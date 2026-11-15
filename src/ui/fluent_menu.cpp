@@ -306,6 +306,7 @@ int FluentMenuModel::NextEnabled(int from, int dir) const {
 // FluentMenu window
 // ---------------------------------------------------------------------------
 FluentMenu::~FluentMenu() {
+    frame_scheduler_.Cancel();
     if (tooltip_) DestroyWindow(tooltip_);
     HideFilterEdit();
     if (edit_) {
@@ -370,6 +371,10 @@ LRESULT CALLBACK FluentMenu::MenuWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPA
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (!self) return DefWindowProcW(hwnd, msg, wParam, lParam);
+    if (msg == EditMotionFrameMessage()) {
+        self->frame_scheduler_.Consume(hwnd, wParam);
+        return 0;
+    }
     if (self->animating_out_ && msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST) return 0;
     const int depth = self->SubmenuDepth(hwnd);
     const bool is_sub = depth >= 0;
@@ -666,11 +671,16 @@ bool FluentMenu::RenderSurface(const FluentMenuModel& model, int hover_row, int 
             painter_.DrawTextField(field);
         }
         if (header > 0) y += (float)header;
+        const float viewport_top = y, viewport_bottom = y + body;
         dc->PushAxisAlignedClip(D2D1::RectF(static_cast<float>(kShadowMargin), y,
             static_cast<float>(kShadowMargin + cw), y + body), D2D1_ANTIALIAS_MODE_ALIASED);
         y += model.RowTopPx(0) - (main ? scroll_y_ : flyout->scroll_y);
         for (int i = 0; i < model.Count(); ++i) {
             const FluentMenuItem* it = model.At(i);
+            if (y >= viewport_bottom) break;
+            const float next_y = y + model.RowHeightPx() +
+                (it->separator_after ? fluent::kMenuSeparatorHeight * scale_ : 0.0f);
+            if (next_y <= viewport_top) { y = next_y; continue; }
             fluent::MenuItemSpec spec;
             spec.bounds = D2D1::RectF((float)kShadowMargin, y,
                                       (float)(kShadowMargin + cw), y + model.RowHeightPx());
@@ -734,8 +744,7 @@ bool FluentMenu::RenderSurface(const FluentMenuModel& model, int hover_row, int 
                     }
                 }
             }
-            y += model.RowHeightPx();
-            if (it->separator_after) y += fluent::kMenuSeparatorHeight * scale_;
+            y = next_y;
         }
         dc->PopAxisAlignedClip();
     }
@@ -1518,9 +1527,10 @@ int FluentMenu::RunModalLoop() {
                 if (r == hover) OpenSubmenu(r, depth);
             }
         }
-        // Input wakes the loop immediately; only animation, submenu dwell and
-        // foreign topmost input tracking need the shorter polling interval.
-        const DWORD interval = animating || sub_pending_row_ >= 0 || topmost_ ? 16 : 100;
+        // Frame deadlines include drawing time and follow the monitor refresh rate.
+        const bool scheduled = animating && frame_scheduler_.Request(hwnd_);
+        if (!animating) frame_scheduler_.Cancel();
+        const DWORD interval = (animating && !scheduled) || sub_pending_row_ >= 0 || topmost_ ? 16 : 100;
         DWORD wait = MsgWaitForMultipleObjectsEx(0, nullptr, interval, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         (void)wait;
         if (topmost_ && open_ && !animating_out_ &&
@@ -1632,6 +1642,7 @@ int FluentMenu::RunModalLoop() {
             }
         }
     }
+    frame_scheduler_.Cancel();
     HideSubWindow();
     if (hwnd_ && IsWindow(hwnd_)) ShowWindow(hwnd_, SW_HIDE);
     HideFilterEdit();
@@ -1912,6 +1923,7 @@ void FluentMenu::RequestDismiss() {
 }
 
 void FluentMenu::Dismiss() {
+    frame_scheduler_.Cancel();
     StopScroll();
     if (!open_) return;
     UpdateTooltip(-1);

@@ -6,6 +6,7 @@
 // thumbnail_disk_cache.cpp - see thumbnail_disk_cache.h.
 #include "thumbnail_disk_cache.h"
 #include "../fs/cloud_state.h"
+#include "../common/path_utils.h"
 #include <algorithm>
 #include <cstring>
 #include <cwchar>
@@ -68,9 +69,7 @@ uint64_t FileTimeValue(const FILETIME& time) {
 bool Eligible(const std::wstring& path, DWORD attrs, bool& remote) {
     remote = false;
     if (attrs & (FILE_ATTRIBUTE_ENCRYPTED | FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) return false;
-    std::wstring normalized = path;
-    if (normalized.starts_with(L"\\\\?\\UNC\\")) normalized = L"\\\\" + normalized.substr(8);
-    else if (normalized.starts_with(L"\\\\?\\")) normalized.erase(0, 4);
+    const std::wstring normalized = pulse::path::StripExtendedPathPrefix(path);
     if (normalized.starts_with(L"\\\\")) {
         remote = !normalized.starts_with(L"\\\\.\\");
         return remote;

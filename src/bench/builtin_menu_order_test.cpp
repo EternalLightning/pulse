@@ -12,9 +12,9 @@
 #include <cstdio>
 #include <set>
 
-namespace pulse::app {
-std::wstring GetPulseDataDir() { return {}; }
-} // namespace pulse::app
+namespace pulse::storage {
+std::wstring ConfigurationRoot() { return {}; }
+} // namespace pulse::storage
 
 namespace {
 using namespace pulse;

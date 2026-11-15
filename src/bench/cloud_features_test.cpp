@@ -8,7 +8,7 @@
 #include "../fs/cloud_pin.h"
 #include "../app/cloud_roots.h"
 #include "../app/cloud_root_catalog.h"
-#include "../app/cloud_sync_probe.h"
+#include "../fs/cloud_sync_probe.h"
 #include "../app/cloud_download.h"
 #include "../ui/cloud_status.h"
 #include "cloud_probe_access_cases.h"
@@ -17,6 +17,29 @@
 #include <iostream>
 #include <string_view>
 #include <shellapi.h>
+
+namespace {
+template<class Check>
+void CloudSyncCacheCases(Check check) {
+    using namespace pulse;
+    uint32_t provider = 6;
+    int queries = 0;
+    fs::CloudSyncProbe probe([&](const std::wstring&) { ++queries; return provider; },
+        fs::CloudSyncProbe::Mode::Manual);
+    check(probe.Lookup(L"fixture", 1) == fs::CloudSync::Idle && probe.QueuedForTest() == 1 && !queries,
+        "UI lookup queues metadata without calling a provider");
+    probe.Lookup(L"fixture", 1);
+    check(probe.QueuedForTest() == 1 && probe.RunPendingForTest() == 1 && queries == 1,
+        "duplicate visible rows share one metadata request");
+    check(probe.Lookup(L"fixture", 1) == fs::CloudSync::Syncing,
+        "background provider results update visible sync status");
+    provider = 7;
+    probe.Lookup(L"fixture", 2);
+    probe.RunPendingForTest();
+    check(probe.Lookup(L"fixture", 2) == fs::CloudSync::Error,
+        "modified entries invalidate cached provider state");
+}
+} // namespace
 
 int main(int argc, char** argv) {
     using namespace pulse;
@@ -27,6 +50,10 @@ int main(int argc, char** argv) {
     };
     if (argc == 2 && std::string_view(argv[1]) == "--sync-probe-only") {
         bench::CloudProbeAccessCases(check);
+        return failed ? 1 : 0;
+    }
+    if (argc == 2 && std::string_view(argv[1]) == "--sync-cache-only") {
+        CloudSyncCacheCases(check);
         return failed ? 1 : 0;
     }
     if (argc > 2 && std::string_view(argv[1]) == "--system-roots-only") {
@@ -148,22 +175,7 @@ int main(int argc, char** argv) {
     app::PublishCloudRootLabels({{L"C:\\Cloud", L"Root"}, {L"C:\\Cloud\\nested", L"Nested"}});
     check(app::CloudRootLabelFor(L"C:\\Cloud\\nested\\file") == L"Nested",
         "nested sync root supplies its own provider label");
-    uint32_t provider = 6;
-    int queries = 0;
-    app::CloudSyncProbe probe([&](const std::wstring&) { ++queries; return provider; },
-        app::CloudSyncProbe::Mode::Manual);
-    check(probe.Lookup(L"fixture", 1) == fs::CloudSync::Idle && probe.QueuedForTest() == 1 && !queries,
-        "UI lookup queues metadata without calling a provider");
-    probe.Lookup(L"fixture", 1);
-    check(probe.QueuedForTest() == 1 && probe.RunPendingForTest() == 1 && queries == 1,
-        "duplicate visible rows share one metadata request");
-    check(probe.Lookup(L"fixture", 1) == fs::CloudSync::Syncing,
-        "background provider results update visible sync status");
-    provider = 7;
-    probe.Lookup(L"fixture", 2);
-    probe.RunPendingForTest();
-    check(probe.Lookup(L"fixture", 2) == fs::CloudSync::Error,
-        "modified entries invalidate cached provider state");
+    CloudSyncCacheCases(check);
     const auto root = std::filesystem::absolute(std::filesystem::path(L"bench_data") /
         (L"cloud-features-" + std::to_wstring(GetCurrentProcessId())));
     std::filesystem::create_directories(root);

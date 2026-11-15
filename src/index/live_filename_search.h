@@ -82,7 +82,11 @@ inline void ScanLiveFilenames(const Query& query, const std::wstring& root,
     ULONGLONG last_publish = GetTickCount64();
     auto flush = [&] {
         result = MergeSearchResults(page, result, {});
-        publish(MergeSearchResults(query, result, {}));
+        SearchResult visible = result;
+        const size_t first = (std::min)(query.offset, visible.hits.size());
+        visible.hits.erase(visible.hits.begin(), visible.hits.begin() + first);
+        if (visible.hits.size() > limit) visible.hits.resize(limit);
+        publish(std::move(visible));
         last_publish = GetTickCount64();
     };
     while (!pending.empty() && !cancelled.load()) {

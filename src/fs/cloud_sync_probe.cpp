@@ -15,7 +15,7 @@
 #include <thread>
 #include <wrl/client.h>
 
-namespace pulse::app {
+namespace pulse::fs {
 namespace {
 constexpr DWORD kIdleExitMs = 5000;
 
@@ -72,8 +72,8 @@ CloudSyncProbe& CloudSyncProbe::Instance() {
 CloudSyncProbe::CloudSyncProbe(Query query, Mode mode)
     : query_(std::move(query)), mode_(mode) {}
 
-fs::CloudSync CloudSyncProbe::Lookup(const std::wstring& path, uint64_t modified, ULONGLONG now) {
-    if (path.empty()) return fs::CloudSync::Idle;
+CloudSync CloudSyncProbe::Lookup(const std::wstring& path, uint64_t modified, ULONGLONG now) {
+    if (path.empty()) return CloudSync::Idle;
     std::lock_guard lock(mutex_);
     auto it = entries_.find(path);
     if (it == entries_.end()) {
@@ -81,12 +81,12 @@ fs::CloudSync CloudSyncProbe::Lookup(const std::wstring& path, uint64_t modified
             // Bounded: forget settled rows (they are re-read when drawn again).
             for (auto e = entries_.begin(); e != entries_.end();)
                 e = e->second.queued ? std::next(e) : entries_.erase(e);
-            if (entries_.size() >= kMaxEntries) return fs::CloudSync::Idle;
+            if (entries_.size() >= kMaxEntries) return CloudSync::Idle;
         }
         it = entries_.emplace(path, Entry{}).first;
         it->second.modified = modified;
         Enqueue(path, it->second);
-        return it->second.known ? it->second.state : fs::CloudSync::Idle;
+        return it->second.known ? it->second.state : CloudSync::Idle;
     }
     Entry& entry = it->second;
     const bool changed = entry.modified != modified;
@@ -95,10 +95,10 @@ fs::CloudSync CloudSyncProbe::Lookup(const std::wstring& path, uint64_t modified
         entry.known = false;
     }
     if (!entry.queued && (changed || now - entry.checked >=
-        (entry.state == fs::CloudSync::Idle ? 10000 : kSyncingRecheckMs))) {
+        (entry.state == CloudSync::Idle ? 10000 : kSyncingRecheckMs))) {
         Enqueue(path, entry);
     }
-    return entry.known ? entry.state : fs::CloudSync::Idle;
+    return entry.known ? entry.state : CloudSync::Idle;
 }
 
 uint64_t CloudSyncProbe::Revision() const {
@@ -114,8 +114,8 @@ bool CloudSyncProbe::ChangedSince(const std::wstring& path, uint64_t revision) c
 
 void CloudSyncProbe::Enqueue(const std::wstring& path, Entry& entry) {
     if (mode_ == Mode::Inline) {
-        const fs::CloudSync state = fs::CloudSyncFromProviderState(query_(path));
-        if ((entry.known ? entry.state : fs::CloudSync::Idle) != state) entry.revision = ++revision_;
+        const CloudSync state = CloudSyncFromProviderState(query_(path));
+        if ((entry.known ? entry.state : CloudSync::Idle) != state) entry.revision = ++revision_;
         entry.known = true;
         entry.state = state;
         entry.checked = GetTickCount64();
@@ -150,7 +150,7 @@ bool CloudSyncProbe::TakeOne(std::wstring& path, uint64_t& modified) {
     return false;
 }
 
-void CloudSyncProbe::Store(const std::wstring& path, uint64_t modified, fs::CloudSync state) {
+void CloudSyncProbe::Store(const std::wstring& path, uint64_t modified, CloudSync state) {
     const auto it = entries_.find(path);
     if (it == entries_.end()) return;
     Entry& entry = it->second;
@@ -161,7 +161,7 @@ void CloudSyncProbe::Store(const std::wstring& path, uint64_t modified, fs::Clou
         Enqueue(path, entry);
         return;
     }
-    if ((entry.known ? entry.state : fs::CloudSync::Idle) != state) entry.revision = ++revision_;
+    if ((entry.known ? entry.state : CloudSync::Idle) != state) entry.revision = ++revision_;
     entry.known = true;
     entry.state = state;
 }
@@ -180,8 +180,8 @@ void CloudSyncProbe::Worker() {
             continue;
         }
         lock.unlock();
-        fs::CloudSync state = fs::CloudSync::Idle;
-        try { state = fs::CloudSyncFromProviderState(query_(path)); } catch (...) {}
+        CloudSync state = CloudSync::Idle;
+        try { state = CloudSyncFromProviderState(query_(path)); } catch (...) {}
         lock.lock();
         Store(path, modified, state);
     }
@@ -196,7 +196,7 @@ size_t CloudSyncProbe::RunPendingForTest() {
     uint64_t modified = 0;
     while (TakeOne(path, modified)) {
         lock.unlock();
-        const fs::CloudSync state = fs::CloudSyncFromProviderState(query_(path));
+        const CloudSync state = CloudSyncFromProviderState(query_(path));
         lock.lock();
         Store(path, modified, state);
         ++done;
@@ -209,4 +209,4 @@ size_t CloudSyncProbe::QueuedForTest() const {
     return queue_.size();
 }
 
-} // namespace pulse::app
+} // namespace pulse::fs

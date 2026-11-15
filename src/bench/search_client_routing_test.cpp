@@ -180,6 +180,46 @@ std::vector<uint8_t> Response(uint64_t revision, DWORD error, bool incomplete) {
     return payload.data();
 }
 
+void LivePagination() {
+    using namespace pulse::index;
+    const auto parent = std::filesystem::absolute(L"bench_data");
+    const auto root = parent / (L"live-page-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    if (error) { Check(false, "create isolated live pagination fixture"); return; }
+    for (const auto* name : {L"match1.txt", L"match2.txt", L"match10.txt"})
+        std::ofstream(root / name) << "fixture";
+    std::atomic_bool cancelled{false};
+    bool equivalent = true;
+    for (const auto sort : {ResultSort::Index, ResultSort::Name, ResultSort::Size, ResultSort::Mtime})
+        for (bool rank : {false, true}) for (bool descending : {false, true}) {
+            Query full; full.needle = L"match"; full.limit = 100;
+            full.sort = sort; full.sort_desc = descending; full.rank = rank;
+            SearchResult complete;
+            ScanLiveFilenames(full, root.wstring(), cancelled,
+                [&](SearchResult value) { complete = std::move(value); });
+            equivalent &= complete.total == 3 && complete.hits.size() == 3;
+            for (size_t offset : {size_t{0}, size_t{1}, size_t{3}, SIZE_MAX})
+                for (size_t limit : {size_t{0}, size_t{1}, size_t{2}, SIZE_MAX}) {
+                    Query page = full; page.offset = offset; page.limit = limit;
+                    SearchResult actual;
+                    ScanLiveFilenames(page, root.wstring(), cancelled,
+                        [&](SearchResult value) { actual = std::move(value); });
+                    const auto expected = MergeSearchResults(page, complete, {});
+                    equivalent &= actual.total == expected.total && actual.error == expected.error &&
+                        !actual.scanning && actual.hits.size() == expected.hits.size();
+                    if (actual.hits.size() == expected.hits.size())
+                        for (size_t i = 0; i < actual.hits.size(); ++i)
+                            equivalent &= actual.hits[i].path == expected.hits[i].path;
+                }
+        }
+    Check(equivalent, "live publications slice sorted candidates without changing rank, ties or page boundaries");
+    if (root.parent_path() == parent && root.filename().wstring().starts_with(L"live-page-"))
+        std::filesystem::remove_all(root, error);
+    Check(!error, "isolated live pagination fixture cleaned");
+}
+
 void LiveSearch(HWND window) {
     using namespace pulse::index;
     NetworkAgentClient client;
@@ -376,7 +416,8 @@ int wmain(int argc, wchar_t** argv) {
     const HWND popup = CreateWindowExW(0, L"STATIC", L"popup", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
     Check(main && popup, "isolated message-only windows created without user data or agents");
     if (main && popup) {
-        if (argc == 2 && std::wstring_view(argv[1]) == L"--live-only") LiveSearch(main);
+        if (argc == 2 && std::wstring_view(argv[1]) == L"--live-pages-only") LivePagination();
+        else if (argc == 2 && std::wstring_view(argv[1]) == L"--live-only") LiveSearch(main);
         else if (argc == 2 && std::wstring_view(argv[1]) == L"--boundaries-only") Boundaries(main);
         else {
             Exercise<pulse::index::IndexClient, pulse::index::IndexClientTestAccess>("index", main, popup);

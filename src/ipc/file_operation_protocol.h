@@ -17,6 +17,7 @@ struct ShellOperationRequest {
     ShellCollisionPolicy collision = ShellCollisionPolicy::Fail;
     uint64_t owner_hwnd = 0;
     std::vector<ShellOperationItem> items;
+    bool elevation_authorized = false;
 };
 struct ShellOperationItemResult {
     std::wstring source;
@@ -32,8 +33,9 @@ struct ShellOperationResult {
 };
 inline std::vector<uint8_t> WriteShellOperation(const ShellOperationRequest& request) {
     PayloadWriter writer;
-    writer.PutU32(1); writer.PutU32(static_cast<uint32_t>(request.kind));
+    writer.PutU32(2); writer.PutU32(static_cast<uint32_t>(request.kind));
     writer.PutU32(static_cast<uint32_t>(request.collision)); writer.PutU64(request.owner_hwnd);
+    writer.PutU32(request.elevation_authorized ? 1u : 0u);
     writer.PutU32(static_cast<uint32_t>(request.items.size()));
     for (const auto& item : request.items) {
         writer.PutString(item.source); writer.PutString(item.destination);
@@ -45,12 +47,14 @@ inline std::vector<uint8_t> WriteShellOperation(const ShellOperationRequest& req
 inline bool ReadShellOperation(const uint8_t* data, size_t size, ShellOperationRequest& request) {
     PayloadReader reader(data, size);
     ShellOperationRequest parsed;
-    uint32_t version = 0, kind = 0, policy = 0, count = 0;
-    if (!reader.GetU32(version) || version != 1 || !reader.GetU32(kind) ||
+    uint32_t version = 0, kind = 0, policy = 0, count = 0, elevation = 0;
+    if (!reader.GetU32(version) || (version != 1 && version != 2) || !reader.GetU32(kind) ||
         kind > static_cast<uint32_t>(ShellOperationKind::Recycle) || !reader.GetU32(policy) ||
         policy > static_cast<uint32_t>(ShellCollisionPolicy::Fail) || !reader.GetU64(parsed.owner_hwnd) ||
+        (version == 2 && (!reader.GetU32(elevation) || elevation > 1)) ||
         !reader.GetU32(count) || !count || count > 65536 || count > reader.remaining() / 16) return false;
     parsed.kind = static_cast<ShellOperationKind>(kind); parsed.collision = static_cast<ShellCollisionPolicy>(policy);
+    parsed.elevation_authorized = elevation != 0;
     for (uint32_t i = 0; i < count; ++i) {
         ShellOperationItem item;
         std::vector<FileIdentity> identities;
@@ -98,5 +102,29 @@ inline bool ReadShellOperationResult(PayloadReader& reader, ShellOperationResult
     }
     if (reader.remaining()) return false;
     result = std::move(parsed); return true;
+}
+
+// Keep both the per-frame item limit and transport byte limit at the trust boundary.
+// Only the final frame carries the operation outcome; earlier frames retain all child outcomes.
+template<class Send>
+bool SendShellOperationResultBatches(const ShellOperationResult& result, Send&& send) {
+    constexpr size_t kBatchBytes = 1024 * 1024;
+    constexpr size_t kBatchItems = 4096;
+    ShellOperationResult batch;
+    size_t bytes = 16;
+    for (const auto& item : result.items) {
+        const size_t item_bytes = 16 + sizeof(wchar_t) * (item.source.size() + item.destination.size());
+        if (item_bytes > kMaxPayload - 16) return false;
+        if (!batch.items.empty() && (batch.items.size() == kBatchItems || bytes + item_bytes > kBatchBytes)) {
+            if (!send(false, WriteShellOperationResult(batch))) return false;
+            batch.items.clear(); bytes = 16;
+        }
+        batch.items.push_back(item); bytes += item_bytes;
+    }
+    if (!batch.items.empty() && !send(false, WriteShellOperationResult(batch))) return false;
+    batch.items.clear(); batch.hr = result.hr; batch.cancelled = result.cancelled;
+    batch.failed_path = result.failed_path;
+    if (batch.failed_path.size() > (kMaxPayload - 16) / sizeof(wchar_t)) return false;
+    return send(true, WriteShellOperationResult(batch));
 }
 }

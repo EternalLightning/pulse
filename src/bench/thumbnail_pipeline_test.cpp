@@ -9,16 +9,24 @@
 #include <algorithm>
 #include <cstdio>
 #include <set>
+#include <string_view>
 
 namespace pulse::ui {
 struct ThumbnailPipelineTestAccess {
-    static int Run(const std::wstring& fixture, const std::wstring& root) {
+    static int Run(const std::wstring& fixture, const std::wstring& root, bool disk_cache_only = false) {
         unsigned passed = 0, failed = 0;
         auto check = [&](bool value, const char* name) {
             std::printf("[%s] %s\n", value ? "PASS" : "FAIL", name);
             value ? ++passed : ++failed;
             std::fflush(stdout);
         };
+        WIN32_FILE_ATTRIBUTE_DATA data{};
+        if (!GetFileAttributesExW(fixture.c_str(), GetFileExInfoStandard, &data)) return 2;
+        if (disk_cache_only) {
+            CheckDiskCache(fixture, root, data, check);
+            std::printf("THUMBNAIL DISK CACHE passed=%u failed=%u\n", passed, failed);
+            return failed ? 1 : 0;
+        }
         ipc::PreviewRequest wire;
         wire.kind = ipc::PreviewRequestKind::Thumbnail; wire.pixel_size = 128;
         ipc::PreviewResponse response;
@@ -45,8 +53,6 @@ struct ThumbnailPipelineTestAccess {
             check(policy.NextRequest(1, GetTickCount64())->key == visible.key,
                 "visible work takes priority over the earlier prefetch");
         }
-        WIN32_FILE_ATTRIBUTE_DATA data{};
-        if (!GetFileAttributesExW(fixture.c_str(), GetFileExInfoStandard, &data)) return 2;
         const uint64_t modified = (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) |
             data.ftLastWriteTime.dwLowDateTime;
         const uint64_t bytes = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
@@ -186,6 +192,16 @@ struct ThumbnailPipelineTestAccess {
             cache.pending_.empty(), "shutdown cancels real host traffic and clears every lane");
         CloseHandle(body); CloseHandle(release);
 
+        CheckDiskCache(fixture, root, data, check);
+        std::printf("THUMBNAIL PIPELINE passed=%u failed=%u\n", passed, failed);
+        return failed ? 1 : 0;
+    }
+
+    static void CheckDiskCache(const std::wstring& fixture, const std::wstring& root,
+        const WIN32_FILE_ATTRIBUTE_DATA& data, auto&& check) {
+        const uint64_t modified = (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) |
+            data.ftLastWriteTime.dwLowDateTime;
+        const uint64_t bytes = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
         auto& store = ThumbnailDiskCache::Shared();
         ThumbnailStoreKey key{fixture, data.dwFileAttributes, 64, modified, bytes};
         StoredThumbnail thumb;
@@ -254,13 +270,12 @@ struct ThumbnailPipelineTestAccess {
             "old decode identity cannot save pixels for a replacement file");
         store.Clear();
         check(store.BytesOnDisk() == 0, "isolated test cache cleanup completes");
-        std::printf("THUMBNAIL PIPELINE passed=%u failed=%u\n", passed, failed);
-        return failed ? 1 : 0;
     }
 };
 }
 
-int wmain() {
+int wmain(int argc, wchar_t** argv) {
+    const bool disk_cache_only = argc > 1 && std::wstring_view(argv[1]) == L"--disk-cache-only";
     wchar_t current[32768]{};
     if (!GetCurrentDirectoryW(32768, current)) return 2;
     const std::wstring root = std::wstring(current) + L"\\bench_data\\thumbnail-pipeline-" +
@@ -285,7 +300,7 @@ int wmain() {
         WriteFile(out, pixels.data(), static_cast<DWORD>(pixels.size()), &wrote, nullptr);
     CloseHandle(out);
     if (!written) return 2;
-    const int result = pulse::ui::ThumbnailPipelineTestAccess::Run(fixture, root);
+    const int result = pulse::ui::ThumbnailPipelineTestAccess::Run(fixture, root, disk_cache_only);
     DeleteFileW(fixture.c_str());
     return result;
 }

@@ -12,6 +12,7 @@
 #include "../fs/fs_enum.h"
 #include "../fs/fs_recycle.h"
 #include "../fs/fs_net_cache.h"
+#include "../common/path_utils.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -411,9 +412,7 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
             if (full.empty() || fs::IsVirtualPath(full)) continue;
             fs::DirEntry entry;
             entry.full_path = full;
-            std::wstring leaf = full;
-            if (leaf.starts_with(L"\\\\?\\UNC\\")) leaf = L"\\\\" + leaf.substr(8);
-            else if (leaf.starts_with(L"\\\\?\\")) leaf = leaf.substr(4);
+            std::wstring leaf = pulse::path::StripExtendedPathPrefix(full);
             while (leaf.size() > 1 && (leaf.back() == L'\\' || leaf.back() == L'/')) leaf.pop_back();
             const auto slash = leaf.find_last_of(L"\\/");
             entry.name = slash == std::wstring::npos ? leaf : leaf.substr(slash + 1);

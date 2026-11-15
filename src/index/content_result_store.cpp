@@ -41,11 +41,12 @@ ContentResultStore::Row ReadRow(sqlite3_stmt* p) {
     row.entry.attrs = FILE_ATTRIBUTE_NORMAL;
     row.snippet = Column(p,5);
     row.file_id = static_cast<uint64_t>(sqlite3_column_int64(p,6));
+    row.spool_sequence = static_cast<uint64_t>(sqlite3_column_int64(p,7));
     const auto line = sqlite3_column_int(p,4);
     if (line) row.snippet = L"L" + std::to_wstring(line) + L"  " + row.snippet;
     return row;
 }
-constexpr const char* kRows = "SELECT h.name,h.path,h.size,h.mtime,h.line,h.snippet,h.file_id FROM visible v JOIN hits h ON h.seq=v.seq WHERE v.pos>=?1 AND v.pos<?2 ORDER BY v.pos";
+constexpr const char* kRows = "SELECT h.name,h.path,h.size,h.mtime,h.line,h.snippet,h.file_id,h.seq FROM visible v JOIN hits h ON h.seq=v.seq WHERE v.pos>=?1 AND v.pos<?2 ORDER BY v.pos";
 std::string SortOrder(ContentResultSort sort, bool descending, bool stable_ties = false) {
     std::string order = stable_ties ? "seq" : "file_id";
     if (sort == ContentResultSort::Name) order = "name COLLATE PULSE_ORDINAL";
@@ -89,19 +90,63 @@ struct ContentResultStore::Impl {
         if (epoch==sort_epoch) sorting=false;
     }
     bool Exec(const char* sql) { return sqlite3_exec(db,sql,nullptr,nullptr,nullptr)==SQLITE_OK; }
-    bool EnsureOrderIndex(const std::string& next_order) {
+    struct SortProgress { Impl* state; uint64_t epoch; };
+    static int CancelSort(void* context) {
+        const auto& current=*static_cast<SortProgress*>(context);
+        return current.state->stopping || current.epoch!=current.state->sort_epoch ? 1 : 0;
+    }
+    bool EnsureOrderIndex(const std::string& next_order, uint64_t epoch=0) {
         if (next_order.empty() || indexed_order==next_order) return true;
-        indexed_order.clear();
-        if (!Exec("DROP INDEX IF EXISTS hits_display_order") ||
-            !Exec(("CREATE INDEX hits_display_order ON hits("+next_order+")").c_str())) return false;
+        if (!Exec("SAVEPOINT display_order")) return false;
+        SortProgress progress{this,epoch};
+        if (epoch) sqlite3_progress_handler(db,4096,CancelSort,&progress);
+        bool ok=Exec("DROP INDEX IF EXISTS hits_display_order") &&
+            Exec(("CREATE INDEX hits_display_order ON hits("+next_order+")").c_str());
+        if (epoch) sqlite3_progress_handler(db,0,nullptr,nullptr);
+        ok=ok && !stopping && (!epoch || epoch==sort_epoch);
+        if (!ok || !Exec("RELEASE display_order")) {
+            Exec("ROLLBACK TO display_order; RELEASE display_order");
+            return false;
+        }
         indexed_order=next_order;
         return true;
     }
-    std::string RowsSql() const {
+    std::string RowsSql(const Row* after=nullptr) const {
         if (!stream_order) return kRows;
-        return "SELECT name,path,size,mtime,line,snippet,file_id FROM hits INDEXED BY hits_display_order "
-            "WHERE EXISTS(SELECT 1 FROM visible WHERE visible.seq=hits.seq) ORDER BY " + order +
-            " LIMIT ?2-?1 OFFSET ?1";
+        const std::string rows="SELECT name,path,size,mtime,line,snippet,file_id,seq FROM hits INDEXED BY hits_display_order WHERE ";
+        const std::string membership="EXISTS(SELECT 1 FROM visible WHERE visible.seq=hits.seq)";
+        if (!after) return rows+membership+" ORDER BY "+order+" LIMIT ?2-?1 OFFSET ?1";
+        const auto primary=order.substr(0,order.find(','));
+        const bool descending=primary.ends_with(" DESC");
+        const auto key=primary.substr(0,primary.find_last_of(' '));
+        const auto anchor="(SELECT "+key+" FROM hits WHERE seq=?3)";
+        // Keep equal keys in seq ASC order even when the primary key descends.
+        // Each branch seeks the index and produces at most one page.
+        return "SELECT * FROM (SELECT * FROM ("+rows+key+"="+anchor+" AND seq>?3 AND "+membership+
+            " ORDER BY "+order+" LIMIT ?2-?1) UNION ALL SELECT * FROM ("+rows+key+
+            (descending ? "<" : ">")+anchor+" AND "+membership+" ORDER BY "+order+
+            " LIMIT ?2-?1)) ORDER BY "+order+" LIMIT ?2-?1";
+    }
+    template<class Read>
+    DWORD ScanSelection(const std::vector<int>& indices, Read selected) {
+        std::vector<int> ordered(indices.begin(),std::find_if(indices.begin(),indices.end(),[](int i){return i<0;}));
+        if (ordered.empty()) return 0;
+        std::sort(ordered.begin(),ordered.end());
+        ordered.erase(std::unique(ordered.begin(),ordered.end()),ordered.end());
+        Statement read(db,RowsSql().c_str());
+        if (!read.p) return ERROR_DATABASE_FAILURE;
+        // Separate sparse ranges so unselected bodies never cross the SQLite API.
+        for (auto next=ordered.begin();next!=ordered.end();) {
+            const auto first=next++;
+            while (next!=ordered.end() && static_cast<size_t>(*next)==static_cast<size_t>(*(next-1))+1) ++next;
+            read.Int(1,*first); read.Int(2,static_cast<size_t>(*(next-1))+1);
+            auto current=first; int rc=SQLITE_DONE;
+            while (!stopping && (rc=sqlite3_step(read.p))==SQLITE_ROW) selected(*current++,read.p);
+            if (stopping) return ERROR_CANCELLED;
+            if (rc!=SQLITE_DONE) return ERROR_DATABASE_FAILURE;
+            read.Reset();
+        }
+        return 0;
     }
     std::string PositionSql(const char* predicate) const {
         if (!stream_order) return std::string("SELECT v.pos FROM visible v JOIN hits h ON h.seq=v.seq WHERE ") + predicate + " LIMIT 1";
@@ -145,9 +190,18 @@ struct ContentResultStore::Impl {
         {
             std::lock_guard lock(io);
             if(!stopping && epoch==page_epoch && Open()) {
-                Statement query(db,RowsSql().c_str());
+                Row anchor; bool seek=false;
+                if (page && stream_order) {
+                    std::lock_guard cache(mu);
+                    const auto previous=pages.find(page-1);
+                    if (previous!=pages.end() && previous->second.size()==kPageSize) {
+                        anchor=previous->second.back(); seek=true;
+                    }
+                }
+                Statement query(db,RowsSql(seek ? &anchor : nullptr).c_str());
                 if(query.p) {
                     query.Int(1,page*kPageSize); query.Int(2,(page+1)*kPageSize);
+                    if (seek) query.Int(3,anchor.spool_sequence);
                     int rc=SQLITE_DONE;
                     while(!stopping && (rc=sqlite3_step(query.p))==SQLITE_ROW) rows.push_back(ReadRow(query.p));
                     if(rc!=SQLITE_DONE) error=ERROR_DATABASE_FAILURE;
@@ -173,10 +227,16 @@ struct ContentResultStore::Impl {
             std::lock_guard lock(mu);
             recent=lru;
         }
-        for (size_t page : recent) {
+        // Old page positions are invalid after a mutation. Seek only from an
+        // already refreshed predecessor, while retaining the original LRU.
+        const std::set<size_t> ascending(recent.begin(),recent.end());
+        for (size_t page : ascending) {
             if (page*kPageSize>=new_count) continue;
-            Statement read(db,RowsSql().c_str());
+            const auto previous=page ? replacement.find(page-1) : replacement.end();
+            const Row* anchor=stream_order && previous!=replacement.end() && previous->second.size()==kPageSize ? &previous->second.back() : nullptr;
+            Statement read(db,RowsSql(anchor).c_str());
             read.Int(1,page*kPageSize); read.Int(2,(page+1)*kPageSize);
+            if (anchor) read.Int(3,anchor->spool_sequence);
             auto& rows=replacement[page];
             int rc=SQLITE_DONE;
             while (read.p && (rc=sqlite3_step(read.p))==SQLITE_ROW) rows.push_back(ReadRow(read.p));
@@ -318,7 +378,7 @@ bool ContentResultStore::UpsertChanges(const std::vector<ContentHit>& hits, Cont
         // Membership changes only for affected identities. Display positions
         // come directly from the reusable order index when a page is read.
         Statement erase(p.db,"DELETE FROM visible WHERE seq=?1");
-        Statement row(p.db,"SELECT name,path,size,mtime,line,snippet,file_id FROM hits WHERE seq=?1");
+        Statement row(p.db,"SELECT name,path,size,mtime,line,snippet,file_id,seq FROM hits WHERE seq=?1");
         Statement admit(p.db,"INSERT INTO visible VALUES((SELECT coalesce(max(pos),-1)+1 FROM visible),?1)");
         size_t count=p.count;
         ok=ok && erase.p && row.p && admit.p;
@@ -458,7 +518,9 @@ void ContentResultStore::SetSort(ContentResultSort sort, bool descending) {
         std::lock_guard lock(p->io);
         if (p->stopping || epoch!=p->sort_epoch) return;
         if (p->stream_order) {
-            if (!p->Open() || !p->EnsureOrderIndex(order)) p->error=ERROR_DATABASE_FAILURE;
+            const bool ok=p->Open() && p->EnsureOrderIndex(order,epoch);
+            if (p->stopping || epoch!=p->sort_epoch) return;
+            if (!ok) p->error=ERROR_DATABASE_FAILURE;
             else { p->order=order; p->RefreshPages(p->count); }
             p->FinishSort(epoch); p->Notify(); return;
         }
@@ -471,11 +533,8 @@ void ContentResultStore::SetSort(ContentResultSort sort, bool descending) {
         }
         Statement read(p->db,("SELECT seq FROM hits WHERE seq IN (SELECT seq FROM visible) ORDER BY "+order).c_str());
         Statement write(p->db,"INSERT INTO sorted VALUES(?1,?2)");
-        struct SortProgress { Impl* state; uint64_t epoch; } progress{p.get(),epoch};
-        sqlite3_progress_handler(p->db,4096,[](void* context) {
-            const auto& current=*static_cast<SortProgress*>(context);
-            return current.state->stopping || current.epoch!=current.state->sort_epoch ? 1 : 0;
-        },&progress);
+        Impl::SortProgress progress{p.get(),epoch};
+        sqlite3_progress_handler(p->db,4096,Impl::CancelSort,&progress);
         size_t count=0; int rc=SQLITE_DONE; bool ok=read.p && write.p;
         while (ok && !p->stopping && epoch==p->sort_epoch && (rc=sqlite3_step(read.p))==SQLITE_ROW) {
             write.Int(1,count++); write.Int(2,static_cast<uint64_t>(sqlite3_column_int64(read.p,0)));
@@ -506,6 +565,16 @@ void ContentResultStore::Resolve(std::vector<int> indices,bool all,size_t count,
         {
             std::lock_guard lock(p->io);
             if(p->stopping || epoch!=p->page_epoch || !p->Open()) result.error=ERROR_CANCELLED;
+            else if (p->stream_order && !all) {
+                std::map<int,Row> found;
+                result.error=p->ScanSelection(indices,[&](int index,sqlite3_stmt* row){found.emplace(index,ReadRow(row));});
+                for (int index:indices) {
+                    if (index<0 || p->stopping) { result.error=ERROR_CANCELLED; break; }
+                    const auto row=found.find(index);
+                    if (row==found.end()) { if (!result.error) result.error=ERROR_DATABASE_FAILURE; break; }
+                    result.rows.emplace_back(static_cast<size_t>(index),row->second);
+                }
+            }
             else {
                 Statement read(p->db,p->RowsSql().c_str());
                 if(!read.p) result.error=ERROR_DATABASE_FAILURE;
@@ -594,21 +663,25 @@ void ContentResultStore::Sum(std::vector<int> indices,bool all,size_t count,std:
             if(epoch!=p->page_epoch || !p->Open()) error=ERROR_CANCELLED;
             else {
                 if (p->stream_order) {
-                    Statement read(p->db,p->RowsSql().c_str());
-                    if (!read.p) error=ERROR_DATABASE_FAILURE;
-                    else if (all) {
+                    if (!all) {
+                        std::map<int,uint64_t> found;
+                        error=p->ScanSelection(indices,[&](int index,sqlite3_stmt* row) {
+                            found.emplace(index,static_cast<uint64_t>(sqlite3_column_int64(row,2)));
+                        });
+                        for (int index:indices) {
+                            if (index<0 || p->stopping) { error=ERROR_CANCELLED; break; }
+                            const auto value=found.find(index);
+                            if (value!=found.end()) bytes+=value->second;
+                            else if (!error) error=ERROR_DATABASE_FAILURE;
+                        }
+                    } else {
+                        Statement read(p->db,p->RowsSql().c_str());
                         read.Int(1,0); read.Int(2,count);
                         size_t rows=0; int rc=SQLITE_DONE;
-                        while (!p->stopping && (rc=sqlite3_step(read.p))==SQLITE_ROW) {
+                        while (read.p && !p->stopping && (rc=sqlite3_step(read.p))==SQLITE_ROW) {
                             bytes+=static_cast<uint64_t>(sqlite3_column_int64(read.p,2)); ++rows;
                         }
-                        if (p->stopping || rc!=SQLITE_DONE || rows!=count) error=ERROR_DATABASE_FAILURE;
-                    } else for (int index:indices) {
-                        if (index<0 || p->stopping) { error=ERROR_CANCELLED; break; }
-                        read.Int(1,static_cast<size_t>(index)); read.Int(2,static_cast<size_t>(index)+1);
-                        if (sqlite3_step(read.p)==SQLITE_ROW) bytes+=static_cast<uint64_t>(sqlite3_column_int64(read.p,2));
-                        else error=ERROR_DATABASE_FAILURE;
-                        read.Reset();
+                        if (!read.p || p->stopping || rc!=SQLITE_DONE || rows!=count) error=ERROR_DATABASE_FAILURE;
                     }
                 } else {
                 Statement read(p->db,all ? "SELECT sum(h.size) FROM visible v JOIN hits h ON h.seq=v.seq WHERE v.pos<?1" : "SELECT h.size FROM visible v JOIN hits h ON h.seq=v.seq WHERE v.pos=?1");

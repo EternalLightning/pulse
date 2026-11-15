@@ -36,6 +36,7 @@ struct OperationJournalProbe {
         item.req.sources = {source};
         manager.queue_.push_back(std::move(item));
     }
+    static size_t Queued(const OpsManager& manager) { return manager.queue_.size(); }
 };
 }
 
@@ -219,6 +220,37 @@ int wmain(int argc, wchar_t** argv) {
           L"recovery reads nested deletion targets and Unicode directly from parsed values");
     Check(!deletion_recovery.RetryRecovery(),
           L"active deletion recovery still refuses automatic replay");
+
+    for (const auto type : {ops::OpType::Rename, ops::OpType::BatchRename, ops::OpType::Copy, ops::OpType::Move}) {
+        for (const bool active : {false, true}) {
+            const auto path = root + L"\\replay-" + std::to_wstring(static_cast<int>(type)) +
+                (active ? L"-active.json" : L"-queued.json");
+            const bool rename = type == ops::OpType::Rename || type == ops::OpType::BatchRename;
+            const std::wstring entry = L"{\"seq\":\"1\",\"active\":" + std::wstring(active ? L"true" : L"false") +
+                L",\"outcome_unknown\":false,\"type\":" + std::to_wstring(static_cast<int>(type)) +
+                L",\"policy\":0,\"sources\":[\"C:\\\\fixture\\\\original.txt\"],\"name\":\"renamed.txt\","
+                L"\"names\":[\"renamed.txt\"],\"dest\":\"" + std::wstring(rename ? L"" : L"C:\\\\fixture\\\\destination") + L"\"}";
+            Check(WriteJournal(path, {entry}), L"write isolated active or queued mutation recovery record");
+            ops::OpsManager recovery;
+            recovery.SetJournalPath(path);
+            const bool retried = recovery.RetryRecovery();
+            Check(recovery.PendingRecovery().entries.size() == 1 && retried == !active &&
+                ops::OperationJournalProbe::Queued(recovery) == (active ? 0u : 1u),
+                rename ? L"only a rename that never started can be queued without historical identity proof" :
+                    L"queued copy or move needs no temporary-file reconciliation; active transfer remains blocked");
+        }
+    }
+    {
+        const auto path = root + L"\\unknown-queued.json";
+        auto unknown_entry = Entry(1, L"C:\\\\fixture\\\\unknown.txt");
+        const auto unknown_flag = unknown_entry.find(L"\"outcome_unknown\":false");
+        unknown_entry.replace(unknown_flag, 23, L"\"outcome_unknown\":true");
+        Check(WriteJournal(path, {unknown_entry}), L"write queued operation with unknown outcome");
+        ops::OpsManager recovery;
+        recovery.SetJournalPath(path);
+        Check(!recovery.RetryRecovery() && ops::OperationJournalProbe::Queued(recovery) == 0,
+            L"unknown outcome still forbids replay even when the active flag is clear");
+    }
 
     const auto corrupt_path = root + L"\\corrupt.json";
     const std::wstring corrupt = LR"({"schema":1,"entries":[{"seq":"6","type":0,"sources":["\uD800"]}]})";

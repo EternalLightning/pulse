@@ -72,6 +72,7 @@ bool SamePath(const std::wstring& a, const std::wstring& b) {
 } // namespace
 
 void AppPrefs::ResetToDefaults() {
+    saves_enabled_ = true;
     launch_on_startup = false;
     start_to_tray = false;
     close_last_tab_window = false;
@@ -245,6 +246,7 @@ std::wstring AppPrefs::ToJson() const {
 bool AppPrefs::FromJson(const std::wstring& json) {
     const pulse::json::Document doc(json);
     if (!doc.Is(pulse::json::Kind::Object)) return false;
+    saves_enabled_ = true;
     folder_views.ReadJson(json);
     launch_on_startup = pulse::json::ExtractBool(doc, L"launch_on_startup", false);
     start_to_tray = pulse::json::ExtractBool(doc, L"start_to_tray", false);
@@ -468,26 +470,33 @@ bool ParseWallpaperVisibility(std::wstring_view text, int& percent) noexcept {
 }
 
 bool AppPrefs::Load() {
+    saves_enabled_ = false;
+    had_file = false;
     const std::wstring dir = GetPulseDataDir();
     if (dir.empty()) {
         launch_on_startup = ReadLaunchOnStartup();
         return false;
     }
     std::wstring json;
-    if (ReadUtf8File(dir + L"\\app.json", json) && !json.empty()) {
-        had_file = true;
-        FromJson(json);
-    }
+    const auto path = dir + L"\\app.json";
+    const DWORD attrs = GetFileAttributesW(path.c_str());
+    const DWORD error = attrs == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    const bool missing = attrs == INVALID_FILE_ATTRIBUTES &&
+        (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND);
+    had_file = attrs != INVALID_FILE_ATTRIBUTES;
+    const bool loaded = ReadUtf8File(path, json) && FromJson(json);
+    saves_enabled_ = loaded || missing;
     const std::wstring startup_command = ReadStartupCommand();
     launch_on_startup = !startup_command.empty();
     if (persist && launch_on_startup && StartupCommandNeedsRepair(startup_command, ExePath()))
         ApplyLaunchOnStartup(true);
     // Association state and legacy repair run in SystemIntegration's background worker.
-    return true;
+    return loaded;
 }
 
 bool AppPrefs::Save() const {
     if (!persist) return true;
+    if (!saves_enabled_) return false;
     const std::wstring dir = GetPulseDataDir();
     if (dir.empty()) return false;
     return WriteUtf8FileAtomic(dir + L"\\app.json", ToJson());

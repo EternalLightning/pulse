@@ -4,7 +4,7 @@
 #include <chrono>
 #include <cstdint>
 
-namespace pulse::app {
+namespace pulse::profile {
 
 enum class FramePhase : size_t { Prepare, Paint, Submit, Present, AfterPresent, Count };
 enum class VmPhase : size_t { Base, Commands, Operations, Sidebar, Tabs, Status, Tray, Details, Panes, Other, Count };
@@ -132,4 +132,4 @@ private:
     FrameProfileSample* previous_;
 };
 
-} // namespace pulse::app
+} // namespace pulse::profile

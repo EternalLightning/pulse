@@ -104,15 +104,15 @@ inline int pulse::ui::ItemReflowUiTest::RunColdScroll() {
         const auto* text_stats = s.compositor.GetLumaTextStats();
         const auto text_before = text_stats ? *text_stats : LumaTextStats{};
         std::vector<double> times;
-        std::array<double, static_cast<size_t>(app::PaintPhase::Count)> phases{};
+        std::array<double, static_cast<size_t>(profile::PaintPhase::Count)> phases{};
         auto next_frame = std::chrono::steady_clock::now();
         for (int frame = 0; frame < 180; ++frame) {
             if (real_directory) std::this_thread::sleep_until(next_frame);
             tab.scroll_y = real_directory ? layout.MaxScrollY() * frame / 179.0f : frame * 24.0f;
-            app::FrameProfileSample sample;
-            { app::ObserveFrameProfile observe(sample); Render(s); }
+            profile::FrameProfileSample sample;
+            { profile::ObserveFrameProfile observe(sample); Render(s); }
             failures += !sample.complete || FAILED(sample.draw_result);
-            times.push_back(sample.total_ms - sample.milliseconds[static_cast<size_t>(app::FramePhase::Present)]);
+            times.push_back(sample.total_ms - sample.milliseconds[static_cast<size_t>(profile::FramePhase::Present)]);
             for (size_t i = 0; i < phases.size(); ++i) phases[i] += sample.paint_milliseconds[i];
             if (real_directory && capture_scroll && pass == 0 && frame % 60 == 0 &&
                 !WriteAnimationSnapshot(s.compositor, L"downloads-scroll-" + std::to_wstring(frame) + L".png"))
@@ -120,8 +120,8 @@ inline int pulse::ui::ItemReflowUiTest::RunColdScroll() {
             if (real_directory) {
                 if (frame < 5) std::printf("[FIRST_FRAME] pass=%d frame=%d cpu_ms=%.3f prepare_ms=%.3f paint_ms=%.3f submit_ms=%.3f columns_ms=%.3f rows_ms=%.3f\n",
                     pass, frame, times.back(), sample.milliseconds[0], sample.milliseconds[1], sample.milliseconds[2],
-                    sample.paint_milliseconds[static_cast<size_t>(app::PaintPhase::ListColumns)],
-                    sample.paint_milliseconds[static_cast<size_t>(app::PaintPhase::ListRows)]);
+                    sample.paint_milliseconds[static_cast<size_t>(profile::PaintPhase::ListColumns)],
+                    sample.paint_milliseconds[static_cast<size_t>(profile::PaintPhase::ListRows)]);
                 next_frame = std::max(next_frame + std::chrono::microseconds(8333), std::chrono::steady_clock::now());
             }
             MSG message{};
@@ -132,7 +132,7 @@ inline int pulse::ui::ItemReflowUiTest::RunColdScroll() {
         std::sort(times.begin(), times.end());
         std::printf("[COLD_SCROLL] pass=%d entries=%zu frames=%zu cpu_p50_ms=%.3f cpu_p95_ms=%.3f cpu_max_ms=%.3f columns_total_ms=%.3f rows_total_ms=%.3f\n",
             pass, entries->size(), times.size(), times[times.size()/2], times[times.size()*95/100], times.back(),
-            phases[static_cast<size_t>(app::PaintPhase::ListColumns)], phases[static_cast<size_t>(app::PaintPhase::ListRows)]);
+            phases[static_cast<size_t>(profile::PaintPhase::ListColumns)], phases[static_cast<size_t>(profile::PaintPhase::ListRows)]);
         if (text_stats) std::printf("[TEXT_CACHE] pass=%d hits=%llu misses=%llu evictions=%llu fallbacks=%llu glyphs=%llu\n",
             pass, text_stats->surface_cache_hits - text_before.surface_cache_hits,
             text_stats->surface_cache_misses - text_before.surface_cache_misses,

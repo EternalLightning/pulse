@@ -106,6 +106,7 @@ uint32_t TabController::FirstUnusedColor(const WindowTabs& tabs) const {
 void TabController::CreateGroupAndEdit(WindowTabs& tabs, int tab_index, POINT screen_pt,
                                        ui::FluentMenu& menu) {
     if (tab_index < 0 || tab_index >= static_cast<int>(tabs.items.size())) return;
+    if (tabs.items[static_cast<size_t>(tab_index)]->pinned) return;
     TabGroup group;
     group.id = AllocateTabGroupId(tabs);
     if (group.id == 0) return;
@@ -285,7 +286,7 @@ void TabController::ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt
     items.push_back(MenuItem(CmdTabPin,
         TabText(tab.pinned ? Text::TabUnpin : Text::TabPin), L"\xE718"));
     items.back().separator_after = true;
-    if (tab.tab_group == 0) {
+    if (!tab.pinned && tab.tab_group == 0) {
         items.push_back(MenuItem(CmdTabAddToNewGroup,
             TabText(tabs.tab_groups.empty() ? Text::TabCreateGroup : Text::TabNewGroup)));
         if (!tabs.tab_groups.empty()) {
@@ -300,7 +301,7 @@ void TabController::ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt
             items.push_back(std::move(join));
         }
         items.back().separator_after = true;
-    } else {
+    } else if (!tab.pinned) {
         items.push_back(MenuItem(CmdTabRemoveFromGroup, TabText(Text::TabRemoveGroup)));
         items.back().separator_after = true;
     }
@@ -365,7 +366,7 @@ void TabController::ShowTabMenu(WindowTabs& tabs, int tab_index, POINT screen_pt
         CloseTabs(tabs, 0, static_cast<int>(tabs.items.size()) - 1, tab_index);
     } else if (command == CmdTabCloseRight) {
         CloseTabs(tabs, tab_index + 1, static_cast<int>(tabs.items.size()) - 1);
-    } else if (command >= CmdTabJoinGroupBase &&
+    } else if (!tab.pinned && command >= CmdTabJoinGroupBase &&
                command < CmdTabJoinGroupBase + static_cast<int>(tabs.tab_groups.size())) {
         WillChangeTabStrip();
         tab.tab_group = tabs.tab_groups[static_cast<size_t>(command - CmdTabJoinGroupBase)].id;

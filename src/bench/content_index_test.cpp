@@ -1758,6 +1758,8 @@ int wmain(int argc, wchar_t* argv[]) {
     } cleanup_fixture{base};
     const int result = [&]() -> int {
     if (argc == 2 && std::wstring_view(argv[1]) == L"--instant-gaps-timeout-probe") return RunInstantGapChild(module, base, true);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--retry-retention") return RunContentRetryRetentionCases(base);
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--system-cache") return RunContentSystemCacheCases(base);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--content-contract") return RunContentContractCases(base);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--root-errors") return RunContentRootErrorCases(base);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--content-config-errors") return RunContentConfigErrorCases(base);

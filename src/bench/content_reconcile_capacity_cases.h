@@ -94,9 +94,10 @@ int RunContentSharedRetentionCases(const std::filesystem::path& base) {
         ready = feed.Request(false, L"", 0, 0, page) && page.ready; if (!ready) Sleep(25);
     }
     Check(ready, "isolated retention feed ready");
-    std::atomic<bool> deny{false}; std::atomic<size_t> denied{0};
+    std::atomic<bool> deny{false}; std::atomic<size_t> denied{0}, observed{0};
     ContentIndexScanHooks hooks;
     hooks.attributes = [&](const auto& path, auto& attributes) {
+        if (ContentScopeKey(path) == ContentScopeKey(victim.wstring())) ++observed;
         if (deny && ContentScopeKey(path) == ContentScopeKey(victim.wstring())) { ++denied; SetLastError(ERROR_ACCESS_DENIED); return false; }
         return GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes) != FALSE;
     };
@@ -118,6 +119,31 @@ int RunContentSharedRetentionCases(const std::filesystem::path& base) {
         Check(db.Configure(config) && db.WaitUntilIdle(15000), "shared crawl recovers after temporary attribute failure");
         Check(Search(db, request).size() == 1 && db.Status().root_status.size() == 1 && !db.Status().root_status[0].error,
             "restored attributes retain document and clear root error");
+        HANDLE locked = CreateFileW(victim.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+        Check(locked != INVALID_HANDLE_VALUE, "hold old shared document during a fresh authoritative crawl");
+        if (locked != INVALID_HANDLE_VALUE) {
+            Check(AdvanceLockedContentVersion(locked, victim), "change old shared metadata to force a read instead of the cache fast path");
+            const auto before = observed.load();
+            config.excluded_directories.push_back(L"unused-sharing-rescan");
+            Check(db.Configure(config), "restart shared crawl while discovered file is locked");
+            const auto until = GetTickCount64() + 10000;
+            bool scanned = false;
+            while (GetTickCount64() < until) {
+                const auto state = db.Status();
+                if (observed > before && !state.indexing && state.pending_files) { scanned = true; break; }
+                Sleep(10);
+            }
+            const auto retained = Search(db, request).size();
+            if (!scanned || retained != 1) {
+                const auto state = db.Status();
+                std::fprintf(stderr, "[DIAG] shared retry: observed=%zu before=%zu scanned=%d hits=%zu indexing=%d pending=%llu error=%lu\n",
+                    observed.load(), before, scanned, retained, state.indexing, state.pending_files, state.error);
+            }
+            Check(scanned && retained == 1,
+                "shared final epoch pruning keeps the old body while its sharing retry is pending");
+            CloseHandle(locked);
+            Check(db.WaitUntilIdle(10000), "shared retry drains after unlock");
+        }
         Write(victim, "updated_marker"); request.needle = L"updated_marker";
         Check(AwaitHit(db, request, 1), "restored shared file updates cached body");
         std::filesystem::remove(victim);

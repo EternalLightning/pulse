@@ -71,14 +71,19 @@ bool Restart(AppState& state) {
     if (!count || count >= ARRAYSIZE(exe)) return false;
     std::wstring command = L"\"" + std::wstring(exe) + L"\" --restart-after " +
         std::to_wstring(GetCurrentProcessId());
-    STARTUPINFOW start{sizeof(start)};
-    PROCESS_INFORMATION process{};
-    if (!CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
-        nullptr, nullptr, &start, &process)) return false;
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-    RequestApplicationExit(state);
-    return true;
+    bool succeeded = true;
+    RequestApplicationExit(state, [&] {
+        STARTUPINFOW start{sizeof(start)};
+        PROCESS_INFORMATION process{};
+        succeeded = CreateProcessW(exe, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+            nullptr, nullptr, &start, &process) != FALSE;
+        if (succeeded) {
+            CloseHandle(process.hThread);
+            CloseHandle(process.hProcess);
+        }
+        return succeeded;
+    });
+    return succeeded;
 }
 
 void CaptureExport(AppState& state, app::SettingsTask& task) {
@@ -174,7 +179,7 @@ bool WaitForSettingsRestart(unsigned long process_id) {
     if (!process_id || process_id == GetCurrentProcessId()) return false;
     HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, process_id);
     if (!process) return GetLastError() == ERROR_INVALID_PARAMETER;
-    const DWORD wait = WaitForSingleObject(process, 30000);
+    const DWORD wait = WaitForSingleObject(process, INFINITE);
     CloseHandle(process);
     return wait == WAIT_OBJECT_0;
 }

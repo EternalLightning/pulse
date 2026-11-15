@@ -13,10 +13,68 @@
 #include <cstdio>
 #include <filesystem>
 #include <chrono>
+#include <cstring>
+#include <vector>
 
 namespace pulse::ui {
+namespace fluent {
+struct PainterTestPeer {
+    static bool RetryMissingNavigationFormat(Painter& painter, const Theme& theme) {
+        if (!painter.BeginFrame(theme, false) || !painter.nav_format_.get()) return false;
+        painter.nav_format_.reset();
+        return painter.BeginFrame(theme, false) && painter.nav_format_.get() &&
+            std::abs(painter.NavFormat()->GetFontSize() - 13 * painter.scale_) < 0.001f;
+    }
+};
+}
 struct OperationCenterTestPeer {
 #include "operation_center_scroll_cases.h"
+#include "dialog_title_render_cases.h"
+    static int RunReviewRegressions(OperationCenter& center, const std::filesystem::path& output) {
+        int failures = 0;
+        const auto check = [&](bool ok, const char* label) {
+            std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", label);
+            failures += !ok;
+        };
+        HighContrastFrameScope normal_palette(false);
+        for (const float scale : {1.0f, 1.5f, 2.0f}) for (const bool dark : {false, true}) {
+            center.scale_ = scale; center.painter_.SetScale(scale);
+            center.compositor_->RecreateTextFormats(scale);
+            center.SetTheme(dark, HexColor(0x0078D4));
+            check(fluent::PainterTestPeer::RetryMissingNavigationFormat(center.painter_,
+                MakeTheme(dark, HexColor(0x0078D4))), "missing navigation format retries at the same DPI");
+            center.Update({});
+            center.width_ = static_cast<int>(420 * scale);
+            center.height_ = static_cast<int>(180 * scale);
+            center.snapshot_ = true;
+            center.labels_.title.clear(); center.Layout();
+            const bool baseline_ok = center.Render(false) && center.bits_;
+            check(baseline_ok, "render an isolated caption baseline");
+            if (!baseline_ok) continue;
+            const size_t bytes = static_cast<size_t>(center.dib_width_) * center.dib_height_ * 4;
+            const auto* bits = static_cast<const BYTE*>(center.bits_);
+            const std::vector<BYTE> baseline(bits, bits + bytes);
+            center.labels_.title = L"Fallback title\nsecond line";
+            const auto bounds = D2D1::RectF(28 * scale, 29 * scale, 392 * scale, 64 * scale);
+            check(!center.compositor_->DrawDialogTitle(center.labels_.title, bounds,
+                MakeTheme(dark, HexColor(0x0078D4)).text), "multiline layout exercises the shared title failure path");
+            const bool rendered = center.Render(false) && center.bits_;
+            bool ink = false;
+            if (rendered) {
+                bits = static_cast<const BYTE*>(center.bits_);
+                for (int y = static_cast<int>(bounds.top); y < static_cast<int>(bounds.bottom); ++y)
+                    for (int x = static_cast<int>(bounds.left); x < static_cast<int>(bounds.right); ++x) {
+                        const size_t at = (static_cast<size_t>(y) * center.dib_width_ + x) * 4;
+                        ink |= std::memcmp(bits + at, baseline.data() + at, 4) != 0;
+                    }
+            }
+            check(rendered && ink, "operation center keeps caption ink when shared title layout fails");
+            if (scale == 1.0f) check(SaveDib(center, output / (dark ? L"title-fallback-dark.png" : L"title-fallback-light.png")),
+                "save the production caption fallback");
+        }
+        center.snapshot_ = false;
+        return failures ? 1 : 0;
+    }
     static int RunTextRendering(OperationCenter& center, const std::filesystem::path& output) {
         int failures = 0;
         const auto check = [&](bool ok, const char* label) {
@@ -863,7 +921,9 @@ int RunOperationCenterUiTest(std::string_view mode) {
             compositor.RecreateTextFormats(1);
             OperationCenter center;
             if (center.Create(owner, &compositor)) {
-                if (mode == "--text-rendering") result = OperationCenterTestPeer::RunTextRendering(center, output);
+                if (mode == "--review-regressions") result = OperationCenterTestPeer::RunReviewRegressions(center, output);
+                else if (mode == "--title-rendering") result = OperationCenterTestPeer::RunTitleRendering(compositor, output);
+                else if (mode == "--text-rendering") result = OperationCenterTestPeer::RunTextRendering(center, output);
                 else if (mode == "--clear-performance") result = OperationCenterTestPeer::RunClearPerformance(center, output);
                 else if (mode == "--visibility-performance") result = OperationCenterTestPeer::RunVisibilityPerformance(center);
                 else if (mode == "--smooth-scroll") result = OperationCenterTestPeer::RunSmoothScroll(center,output);

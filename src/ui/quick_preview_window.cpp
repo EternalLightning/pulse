@@ -248,6 +248,7 @@ void QuickPreviewWindow::Show(const QuickPreviewItem& item, bool dark, WindowEff
                               bool safe_mode) {
     if (!hwnd_ || item.path.empty()) return;
     thumbnails_->Evict(ThumbnailCache::Consumer::QuickPreview);
+    thumbnails_->InvalidatePath(item.path);
     thumbnails_->SetNotifyWindow(hwnd_, ThumbnailCache::Consumer::QuickPreview);
     item_ = item;
     dark_ = dark;
@@ -1089,7 +1090,11 @@ bool QuickPreviewWindow::Render(const wchar_t* snapshot_path) {
     const D2D1_RECT_F title_rect = typography::SnapVerticalBounds(D2D1::RectF(
         pad, 8.0f * scale_,
         width - (kCloseButtonWidth + kChromeButtonWidth * 3.0f + 8.0f) * scale_, header));
-    compositor_.DrawDialogTitle(item_.name, title_rect, foreground);
+    if (!compositor_.DrawDialogTitle(item_.name, title_rect, foreground) &&
+        text_brush.get() && compositor_.DialogTitleFormat())
+        dc->DrawTextW(item_.name.data(), static_cast<UINT32>(item_.name.size()),
+            compositor_.DialogTitleFormat(), title_rect, text_brush.get(),
+            D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
     const D2D1_RECT_F close_rect = D2D1::RectF(width - kCloseButtonWidth * scale_, 0,
                                                width, header);
     if (close_hover_) {

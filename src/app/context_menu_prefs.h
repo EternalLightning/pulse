@@ -89,6 +89,7 @@ struct ContextMenuPrefs {
     bool Save() const;
 
 private:
+    bool saves_enabled_ = true;
     void MigrateBuiltinCatalog(uint32_t explicit_items);
     void CoalesceCompressCatalog();
 };

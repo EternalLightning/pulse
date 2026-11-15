@@ -25,6 +25,7 @@ ui::ConfirmDialogSpec BuildPermissionOperationConfirmationSpec(const ops::OpStat
         spec.rows.push_back({path::FriendlyPathText(value), true, true});
     };
     add_path(I::PermissionOperationSourcePath, status.elevation_source_path);
+    add_path(I::PermissionOperationDestinationPath, status.elevation_destination_path);
     return spec;
 }
 

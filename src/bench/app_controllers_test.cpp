@@ -6,7 +6,7 @@
 #include "../app/settings_controller.h"
 #include "change_tracking_menu_test.h"
 #include "folder_actions_menu_cases.h"
-#include "session_layout_cases.h"
+#include "tab_lifecycle_cases.h"
 #include "../app/session.h"
 #include "../app/context_menu_controller.h"
 #include "../app/quick_access_menu.h"
@@ -538,8 +538,8 @@ int wmain(int argc, wchar_t** argv) {
         CoUninitialize();
         return passed ? 0 : 1;
     }
-    if (argc == 2 && std::wstring(argv[1]) == L"--session-layout")
-        return pulse::bench::RunSessionLayoutTests() ? 0 : 1;
+    if (argc == 2 && std::wstring(argv[1]) == L"--tab-lifecycle")
+        return pulse::bench::RunTabLifecycleTests() ? 0 : 1;
     if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-refresh") {
         pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
         return RunContextMenuRefreshTests() ? 0 : 1;
@@ -1112,7 +1112,7 @@ int wmain(int argc, wchar_t** argv) {
     passed &= Report("settings UI controller has explicit binding lifecycle",
         !settings_ui.ui_bound());
 
-    passed &= pulse::bench::RunSessionLayoutTests();
+    passed &= pulse::bench::RunTabLifecycleTests();
 
     passed &= RunContextMenuComTests(context);
 

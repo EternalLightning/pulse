@@ -6,6 +6,7 @@
 #include "filename_pinyin.h"
 // index_engine.cpp — mmap v6 base + heap delta (优化.md).
 #include "index_engine.h"
+#include "search_result_order.h"
 #include "search_trace.h"
 #include "index_parent_chain.h"
 #include "index_name_pool.h"
@@ -136,18 +137,6 @@ uint64_t ChildKey(int32_t parent, std::wstring_view name) {
     return (static_cast<uint64_t>(static_cast<uint32_t>(parent)) << 32) | NameHash(name);
 }
 
-int CmpLogical(std::wstring_view a, std::wstring_view b) {
-    wchar_t wa[260], wb[260];
-    if (a.size() < 259 && b.size() < 259) {
-        if (!a.empty()) memcpy(wa, a.data(), a.size() * 2);
-        wa[a.size()] = 0;
-        if (!b.empty()) memcpy(wb, b.data(), b.size() * 2);
-        wb[b.size()] = 0;
-        return StrCmpLogicalW(wa, wb);
-    }
-    std::wstring sa(a), sb(b);
-    return StrCmpLogicalW(sa.c_str(), sb.c_str());
-}
 
 bool SplitPath(std::wstring path, std::wstring& root, std::vector<std::wstring_view>& segs,
                std::wstring& storage) {
@@ -1147,6 +1136,17 @@ void Engine::NarrowMatchesLocked(const CompiledQuery& cq, int32_t prefix_node,
     });
 }
 
+bool Engine::SearchResultLessLocked(int32_t a, int32_t b, ResultSort sort, bool desc) const {
+    if (sort == ResultSort::Index) return desc ? a > b : a < b;
+    const auto aa = sort == ResultSort::Name ? Attr{} : QueryAttrAtLocked(a);
+    const auto ab = sort == ResultSort::Name ? Attr{} : QueryAttrAtLocked(b);
+    int comparison = CompareSearchOrder(QueryNameOfLocked(a), sort != ResultSort::Name && (QueryNodeAtLocked(a).flags & kFlagDir) != 0,
+        aa.size, aa.mtime, QueryNameOfLocked(b), sort != ResultSort::Name && (QueryNodeAtLocked(b).flags & kFlagDir) != 0,
+        ab.size, ab.mtime, sort, desc);
+    if (!comparison) comparison = desc ? (a < b ? 1 : a > b ? -1 : 0) : (a < b ? -1 : a > b ? 1 : 0);
+    return comparison < 0;
+}
+
 void Engine::SortIdsLocked(std::vector<int32_t>& ids, ResultSort sort, bool desc) const {
     if (ids.size() <= 1 || sort == ResultSort::Index) {
         if (desc && sort == ResultSort::Index) std::reverse(ids.begin(), ids.end());
@@ -1158,24 +1158,7 @@ void Engine::SortIdsLocked(std::vector<int32_t>& ids, ResultSort sort, bool desc
         std::vector<uint8_t> selected(static_cast<size_t>(BaseCount()), 0);
         for (int32_t id : ids)
             if (id >= 0 && id < BaseCount()) selected[static_cast<size_t>(id)] = 1;
-        auto less = [&](int32_t a, int32_t b) {
-            if (sort == ResultSort::Name) {
-                int c = CmpLogical(QueryNameOfLocked(a), QueryNameOfLocked(b));
-                if (c == 0) c = a < b ? -1 : a > b ? 1 : 0;
-                return desc ? c > 0 : c < 0;
-            }
-            const bool da = (QueryNodeAtLocked(a).flags & kFlagDir) != 0;
-            const bool db = (QueryNodeAtLocked(b).flags & kFlagDir) != 0;
-            if (da != db) return da;
-            const Attr aa = QueryAttrAtLocked(a);
-            const Attr ab = QueryAttrAtLocked(b);
-            const uint64_t va = sort == ResultSort::Size ? aa.size : aa.mtime;
-            const uint64_t vb = sort == ResultSort::Size ? ab.size : ab.mtime;
-            if (va != vb) return desc ? va > vb : va < vb;
-            int c = CmpLogical(QueryNameOfLocked(a), QueryNameOfLocked(b));
-            if (c == 0) c = a < b ? -1 : a > b ? 1 : 0;
-            return desc ? c > 0 : c < 0;
-        };
+        auto less = [&](int32_t a, int32_t b) { return SearchResultLessLocked(a, b, sort, desc); };
         std::vector<int32_t> sorted;
         for (const auto& shard : query_shards_) {
             const int32_t* order = sort == ResultSort::Name ? shard.mapped->name_order :
@@ -1237,22 +1220,7 @@ void Engine::SortIdsLocked(std::vector<int32_t>& ids, ResultSort sort, bool desc
                 if (id >= base || patches_.find(id) != patches_.end())
                     delta.push_back(id);
             }
-            auto less = [&](int32_t a, int32_t b) {
-                if (sort == ResultSort::Name) {
-                    int c = CmpLogical(NameOf(a), NameOf(b));
-                    if (c == 0) c = a < b ? -1 : a > b ? 1 : 0;
-                    return desc ? c > 0 : c < 0;
-                }
-                const bool da = (NodeAt(a).flags & kFlagDir) != 0;
-                const bool db = (NodeAt(b).flags & kFlagDir) != 0;
-                if (da != db) return da;
-                const uint64_t va = sort == ResultSort::Size ? AttrAt(a).size : AttrAt(a).mtime;
-                const uint64_t vb = sort == ResultSort::Size ? AttrAt(b).size : AttrAt(b).mtime;
-                if (va != vb) return desc ? va > vb : va < vb;
-                int c = CmpLogical(NameOf(a), NameOf(b));
-                if (c == 0) c = a < b ? -1 : a > b ? 1 : 0;
-                return desc ? c > 0 : c < 0;
-            };
+            auto less = [&](int32_t a, int32_t b) { return SearchResultLessLocked(a, b, sort, desc); };
             std::sort(delta.begin(), delta.end(), less);
             std::vector<int32_t> base_sorted;
             base_sorted.reserve(ids.size() - delta.size());
@@ -1286,29 +1254,8 @@ void Engine::SortIdsLocked(std::vector<int32_t>& ids, ResultSort sort, bool desc
             return;
         }
     }
-    auto name_cmp = [&](int32_t a, int32_t b) {
-        int c = CmpLogical(NameOf(a), NameOf(b));
-        if (c == 0) c = (a < b) ? -1 : (a > b ? 1 : 0);
-        return desc ? c > 0 : c < 0;
-    };
-    if (sort == ResultSort::Name) {
-        std::sort(ids.begin(), ids.end(), name_cmp);
-        return;
-    }
     std::sort(ids.begin(), ids.end(), [&](int32_t a, int32_t b) {
-        const bool da = (NodeAt(a).flags & kFlagDir) != 0;
-        const bool db = (NodeAt(b).flags & kFlagDir) != 0;
-        if (da != db) return da;
-        uint64_t va = 0, vb = 0;
-        if (sort == ResultSort::Size) {
-            va = AttrAt(a).size;
-            vb = AttrAt(b).size;
-        } else {
-            va = AttrAt(a).mtime;
-            vb = AttrAt(b).mtime;
-        }
-        if (va != vb) return desc ? va > vb : va < vb;
-        return name_cmp(a, b);
+        return SearchResultLessLocked(a, b, sort, desc);
     });
 }
 
@@ -1330,23 +1277,7 @@ void Engine::PartialSortPage(std::vector<int32_t>& ids, size_t offset, size_t li
         SortIdsLocked(ids, sort, desc);
         return;
     }
-    auto less = [&](int32_t a, int32_t b) {
-        if (sort == ResultSort::Index) return desc ? a > b : a < b;
-        if (sort == ResultSort::Name) {
-            int c = CmpLogical(NameOf(a), NameOf(b));
-            if (c == 0) c = (a < b) ? -1 : (a > b ? 1 : 0);
-            return desc ? c > 0 : c < 0;
-        }
-        const bool da = (NodeAt(a).flags & kFlagDir) != 0;
-        const bool db = (NodeAt(b).flags & kFlagDir) != 0;
-        if (da != db) return da;
-        uint64_t va = sort == ResultSort::Size ? AttrAt(a).size : AttrAt(a).mtime;
-        uint64_t vb = sort == ResultSort::Size ? AttrAt(b).size : AttrAt(b).mtime;
-        if (va != vb) return desc ? va > vb : va < vb;
-        int c = CmpLogical(NameOf(a), NameOf(b));
-        if (c == 0) c = (a < b) ? -1 : (a > b ? 1 : 0);
-        return desc ? c > 0 : c < 0;
-    };
+    auto less = [&](int32_t a, int32_t b) { return SearchResultLessLocked(a, b, sort, desc); };
     std::nth_element(ids.begin(), ids.begin() + static_cast<std::ptrdiff_t>(keep), ids.end(), less);
     ids.resize(keep);
     SortIdsLocked(ids, sort, desc);

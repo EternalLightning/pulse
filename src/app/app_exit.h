@@ -5,9 +5,12 @@
 
 #pragma once
 
+#include <functional>
+
 namespace pulse {
 struct AppState;
-void RequestApplicationExit(AppState& state);
+// The hook runs after confirmation; failure keeps the application open.
+void RequestApplicationExit(AppState& state, const std::function<bool()>& before_shutdown = {});
 void RequestAppWindowClose(AppState& state);
 void RequestWindowClose(AppState& state);
 bool CompleteApplicationExit(AppState& state);

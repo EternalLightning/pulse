@@ -104,13 +104,14 @@ void RequestWindowClose(AppState& s) {
     BeginWindowShutdown(s);
 }
 
-void RequestApplicationExit(AppState& s) {
+void RequestApplicationExit(AppState& s, const std::function<bool()>& before_shutdown) {
     if (s.exit_requested || s.exit_confirming || !s.hwnd) return;
     bool pending = HasPendingWindowOperations(s);
     s.core.windows.ForEach([&](HWND, AppState& window) {
         pending = pending || HasPendingWindowOperations(window);
     });
     if (!ConfirmWindowShutdown(s, pending)) return;
+    if (before_shutdown && !before_shutdown()) return;
     s.core.exiting = true;
     // Each window drains its own operation callbacks while the shared UI
     // thread keeps pumping. No window bypasses its asynchronous shutdown.

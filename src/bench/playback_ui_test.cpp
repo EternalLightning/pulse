@@ -57,6 +57,31 @@ struct QuickPreviewPlaybackProbe {
         item.modified = (uint64_t{data.ftLastWriteTime.dwHighDateTime} << 32) | data.ftLastWriteTime.dwLowDateTime;
         return item;
     }
+    static int RunTitleFallback() {
+        const auto output = std::filesystem::absolute(L"bench_data/review-title-fallback");
+        std::filesystem::create_directories(output);
+        HWND owner = CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"Caption fixture",
+            WS_OVERLAPPEDWINDOW, -20000, -20000, 900, 700, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+        {
+            QuickPreviewWindow q;
+            Check(q.Initialize(owner, WM_APP + 1, WM_APP + 2), "initialize isolated production preview");
+            if (q.hwnd_) for (const float scale : {1.0f, 1.5f}) for (const bool dark : {false, true}) {
+                SetWindowPos(q.hwnd_, nullptr, -20000, -20000, static_cast<int>(640 * scale),
+                    static_cast<int>(360 * scale), SWP_NOZORDER | SWP_NOACTIVATE);
+                q.scale_ = scale; q.dark_ = dark;
+                q.compositor_.RecreateTextFormats(scale); q.RecreateFormats();
+                q.item_.name = L"Fallback preview title\nsecond line";
+                const auto bounds = D2D1::RectF(20 * scale, 8 * scale, 440 * scale, 44 * scale);
+                Check(!q.compositor_.DrawDialogTitle(q.item_.name, bounds, D2D1::ColorF(0)),
+                    "multiline preview title exercises the shared layout failure");
+                const auto name = std::wstring(dark ? L"dark-" : L"light-") +
+                    std::to_wstring(static_cast<int>(scale * 100)) + L".png";
+                Check(q.Render((output / name).c_str()), "render and capture production preview title fallback");
+            }
+        }
+        DestroyWindow(owner);
+        return failures ? 1 : 0;
+    }
     static int RunSmoothScroll() {
         failures = 0;
         const auto folder = std::filesystem::absolute(L"bench_data/smooth-scroll-preview");
@@ -513,6 +538,7 @@ struct QuickPreviewPlaybackProbe {
 };
 }
 int wmain(int argc, wchar_t** argv) {
+    const bool title_only = argc == 2 && wcscmp(argv[1], L"--title-fallback") == 0;
     const bool smooth_scroll_only = argc == 2 && wcscmp(argv[1], L"--smooth-scroll") == 0;
     const bool video_only = argc == 3 && wcscmp(argv[1], L"--video-only") == 0;
     const bool end_seek_only = argc == 3 && wcscmp(argv[1], L"--end-seek-only") == 0;
@@ -520,7 +546,8 @@ int wmain(int argc, wchar_t** argv) {
     OleInitialize(nullptr);
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES}; InitCommonControlsEx(&controls);
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const int result = smooth_scroll_only ? pulse::ui::QuickPreviewPlaybackProbe::RunSmoothScroll()
+    const int result = title_only ? pulse::ui::QuickPreviewPlaybackProbe::RunTitleFallback()
+        : smooth_scroll_only ? pulse::ui::QuickPreviewPlaybackProbe::RunSmoothScroll()
         : end_seek_only ? pulse::ui::QuickPreviewPlaybackProbe::RunEndSeek(argv[2])
         : video_only ? pulse::ui::QuickPreviewPlaybackProbe::RunVideo(argv[2])
         : pulse::ui::QuickPreviewPlaybackProbe::Run(argv[1]);

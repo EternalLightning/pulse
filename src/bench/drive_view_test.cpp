@@ -13,8 +13,8 @@
 #include <chrono>
 #include "../common/path_utils.h"
 
-namespace pulse::app {
-std::wstring GetPulseDataDir() { return {}; }
+namespace pulse::storage {
+std::wstring ConfigurationRoot() { return {}; }
 }
 
 int wmain() {

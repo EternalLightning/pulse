@@ -5,26 +5,16 @@
 
 #include "search_result_merge.h"
 #include "index_query.h"
+#include "search_result_order.h"
 #include <algorithm>
 #include <windows.h>
 
 namespace pulse::index {
 namespace {
 
-int CompareName(const Hit& a, const Hit& b) {
-    const int by_name = CompareStringOrdinal(a.name.c_str(), -1, b.name.c_str(), -1, TRUE);
-    if (by_name != CSTR_EQUAL) return by_name == CSTR_LESS_THAN ? -1 : 1;
-    const int by_path = CompareStringOrdinal(a.path.c_str(), -1, b.path.c_str(), -1, TRUE);
-    return by_path == CSTR_LESS_THAN ? -1 : by_path == CSTR_GREATER_THAN ? 1 : 0;
-}
-
 bool BetterHit(const Hit& a, const Hit& b, const Query& query) {
-    int cmp = 0;
-    if (query.sort == ResultSort::Size && a.size != b.size) cmp = a.size < b.size ? -1 : 1;
-    else if (query.sort == ResultSort::Mtime && a.mtime != b.mtime) cmp = a.mtime < b.mtime ? -1 : 1;
-    else cmp = CompareName(a, b);
-    if (query.sort_desc) cmp = -cmp;
-    return cmp < 0;
+    return CompareSearchOrder(a.name, a.is_dir, a.size, a.mtime,
+        b.name, b.is_dir, b.size, b.mtime, query.sort, query.sort_desc) < 0;
 }
 
 } // namespace
@@ -65,10 +55,10 @@ SearchResult MergeSearchResults(const Query& query, const SearchResult& local,
         };
         append(local);
         append(network);
-        // Keep the full sort and comparator ties identical to the unscored path.
-        std::sort(ranked.begin(), ranked.end(), [](const RankedHit& a, const RankedHit& b) {
+        // Providers cut ranked pages by score, preserving their own order on ties.
+        std::stable_sort(ranked.begin(), ranked.end(), [](const RankedHit& a, const RankedHit& b) {
             if (a.score != b.score) return a.score > b.score;
-            return CompareName(*a.hit, *b.hit) < 0;
+            return false;
         });
         for (size_t i = begin; i < end; ++i) result.hits.push_back(*ranked[i].hit);
         return result;
@@ -77,7 +67,7 @@ SearchResult MergeSearchResults(const Query& query, const SearchResult& local,
     candidates.reserve(count);
     for (const auto& hit : local.hits) candidates.push_back(&hit);
     for (const auto& hit : network.hits) candidates.push_back(&hit);
-    std::sort(candidates.begin(), candidates.end(), [&](const Hit* a, const Hit* b) {
+    std::stable_sort(candidates.begin(), candidates.end(), [&](const Hit* a, const Hit* b) {
         return BetterHit(*a, *b, query);
     });
     for (size_t i = begin; i < end; ++i) result.hits.push_back(*candidates[i]);

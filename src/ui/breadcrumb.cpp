@@ -7,6 +7,7 @@
 #include "device_crumbs.h"
 #include "../common/localization.h"
 #include "../common/known_folder_labels.h"
+#include "../common/path_utils.h"
 #include "../model/places.h"
 
 namespace pulse::ui {
@@ -15,9 +16,7 @@ void SetDeviceCrumbResolver(DeviceCrumbResolver resolver) { device_resolver = re
 std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path,
     std::wstring_view virtual_title) {
     std::vector<BreadcrumbSegment> out;
-    std::wstring p = path;
-    if (p.starts_with(L"\\\\?\\UNC\\")) p = L"\\\\" + p.substr(8);
-    else if (p.starts_with(L"\\\\?\\")) p = p.substr(4);
+    std::wstring p = pulse::path::StripExtendedPathPrefix(path);
     while (p.size() > 1 && p.back() == L'\\') p.pop_back();
     if (p.empty()) {
         // Empty path = This PC: a single segment that navigates to "".

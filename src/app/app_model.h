@@ -409,6 +409,7 @@ struct WindowTabs {
     const LayoutTab* Active() const { return active < items.size() ? items[active].get() : nullptr; }
 
     void EnsureDefault();
+    // An empty path opens This PC; callers choose any default folder explicitly.
     LayoutTab& NewTab(const std::wstring& path);
     LayoutTab& NewTabAt(size_t index, const std::wstring& path);
     void CloseTab(size_t idx);

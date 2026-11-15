@@ -5711,96 +5711,6 @@ void TestFindGroupRun() {
     }
 }
 
-bool SameLayoutTabs(const std::vector<LayoutTabSnapshot>& a,
-                    const std::vector<LayoutTabSnapshot>& b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (a[i].pinned != b[i].pinned || a[i].group != b[i].group ||
-            a[i].title != b[i].title || a[i].marker_rgb != b[i].marker_rgb ||
-            a[i].layout != b[i].layout ||
-            a[i].focused != b[i].focused || a[i].target != b[i].target ||
-            a[i].split_ratios != b[i].split_ratios ||
-            a[i].panes.size() != b[i].panes.size()) return false;
-        for (size_t p = 0; p < a[i].panes.size(); ++p) {
-            if (a[i].panes[p].path != b[i].panes[p].path ||
-                a[i].panes[p].view != b[i].panes[p].view ||
-                a[i].panes[p].columns != b[i].panes[p].columns ||
-                a[i].panes[p].search_columns != b[i].panes[p].search_columns)
-                return false;
-        }
-    }
-    return true;
-}
-
-void TestSessionLayoutTabs() {
-    {   // Round-trip: two layout tabs, groups, special characters, split ratios.
-        std::vector<LayoutTabSnapshot> tabs(2);
-        tabs[0].pinned = true;
-        tabs[0].group = 1;
-        tabs[0].title = L"工作";
-        tabs[0].marker_rgb = 0x0078D4;
-        tabs[0].layout = 1;
-        tabs[0].focused = 1;
-        tabs[0].target = 0;
-        tabs[0].split_ratios = { 0.42f };
-        tabs[0].panes.push_back({ L"C:\\", ui::ViewMode::Details, { 0.42f, 0.61f, 0.82f },
-                                  { 0.28f, 0.52f, 0.70f, 0.86f } });
-        tabs[0].panes.push_back({ L"D:\\代码\\路径 \"quoted\"\\dir", ui::ViewMode::LargeIcons });
-        tabs[1].group = 2;
-        tabs[1].layout = 0;
-        tabs[1].title = L"引\"号\\组\n名";
-        tabs[1].panes.push_back({ L"\\\\?\\UNC\\server\\share\\dir", ui::ViewMode::List });
-
-        const std::wstring json = LayoutTabsToJson(tabs);
-        std::vector<LayoutTabSnapshot> back;
-        Check(ParseLayoutTabs(json, back), L"layouttabs: round-trip parses");
-        Check(!back.empty() && back[0].marker_rgb == 0x0078D4,
-              L"layouttabs: individual tab color survives JSON round-trip");
-        Check(SameLayoutTabs(tabs, back), L"layouttabs: round-trip preserves all fields");
-    }
-    {   // Missing searchCols still loads (older sessions).
-        std::vector<LayoutTabSnapshot> out;
-        Check(ParseLayoutTabs(
-            L"[{\"pinned\":false,\"group\":0,\"layout\":0,\"focused\":0,\"panes\":["
-            L"{\"path\":\"C:\\\\\",\"view\":\"details\",\"cols\":\"4200,6100,8200\"}]}]", out) &&
-            !out.empty() && !out[0].panes.empty() &&
-            out[0].panes[0].columns[0] > 0.0f &&
-            out[0].panes[0].search_columns[0] == 0.0f,
-              L"layouttabs: older JSON without searchCols stays default");
-    }
-    {   // Empty array and empty layout tab.
-        std::vector<LayoutTabSnapshot> out;
-        Check(ParseLayoutTabs(L"[]", out) && out.empty(),
-              L"layouttabs: empty array");
-        std::vector<LayoutTabSnapshot> tabs(1);
-        out.clear();
-        Check(ParseLayoutTabs(LayoutTabsToJson(tabs), out) &&
-              SameLayoutTabs(tabs, out),
-              L"layouttabs: empty tab round-trips");
-    }
-    {   // Unknown view falls back to details; out-of-range focused survives parsing.
-        std::vector<LayoutTabSnapshot> out;
-        Check(ParseLayoutTabs(
-                  L"[{\"layout\":1,\"focused\":99,\"panes\":["
-                  L"{\"path\":\"C:\\\\x\",\"view\":\"bogus\"}]}]",
-                  out) &&
-              out.size() == 1 && out[0].focused == 99 && out[0].layout == 1 &&
-              out[0].panes.size() == 1 && out[0].panes[0].path == L"C:\\x" &&
-              out[0].panes[0].view == ui::ViewMode::Details,
-              L"layouttabs: unknown view + focused parsed as-is");
-    }
-    {   // Corrupt input: rejects or skips without crashing, never throws.
-        std::vector<LayoutTabSnapshot> out;
-        Check(!ParseLayoutTabs(L"", out), L"layouttabs: empty string rejected");
-        Check(!ParseLayoutTabs(L"not json", out), L"layouttabs: garbage rejected");
-        Check(!ParseLayoutTabs(L"[{\"layout\":1,\"panes\":[{\"path\":\"C:\\\\\"}]", out),
-              L"layouttabs: truncated array rejected");
-        Check(ParseLayoutTabs(L"[{\"panes\":[{}]}]", out) && out.size() == 1 &&
-              out[0].panes.size() == 1 && out[0].panes[0].path.empty(),
-              L"layouttabs: empty object tolerated");
-    }
-}
-
 void TestTabShortcuts() {
     WindowTabs tabs;
     Check(!TabShortcutTarget(tabs, false), L"tab shortcuts: empty strip has no target");
@@ -5922,33 +5832,6 @@ void TestLayoutOwnedTabs() {
     Check(tabs.Active()->panes[0]->view.current_path.find(L"work") != std::wstring::npos &&
           tabs.Active()->panes[1]->view.current_path.find(L"assets") != std::wstring::npos,
           L"layouttabs: switch restores each column path");
-
-    const LayoutTabSnapshot first_snap = CaptureLayoutTab(*tabs.items[0]);
-    const LayoutTabSnapshot second_snap = CaptureLayoutTab(*tabs.items[1]);
-    WindowTabs restored;
-    bool loading_panes_registered = true;
-    RestoreWindowTabs(restored, { first_snap, second_snap }, {}, 1,
-        [&](Tab& tab, const std::wstring& path) {
-            bool registered = false;
-            for (const auto& layout : restored.items)
-                for (const auto& pane : layout->panes)
-                    registered |= pane->ActiveTab() == &tab;
-            loading_panes_registered &= registered;
-            tab.current_path = path;
-        });
-    Check(loading_panes_registered,
-          L"layouttabs: restoring panes are registered before directory loading");
-    Check(restored.items.size() == 2 && restored.active == 1,
-          L"layouttabs: session restore keeps two tabs and active index");
-    Check(restored.items[0]->layout == LayoutPreset::TwoVertical &&
-          restored.items[0]->panes.size() == 2 &&
-          restored.items[0]->panes[0]->view.current_path.find(L"work") != std::wstring::npos &&
-          restored.items[0]->panes[1]->view.current_path.find(L"assets") != std::wstring::npos,
-          L"layouttabs: session restore keeps the first tab's split folders");
-    Check(restored.items[1]->layout == LayoutPreset::Single &&
-          restored.items[1]->panes.size() == 1 &&
-          restored.items[1]->panes[0]->view.current_path.find(L"raw") != std::wstring::npos,
-          L"layouttabs: session restore keeps the second tab's single folder");
 }
 
 void TestUtf8PersistFile() {
@@ -6202,7 +6085,7 @@ void TestDetailsPreviewInteraction() {
     const auto data_dir = std::wstring(kSandbox) + L"\\preview-session";
     std::filesystem::create_directories(data_dir);
     SetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", data_dir.c_str());
-    SessionSnapshot saved, loaded;
+    WindowSessionSnapshot saved, loaded;
     saved.details_panel = true;
     saved.details_preview_only = true;
     saved.details_preview = false;
@@ -6212,18 +6095,18 @@ void TestDetailsPreviewInteraction() {
     saved.sidebar_order = { 3, 6, 0, 7, 1, 2, 4, 5 };
     saved.quick_access_hidden = (1 << static_cast<int>(BuiltinQuickAccess::Desktop)) |
         (1 << static_cast<int>(BuiltinQuickAccess::RecycleBin));
-    Check(SaveSession(saved) && LoadSession(loaded) && loaded.details_preview_only &&
+    Check(SaveSessionPreferences(saved) && LoadSessionPreferences(loaded) && loaded.details_preview_only &&
         !loaded.details_preview && loaded.details_panel_width == 420,
-        L"preview: folded mode, preview switch and panel width survive session reload");
+        L"preview: folded mode, preview switch and panel width survive preference reload");
     Check(loaded.sidebar_collapsed == 0x2 && loaded.sidebar_hidden == 0x4,
         L"session: sidebar collapse and hide masks survive reload");
     Check(loaded.sidebar_order == saved.sidebar_order &&
         loaded.quick_access_hidden == saved.quick_access_hidden,
         L"session: section order and hidden quick-access links survive reload");
     WriteUtf8FileAtomic(data_dir + L"\\session.json", L"{\"detailsPanel\":1,\"version\":4}");
-    SessionSnapshot legacy;
-    LoadSession(legacy);
-    Check(!legacy.details_preview_only, L"preview: older sessions default to expanded details");
+    DeleteFileW((data_dir + L"\\preferences.json").c_str());
+    WindowSessionSnapshot legacy;
+    Check(LoadSessionPreferences(legacy) && !legacy.details_preview_only, L"preview: older sessions default to expanded details");
     SetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", previous[0] ? previous : nullptr);
 }
 
@@ -6462,7 +6345,6 @@ int RunSelfTest1B2() {
     TestNormalizeGroupRuns();
     TestChipBlockDragGeometry();
     TestFindGroupRun();
-    TestSessionLayoutTabs();
     TestTabShortcuts();
     TestStagingTrayDeletion();
     TestLayoutOwnedTabs();

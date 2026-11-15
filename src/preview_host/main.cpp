@@ -26,6 +26,7 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 #include <algorithm>
+#include <cstring>
 #include <cwctype>
 #include <string>
 #include <string_view>
@@ -417,19 +418,15 @@ static bool OpenGifState(GifDecodeState& state, const std::wstring& path, UINT p
     ComPtr<IWICMetadataQueryReader> decoder_reader;
     if (SUCCEEDED(decoder->GetMetadataQueryReader(&decoder_reader)) && decoder_reader) {
         PROPVARIANT pv{}; PropVariantInit(&pv);
-        if (SUCCEEDED(decoder_reader->GetMetadataByName(L"/appext/Data", &pv)) &&
-            ((pv.vt & VT_VECTOR) != 0) && ((pv.vt & VT_TYPEMASK) == VT_UI1) &&
-            pv.caub.cElems >= 16) {
-            const auto* b = pv.caub.pElems;
-            for (ULONG i = 0; i + 4 < pv.caub.cElems; ++i)
-                if (b[i] == 'N' && b[i + 1] == 'E' && b[i + 2] == 'T' &&
-                    b[i + 3] == 'S' && b[i + 4] == 'C') {
-                    for (ULONG j = i; j + 15 < pv.caub.cElems; ++j)
-                        if (b[j] == 0x03 && b[j + 1] == 0x01) {
-                            state.loop_count = b[j + 2] | (static_cast<uint32_t>(b[j + 3]) << 8); break;
-                        }
-                    break;
-                }
+        if (SUCCEEDED(decoder_reader->GetMetadataByName(L"/appext/Application", &pv)) &&
+            pv.vt == (VT_VECTOR | VT_UI1) && pv.caub.cElems == 11 && pv.caub.pElems &&
+            (!std::memcmp(pv.caub.pElems, "NETSCAPE2.0", 11) ||
+             !std::memcmp(pv.caub.pElems, "ANIMEXTS1.0", 11))) {
+            PropVariantClear(&pv);
+            if (SUCCEEDED(decoder_reader->GetMetadataByName(L"/appext/Data", &pv)) &&
+                pv.vt == (VT_VECTOR | VT_UI1) && pv.caub.cElems >= 4 && pv.caub.pElems &&
+                pv.caub.pElems[0] == 3 && pv.caub.pElems[1] == 1)
+                state.loop_count = pv.caub.pElems[2] | (static_cast<uint32_t>(pv.caub.pElems[3]) << 8);
         }
         PropVariantClear(&pv);
     }

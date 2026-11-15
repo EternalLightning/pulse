@@ -142,6 +142,7 @@ public:
     std::vector<std::wstring> PathsForTag(const TagId& id) const;
 
     TagId CreateTag(const std::wstring& name, uint32_t rgb);
+    bool CanEditTags() const noexcept { return tag_saves_enabled_; }
     bool RenameTag(const TagId& id, const std::wstring& name);
     bool SetTagColor(const TagId& id, uint32_t rgb);
     size_t DeleteTag(const TagId& id, std::vector<TagAdsUpdate>* deferred_ads = nullptr);
@@ -224,7 +225,8 @@ private:
     std::unordered_set<std::wstring> starred_index_;
     mutable std::atomic<ULONGLONG> places_save_due_{0};
     uint64_t tag_revision_ = 1;
-    bool tag_saves_enabled_ = true;
+    bool tag_saves_enabled_ = true; // Failed tag loads keep the fallback catalog read-only.
+    bool places_saves_enabled_ = true;
     mutable std::mutex tag_save_mutex_;
     mutable std::condition_variable tag_save_cv_;
     mutable std::optional<std::vector<ColorTag>> pending_tag_save_;

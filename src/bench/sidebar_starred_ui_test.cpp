@@ -6,6 +6,8 @@
 #include "../app/app_internal.h"
 #include "../app/app_input.h"
 #include "../app/session.h"
+#include "../common/user_storage.h"
+#include "../common/windows_compat.h"
 #include "../ui/ui_renderer_internal.h"
 #include <algorithm>
 #include <cstdio>
@@ -42,7 +44,7 @@ void CALLBACK SelectMenu(HWND, UINT, UINT_PTR timer, DWORD) {
 
 void RightClick(pulse::AppState& state, float x, float y, int row) {
     menu_row = row;
-    menu_scale = state.scale;
+    menu_scale = static_cast<float>(pulse::compat::WindowDpi(state.hwnd)) / 96.0f;
     menu_clicked = false;
     const auto timer = SetTimer(nullptr, 0, 200, SelectMenu);
     pulse::HandleRButtonUp(&state, state.hwnd, WM_RBUTTONUP, 0,
@@ -127,11 +129,14 @@ int RunSidebarStarredUiTest() {
             RightClick(s, x, (star_bounds.top + star_bounds.bottom) * 0.5f, 0);
             Check(s.sidebarHiddenMask == (1u << starred_id),
                 "right-clicking the starred root hides the entire section only");
-            app::SessionSnapshot saved, loaded;
+            app::WindowSessionSnapshot saved, loaded;
             saved.sidebar_hidden = static_cast<int>(s.sidebarHiddenMask);
-            Check(app::ParseSessionJson(app::SessionToJson(saved), loaded) &&
-                loaded.sidebar_hidden == saved.sidebar_hidden,
-                "starred visibility persists through the existing session format");
+            const auto previous_root = storage::ConfigurationRoot();
+            storage::OverrideDefaultRootForTesting((output / L"profile").wstring());
+            const bool round_trip = app::SaveSessionPreferences(saved) && app::LoadSessionPreferences(loaded);
+            storage::OverrideDefaultRootForTesting(previous_root);
+            Check(round_trip && loaded.sidebar_hidden == saved.sidebar_hidden,
+                "starred visibility persists through the production preferences file");
             vm = BuildVm(s, false);
             for (const bool rail : {false, true}) {
                 const auto hidden = slots(vm, rail);

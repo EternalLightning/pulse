@@ -16,6 +16,119 @@
 #include <string_view>
 #include "places_tag_loading_cases.h"
 
+static int RunPreferencesLoadProtectionChecks() {
+    using namespace pulse;
+    int failures = 0;
+    const auto check = [&](bool passed, const char* name) {
+        std::cout << (passed ? "[PASS] " : "[FAIL] ") << name << '\n';
+        failures += !passed;
+    };
+    const auto parent = std::filesystem::absolute(L"bench_data");
+    const auto root = parent / (L"preferences-load-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    if (error) return 2;
+    storage::OverrideDefaultRootForTesting(root.wstring());
+    const auto check_file = [&](auto& prefs, const wchar_t* filename, const std::wstring& valid) {
+        const auto path = (root / filename).wstring();
+        const auto load = [&] {
+            // AppPrefs must not repair the user's startup registry entry in a fixture.
+            prefs.persist = false;
+            const bool loaded = prefs.Load();
+            prefs.persist = true;
+            return loaded;
+        };
+        check(!load() && prefs.Save(), "missing preferences permit first-run creation");
+        for (const auto& damaged : {std::wstring(), std::wstring(L"{damaged"), std::wstring(L"[]")}) {
+            check(WriteUtf8FileAtomic(path, damaged) && !load(),
+                "empty, damaged and non-object preferences report load failure");
+            std::wstring retained;
+            check(!prefs.Save() && ReadUtf8File(path, retained) && retained == damaged,
+                "failed preference load prevents automatic replacement");
+        }
+        check(WriteUtf8FileAtomic(path, valid), "write valid preferences before exclusive lock");
+        HANDLE lock = CreateFileW(path.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        check(lock != INVALID_HANDLE_VALUE, "lock existing preferences against reads");
+        if (lock != INVALID_HANDLE_VALUE) {
+            check(!load(), "locked preference file reports load failure");
+            CloseHandle(lock);
+            std::wstring retained;
+            check(!prefs.Save() && ReadUtf8File(path, retained) && retained == valid,
+                "unlocking after failed load still preserves original preferences on save");
+        }
+        check(!prefs.FromJson(L"{damaged") && !prefs.Save(),
+            "failed import does not clear load protection");
+        check(load() && prefs.Save(), "successful reload restores preference saves");
+        check(!prefs.FromJson(L"{damaged") && prefs.Save(),
+            "failed import does not disable an otherwise healthy preference store");
+        check(WriteUtf8FileAtomic(path, L"{damaged") && !load(),
+            "prepare failed load before explicit reset");
+        prefs.ResetToDefaults();
+        check(prefs.Save(), "explicit reset permits replacing damaged preferences");
+        check(WriteUtf8FileAtomic(path, L"{damaged") && !load() &&
+            prefs.FromJson(valid) && prefs.Save(), "valid import permits replacing damaged preferences");
+    };
+    app::AppPrefs prefs;
+    check_file(prefs, L"app.json", LR"({"row_height":42})");
+    app::ContextMenuPrefs menus;
+    check_file(menus, L"context_menu.json", LR"({"categories":{"software":false}})");
+
+    const auto path = (root / L"preferences.json").wstring();
+    const auto legacy = (root / L"session.json").wstring();
+    app::WindowSessionSnapshot loaded;
+    bool saves_enabled = false;
+    check(!app::LoadSessionPreferences(loaded, &saves_enabled) && saves_enabled &&
+        app::SaveSessionPreferences(loaded), "missing window preferences permit first-run creation");
+    const std::wstring valid = LR"({"sidebarHidden":3})";
+    check(WriteUtf8FileAtomic(legacy, LR"({"sidebarHidden":1})") &&
+        WriteUtf8FileAtomic(path, valid), "write independent current and legacy window preferences");
+    for (const auto& damaged : {std::wstring(), std::wstring(L"{damaged"), std::wstring(L"[]")}) {
+        check(WriteUtf8FileAtomic(path, damaged) &&
+            !app::LoadSessionPreferences(loaded, &saves_enabled) && !saves_enabled,
+            "invalid window preferences disable automatic saves without falling back to legacy");
+        // The application recaptures a fresh snapshot when closing any window.
+        const app::WindowSessionSnapshot captured;
+        if (saves_enabled) app::SaveSessionPreferences(captured);
+        std::wstring retained;
+        check(ReadUtf8File(path, retained) && retained == damaged,
+            "recaptured window defaults retain the shared load-failure protection");
+    }
+    check(WriteUtf8FileAtomic(path, valid), "restore window preferences before exclusive lock");
+    HANDLE lock = CreateFileW(path.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr);
+    check(lock != INVALID_HANDLE_VALUE, "lock existing window preferences against reads");
+    if (lock != INVALID_HANDLE_VALUE) {
+        check(!app::LoadSessionPreferences(loaded, &saves_enabled) && !saves_enabled,
+            "locked window preferences disable automatic saves");
+        CloseHandle(lock);
+        if (saves_enabled) app::SaveSessionPreferences({});
+        std::wstring retained;
+        check(ReadUtf8File(path, retained) && retained == valid,
+            "unlocking window preferences before exit preserves original values");
+    }
+    check(app::LoadSessionPreferences(loaded, &saves_enabled) && saves_enabled &&
+        loaded.sidebar_hidden == 3, "successful window preference reload restores automatic saves");
+    std::filesystem::remove(path, error);
+    check(!error && app::LoadSessionPreferences(loaded, &saves_enabled) && saves_enabled &&
+        loaded.sidebar_hidden == 1 && app::SaveSessionPreferences(loaded),
+        "readable legacy window preferences can still migrate into their new file");
+    std::filesystem::remove(path, error);
+    check(!error && WriteUtf8FileAtomic(legacy, L"{damaged") &&
+        !app::LoadSessionPreferences(loaded, &saves_enabled) && !saves_enabled,
+        "unreadable legacy window preferences do not authorize saving fallback defaults");
+    storage::OverrideDefaultRootForTesting(L"");
+    const auto actual = std::filesystem::weakly_canonical(root, error);
+    const auto expected_parent = std::filesystem::weakly_canonical(parent, error);
+    if (!error && actual.parent_path() == expected_parent &&
+        actual.filename().wstring().starts_with(L"preferences-load-"))
+        std::filesystem::remove_all(actual, error);
+    else check(false, "load protection fixture cleanup remains inside bench_data");
+    check(!error, "load protection fixture cleaned without user preferences");
+    return failures ? 1 : 0;
+}
+
 static int RunSessionPreferencesChecks() {
     using namespace pulse;
     int failures = 0;
@@ -32,21 +145,13 @@ static int RunSessionPreferencesChecks() {
         return 2;
     }
     storage::OverrideDefaultRootForTesting(root.wstring());
-    app::SessionSnapshot full;
-    full.active_path = L"C:\\retained";
-    full.sidebar_hidden = 1;
-    full.layout_tabs.resize(1);
-    full.layout_tabs.front().panes.push_back({full.active_path});
-    auto legacy_json = app::SessionToJson(full);
     const std::wstring legacy_undo = LR"("undo":[{"type":2,"sup":true,"dest":"","name":"renamed.txt","src":["C:\\fixture\\original.txt"]}],)";
     const std::wstring legacy_tray = LR"("tray":[{"move":true,"items":["C:\\fixture\\staged.txt"]}],)";
-    legacy_json.insert(legacy_json.find(L'{') + 1, legacy_undo + legacy_tray);
-    legacy_json.insert(legacy_json.find(L'{', legacy_json.find(L"\"windows\"")) + 1, legacy_tray);
+    const std::wstring legacy_json = LR"({"version":8,"sidebarHidden":1,"path":"C:\\retained","layoutTabs":[{"panes":[{"path":"C:\\retained"}]}],"undo":[{"type":2,"src":["C:\\fixture\\original.txt"]}],"tray":[{"move":true,"items":["C:\\fixture\\staged.txt"]}],"windows":[{"path":"C:\\retained","tray":[]}]})";
     check(WriteUtf8FileAtomic((root / L"session.json").wstring(), legacy_json),
         "write an isolated legacy session with a completed rename in undo history");
     app::WindowSessionSnapshot preferences;
-    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 1 &&
-        preferences.active_path.empty() && preferences.layout_tabs.empty(),
+    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 1,
         "preferences migrate legacy settings without restoring navigation");
     const auto migrated_json = app::SessionPreferencesToJson(preferences);
     const json::Document migrated(migrated_json);
@@ -57,7 +162,6 @@ static int RunSessionPreferencesChecks() {
     check(ReadUtf8File((root / L"session.json").wstring(), original_session),
         "capture the complete legacy session before saving preferences");
     preferences.sidebar_hidden = 2;
-    preferences.active_path = L"D:\\must-not-be-written";
     check(app::SaveSessionPreferences(preferences), "save preferences into their separate file");
     std::wstring saved_session, saved_preferences;
     check(ReadUtf8File((root / L"session.json").wstring(), saved_session) && saved_session == original_session &&
@@ -68,19 +172,8 @@ static int RunSessionPreferencesChecks() {
         "the preference schema contains no navigation state");
     check(!doc.Find(L"undo"), "saved preferences contain no undo history");
     check(!doc.Find(L"tray"), "saved preferences contain no staging tray");
-    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2 && preferences.active_path.empty(),
+    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2,
         "the new preference file takes precedence over legacy values");
-    app::SessionSnapshot restored;
-    check(app::LoadSession(restored) && restored.active_path == full.active_path && restored.layout_tabs.size() == 1,
-        "complete session remains readable after preference updates");
-    const auto restored_json = app::SessionToJson(restored);
-    const json::Document restored_session(restored_json);
-    check(restored_session.Is(json::Kind::Object) && !restored_session.Find(L"undo") &&
-        !restored_session.Find(L"windows")->children.front().Find(L"undo"),
-        "complete session snapshots discard legacy undo in every window");
-    check(!restored_session.Find(L"tray") &&
-        !restored_session.Find(L"windows")->children.front().Find(L"tray"),
-        "complete session snapshots discard the legacy staging tray in every window");
     auto legacy_preferences = saved_preferences;
     legacy_preferences.insert(legacy_preferences.find(L'{') + 1, legacy_undo + legacy_tray);
     check(WriteUtf8FileAtomic((root / L"preferences.json").wstring(), legacy_preferences) &&
@@ -100,6 +193,8 @@ static int RunSessionPreferencesChecks() {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--preferences-load-protection")
+        return RunPreferencesLoadProtectionChecks();
     if (argc == 2 && std::string_view(argv[1]) == "--session-preferences")
         return RunSessionPreferencesChecks();
     if (argc == 2 && std::string_view(argv[1]) == "--places-tags-load")
@@ -130,45 +225,12 @@ int main(int argc, char** argv) {
         return failures ? 1 : 0;
     }
     {
-        app::LayoutTabSnapshot saved;
-        saved.panes.push_back({});
-        app::LayoutTab restored;
-        std::vector<std::wstring> requested;
-        const auto load = [&](app::Tab& tab, const std::wstring& path) {
-            requested.push_back(path);
-            tab.current_path = path;
-        };
-        app::RestoreLayoutTab(restored, saved, load);
-        check(restored.panes.size() == 1 && restored.panes[0]->view.current_path.empty() &&
-              requested == std::vector<std::wstring>{L""},
-              "session restore preserves This PC as an empty navigation path");
-        saved.layout = static_cast<int>(app::LayoutPreset::TwoVertical);
-        app::PaneFolderSnapshot folder;
-        folder.path = L"C:\\fixture";
-        saved.panes.push_back(folder);
-        saved.focused = 1;
-        requested.clear();
-        app::RestoreLayoutTab(restored, saved, load);
-        check(restored.panes.size() == 2 && restored.panes[0]->view.current_path.empty() &&
-              restored.panes[1]->view.current_path == folder.path && restored.focused_index == 1 &&
-              requested == std::vector<std::wstring>{L"", folder.path},
-              "session restore keeps This PC and folder panes in their original positions");
-        saved.panes.resize(1);
-        requested.clear();
-        app::RestoreLayoutTab(restored, saved, load);
-        check(restored.panes.size() == 2 && restored.panes[0]->view.current_path.empty() &&
-              restored.panes[1]->view.current_path.empty() &&
-              requested == std::vector<std::wstring>{L"", L""},
-              "session restore preserves This PC when filling missing preset panes");
-    }
-    if (argc == 2 && std::string_view(argv[1]) == "--session-this-pc") return failures ? 1 : 0;
-    {
         app::WindowTabs tabs;
         const int maximum = (std::numeric_limits<int>::max)();
-        app::RestoreWindowTabs(tabs, {}, {{maximum, L"maximum", 0, false},
-                                        {1, L"first", 0, false}}, 0, {});
+        tabs.tab_groups = {{maximum, L"maximum", 0, false}, {1, L"first", 0, false}};
+        tabs.next_tab_group_id = app::NextTabGroupId(maximum);
         check(tabs.next_tab_group_id == 1 && app::AllocateTabGroupId(tabs) == 2,
-              "session INT_MAX group wraps without colliding with an existing group");
+              "INT_MAX group counter wraps without colliding with an existing group");
         tabs.tab_groups.clear();
         tabs.next_tab_group_id = maximum;
         check(app::AllocateTabGroupId(tabs) == maximum && tabs.next_tab_group_id == 1 &&
@@ -179,7 +241,7 @@ int main(int argc, char** argv) {
         check(app::AllocateTabGroupId(tabs) == 2,
               "group allocation normalizes invalid counters and skips occupied IDs");
     }
-    if (argc == 2 && std::string_view(argv[1]) == "--session-group-id") return failures ? 1 : 0;
+    if (argc == 2 && std::string_view(argv[1]) == "--tab-group-id") return failures ? 1 : 0;
     const auto parent = std::filesystem::current_path() / L"bench_data";
     const auto root = parent / (L"json-persistence-" + std::to_wstring(GetCurrentProcessId()) +
                                L"-" + std::to_wstring(GetTickCount64()));
@@ -188,29 +250,16 @@ int main(int argc, char** argv) {
     {
         const std::wstring old_session = LR"({"version":7,"left":1,"top":2,"right":800,"bottom":600,"path":"C:\\old","tray":[],"undo":[],"layoutTabs":[{"title":"legacy","panes":[{"path":"C:\\pane","view":"details","cols":"0,0,0"}]}]})";
         check(WriteUtf8FileAtomic((root / L"session.json").wstring(), old_session), "write isolated actual legacy session shape");
-        app::SessionSnapshot loaded;
-        check(app::LoadSession(loaded) && loaded.window_rect.left == 1 && loaded.layout_tabs.size() == 1 &&
-              loaded.layout_tabs[0].title == L"legacy", "legacy session schema and layout panes remain readable");
+        app::WindowSessionSnapshot loaded;
+        check(app::LoadSessionPreferences(loaded) && loaded.window_rect.left == 1,
+              "legacy session preferences remain readable alongside ignored navigation");
         check(WriteUtf8FileAtomic((root / L"session.json").wstring(),
               LR"({"child":{"left":999,"path":"fake"},"left":5,"path":"real","tray":[],"undo":[]})") &&
-              app::LoadSession(loaded) && loaded.window_rect.left == 5 && loaded.active_path == L"real",
-              "production session loader selects root members over nested pseudo-state");
+              app::LoadSessionPreferences(loaded) && loaded.window_rect.left == 5,
+              "production preference migration selects root members over nested pseudo-state");
         check(WriteUtf8FileAtomic((root / L"session.json").wstring(), LR"({"left":truejunk})") &&
-              !app::LoadSession(loaded) && loaded.window_rect.left == 5,
-              "damaged session rejected before replacing current snapshot");
-        app::SessionSnapshot original;
-        original.active_path = root.wstring();
-        app::LayoutTabSnapshot tab;
-        tab.title = L"braces } ] \" 汉\U0001F600\b\f";
-        app::PaneFolderSnapshot pane;
-        pane.path = root.wstring();
-        tab.panes.push_back(pane);
-        original.layout_tabs.push_back(tab);
-        original.tab_groups.push_back({1, L"group } ] \" 汉\U0001F600", 0x123456, true});
-        check(app::SaveSession(original) && app::LoadSession(loaded) && loaded.layout_tabs.size() == 1 &&
-              loaded.layout_tabs[0].title == tab.title && loaded.tab_groups.size() == 1 &&
-              loaded.tab_groups[0].name == original.tab_groups[0].name,
-              "session writer/loader round-trip complete escapes and braces in titles");
+              !app::LoadSessionPreferences(loaded) && loaded.window_rect.left == 5,
+              "damaged legacy preferences rejected before replacing current snapshot");
         const std::wstring tray_json = LR"([{"move":false,"items":["C:\\fixture\\\u6C49\uD83D\uDE00\b\f"]}])";
         app::StagingTray tray;
         std::wstring serialized;

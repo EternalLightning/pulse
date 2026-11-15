@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <cstddef>
-#include "../app/frame_profile.h"
+#include "../common/frame_profile.h"
 #include "presentation_statistics_profile.h"
 #include <cmath>
 #include <cstdio>
@@ -8,7 +8,7 @@
 #include <thread>
 
 int main() {
-    using namespace pulse::app;
+    using namespace pulse::profile;
     int failures = 0;
     const auto check = [&](bool passed, const char* label) {
         std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);

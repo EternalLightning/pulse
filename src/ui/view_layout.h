@@ -16,10 +16,10 @@ namespace pulse::ui {
 
 using model::ViewMode;
 
-const wchar_t* ViewModeName(ViewMode mode) noexcept;
-ViewMode ParseViewMode(const std::wstring& value) noexcept;
-int ViewModeIndex(ViewMode mode) noexcept;
-ViewMode ViewModeFromIndex(int index) noexcept;
+using model::ViewModeName;
+using model::ParseViewMode;
+using model::ViewModeIndex;
+using model::ViewModeFromIndex;
 bool ShowsColumnHeader(ViewMode mode) noexcept;
 bool UsesThumbnails(ViewMode mode) noexcept;
 bool ShowsFolderSize(ViewMode mode) noexcept;

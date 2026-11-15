@@ -133,11 +133,32 @@ static int RunSmoothScroll(OperationCenter& center, const std::filesystem::path&
         SendMessageW(center.hwnd_,WM_KEYDOWN,VK_HOME,0);
         check(!pending() && center.scroll_==0,"Home cancels pending scrolling and jumps to the first card");
 
-        reset();wheel(-WHEEL_DELTA);
+        reset();
+        const auto before_update = center.buttons_;
+        center.scroll_motion_.ScrollBy(center.scroll_, 72 * scale, maximum(), center.body_height_,
+            AnimationTimeMs() - 40, true);
         const auto saved_target=target();
         center.Update(tasks);
         check(std::abs(target()-saved_target)<0.1f && pending(),
             "ordinary task updates preserve the running scroll clock and target");
+        check(center.scroll_ > 0, "task refresh advances an in-flight scroll while rebuilding action positions");
+        bool aligned = center.buttons_.size() == before_update.size();
+        int visible_actions = 0;
+        for (size_t i = 0; i < center.buttons_.size() && i < before_update.size(); ++i) {
+            const auto& button = center.buttons_[i];
+            const float offset = (12 + 56) * scale - center.scroll_;
+            aligned &= std::abs(button.content_top - before_update[i].content_top) < 0.1f &&
+                std::abs(button.bounds.top - before_update[i].content_top - offset) < 0.1f &&
+                std::abs(button.bounds.bottom - before_update[i].content_bottom - offset) < 0.1f;
+            if (button.bounds.top >= (12 + 56) * scale && button.bounds.bottom <= center.height_ - 12 * scale) {
+                ++visible_actions;
+                aligned &= center.Hit((button.bounds.left + button.bounds.right) * 0.5f,
+                    (button.bounds.top + button.bounds.bottom) * 0.5f) == static_cast<int>(i);
+            }
+        }
+        check(aligned && visible_actions > 0, "task actions stay on their cards and remain clickable after a scrolling refresh");
+        check(SaveDib(center, output / (L"scroll-refresh-" + std::to_wstring(static_cast<int>(scale * 100)) +
+            (dark ? L"-dark.png" : L"-light.png"))), "capture action visibility after a scrolling refresh");
         center.motion_override_=0;center.Tick();
         check(!pending() && std::abs(center.scroll_-saved_target)<0.1f,"reduced motion settles an active scroll at its target");
         reset();center.motion_override_=0;wheel(-WHEEL_DELTA);

@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "network_index.h"
+#include "search_result_order.h"
 #include "index_transport_security.h"
 #include "index_config.h"
 #include "../common/user_storage.h"
@@ -1211,25 +1212,12 @@ void NetworkIndex::SearchLoop() {
             const auto& record = *candidate.record;
             return std::wstring_view(candidate.shard->pool + record.path_off, record.path_len);
         };
-        auto compare_text = [](std::wstring_view a, std::wstring_view b) {
-            const int value = CompareStringOrdinal(a.data(), static_cast<int>(a.size()),
-                                                   b.data(), static_cast<int>(b.size()), TRUE);
-            return value == CSTR_LESS_THAN ? -1 : value == CSTR_GREATER_THAN ? 1 : 0;
-        };
         auto better = [&](const Candidate& a, const Candidate& b) {
             if (query.rank && a.score != b.score) return a.score > b.score;
-            int comparison = 0;
-            if (!query.rank && query.sort == ResultSort::Size &&
-                a.record->size != b.record->size)
-                comparison = a.record->size < b.record->size ? -1 : 1;
-            else if (!query.rank && query.sort == ResultSort::Mtime &&
-                     a.record->mtime != b.record->mtime)
-                comparison = a.record->mtime < b.record->mtime ? -1 : 1;
-            else {
-                comparison = compare_text(name_of(a), name_of(b));
-                if (!comparison) comparison = compare_text(path_of(a), path_of(b));
-            }
-            if (!query.rank && query.sort_desc) comparison = -comparison;
+            const int comparison = query.rank ? 0 : CompareSearchOrder(
+                name_of(a), (a.record->flags & kRecordDirectory) != 0, a.record->size, a.record->mtime,
+                name_of(b), (b.record->flags & kRecordDirectory) != 0, b.record->size, b.record->mtime,
+                query.sort, query.sort_desc);
             if (comparison) return comparison < 0;
             if (a.shard_order != b.shard_order) return a.shard_order < b.shard_order;
             return a.record_order < b.record_order;

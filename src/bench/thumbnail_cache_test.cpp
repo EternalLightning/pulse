@@ -11,6 +11,187 @@
 
 namespace pulse::ui {
 struct ThumbnailCacheTestAccess {
+    static bool RunWarmProcessLifecycle() {
+        ThumbnailCache cache;
+        cache.lane_count_ = 4;
+        HANDLE initialized = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        HANDLE main_sampled = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!initialized || !main_sampled) {
+            if (initialized) CloseHandle(initialized);
+            if (main_sampled) CloseHandle(main_sampled);
+            std::printf("[FAIL] create real preview lifecycle synchronization\n");
+            return false;
+        }
+        ULONGLONG now = 1;
+        unsigned initialized_lanes = 0;
+        cache.worker_clock_ = [&] {
+            const auto current = std::this_thread::get_id();
+            for (size_t lane = 0; lane < cache.lane_count_; ++lane) {
+                const auto worker = lane ? cache.hosts_[lane - 1].worker.get_id() : cache.worker_.get_id();
+                if (current == worker) initialized_lanes |= 1u << lane;
+            }
+            if (current == cache.worker_.get_id()) SetEvent(main_sampled);
+            if (initialized_lanes == (1u << cache.lane_count_) - 1) SetEvent(initialized);
+            return now;
+        };
+        cache.Warm();
+        const bool ready = WaitForSingleObject(initialized, 5000) == WAIT_OBJECT_0;
+        HANDLE process = nullptr;
+        bool main_warm = false, auxiliaries_cold = false;
+        if (ready) {
+            // Every lane has entered its clock under mutex after initial Connect.
+            std::lock_guard lock(cache.mutex_);
+            main_warm = cache.pipe_ != INVALID_HANDLE_VALUE && cache.child_.hProcess &&
+                DuplicateHandle(GetCurrentProcess(), cache.child_.hProcess, GetCurrentProcess(),
+                    &process, 0, FALSE, DUPLICATE_SAME_ACCESS);
+            auxiliaries_cold = std::all_of(cache.hosts_.begin(), cache.hosts_.end(), [](const auto& host) {
+                return !host.child.hProcess && host.pipe == INVALID_HANDLE_VALUE;
+            });
+        }
+        bool ok = main_warm && auxiliaries_cold && WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+        std::printf("[%s] Warm starts one real preview helper while auxiliary lanes remain dormant\n",
+            ok ? "PASS" : "FAIL");
+        if (main_warm) {
+            cache.Warm();
+            const auto advance = [&](ULONGLONG tick) {
+                {
+                    std::lock_guard lock(cache.mutex_);
+                    now = tick;
+                    ResetEvent(main_sampled);
+                }
+                cache.cv_.notify_all();
+                return WaitForSingleObject(main_sampled, 1000) == WAIT_OBJECT_0;
+            };
+            const bool retained = advance(60000) && WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+            std::printf("[%s] repeated Warm preserves the real helper before its idle deadline\n",
+                retained ? "PASS" : "FAIL");
+            const bool retired = advance(60001) && WaitForSingleObject(process, 3000) == WAIT_OBJECT_0;
+            std::printf("[%s] the real preview process exits at the simulated idle deadline\n",
+                retired ? "PASS" : "FAIL");
+            ok &= retained && retired;
+        }
+        {
+            std::lock_guard lock(cache.mutex_);
+            cache.worker_clock_ = {};
+        }
+        cache.Reset();
+        if (process) CloseHandle(process);
+        CloseHandle(initialized); CloseHandle(main_sampled);
+        return ok;
+    }
+    static bool RunIdleLanes() {
+        bool ok = RunWarmProcessLifecycle();
+        const auto check = [&](bool value, const char* name) {
+            std::printf("[%s] %s\n", value ? "PASS" : "FAIL", name);
+            ok &= value;
+        };
+        {
+            ThumbnailCache cache;
+            cache.lane_count_ = 2;
+            HANDLE waiting = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!waiting) return false;
+            cache.worker_clock_ = [&] { SetEvent(waiting); return ULONGLONG{1}; };
+            cache.running_ = true;
+            cache.hosts_[0].worker = std::thread([&] { cache.Worker(1); });
+            const bool ready = WaitForSingleObject(waiting, 1000) == WAIT_OBJECT_0;
+            cache.Reset();
+            check(ready && cache.hosts_[0].pipe == INVALID_HANDLE_VALUE &&
+                  !cache.hosts_[0].child.hProcess,
+                  "an unused auxiliary lane waits without launching a preview process");
+            CloseHandle(waiting);
+        }
+        for (size_t lane : {size_t{0}, size_t{1}}) {
+            ThumbnailCache cache;
+            cache.lane_count_ = 2;
+            HANDLE reader = INVALID_HANDLE_VALUE, writer = INVALID_HANDLE_VALUE;
+            HANDLE sampled = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            HANDLE disconnected = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            HANDLE completed = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            const auto pipe_name = L"\\\\.\\pipe\\PulsePreviewIdleTest-" +
+                std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(cache.pipe_token_);
+            reader = CreateNamedPipeW(pipe_name.c_str(), PIPE_ACCESS_DUPLEX,
+                PIPE_TYPE_BYTE | PIPE_WAIT, 1, 4096, 4096, 0, nullptr);
+            if (reader != INVALID_HANDLE_VALUE)
+                writer = CreateFileW(pipe_name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                    OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+            if (!sampled || !disconnected || !completed || writer == INVALID_HANDLE_VALUE) {
+                check(false, "create isolated idle-lane transport");
+                if (sampled) CloseHandle(sampled);
+                if (disconnected) CloseHandle(disconnected);
+                if (completed) CloseHandle(completed);
+                if (reader != INVALID_HANDLE_VALUE) CloseHandle(reader);
+                if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+                continue;
+            }
+            ConnectNamedPipe(reader, nullptr);
+            auto& lane_pipe = lane ? cache.hosts_[lane - 1].pipe : cache.pipe_;
+            lane_pipe = writer;
+            ULONGLONG now = 1;
+            cache.worker_clock_ = [&] {
+                SetEvent(sampled);
+                if (cache.items_.contains(L"idle-animation")) SetEvent(completed);
+                return now;
+            };
+            std::thread peer([&] {
+                ipc::PreviewRequest wire;
+                while (ipc::ReadAll(reader, &wire, sizeof(wire))) {
+                    if (wire.path_chars > 32768) break;
+                    std::wstring path(wire.path_chars, L'\0');
+                    if (!ipc::ReadAll(reader, path.data(), wire.path_chars * sizeof(wchar_t))) break;
+                    ipc::PreviewResponse response;
+                    response.request_id = wire.request_id; response.generation = wire.generation;
+                    response.kind = ipc::PreviewContentKind::Text;
+                    if (!ipc::WriteAll(reader, &response, sizeof(response))) break;
+                }
+                if (GetLastError() == ERROR_BROKEN_PIPE) SetEvent(disconnected);
+            });
+            cache.running_ = true;
+            auto& worker = lane ? cache.hosts_[lane - 1].worker : cache.worker_;
+            worker = std::thread([&] { cache.Worker(lane); });
+            bool ready = WaitForSingleObject(sampled, 1000) == WAIT_OBJECT_0;
+            const auto advance = [&](ULONGLONG tick) {
+                {
+                    std::lock_guard lock(cache.mutex_);
+                    ResetEvent(sampled);
+                    now = tick;
+                }
+                cache.cv_.notify_all();
+                return WaitForSingleObject(sampled, 1000) == WAIT_OBJECT_0;
+            };
+            const ULONGLONG timeout = lane == 0 ? 60000 : 10000;
+            ready &= advance(timeout);
+            check(ready && WaitForSingleObject(disconnected, 0) == WAIT_TIMEOUT,
+                  "idle preview transport remains warm before its deadline");
+            {
+                std::lock_guard lock(cache.mutex_);
+                ThumbnailCache::Request request;
+                request.id = 1; request.epoch = cache.epoch_.load(); request.pixels = 512;
+                request.path = L"fixture.gif"; request.key = L"idle-animation";
+                ThumbnailCache::Pending pending;
+                pending.id = request.id;
+                pending.interests[0] = {true, false, 0, cache.consumers_[0].epoch};
+                cache.pending_[request.key] = pending;
+                cache.queue_.push_back(std::move(request));
+            }
+            cache.cv_.notify_all();
+            const bool active = WaitForSingleObject(completed, 1000) == WAIT_OBJECT_0;
+            ready &= advance(timeout + 1);
+            check(active && ready && WaitForSingleObject(disconnected, 0) == WAIT_TIMEOUT,
+                  "servicing an animation request renews the helper idle interval");
+            ready &= advance(timeout * 2 - 1);
+            check(ready && WaitForSingleObject(disconnected, 0) == WAIT_TIMEOUT,
+                  "recently active preview stays connected until its renewed deadline");
+            ready &= advance(timeout * 2);
+            const bool retired = WaitForSingleObject(disconnected, 1000) == WAIT_OBJECT_0;
+            cache.Reset();
+            peer.join();
+            check(ready && retired && lane_pipe == INVALID_HANDLE_VALUE,
+                  lane == 0 ? "main helper transport closes after its longer warm interval" :
+                              "auxiliary helper releases its transport at the exact idle deadline");
+            CloseHandle(reader); CloseHandle(sampled); CloseHandle(disconnected); CloseHandle(completed);
+        }
+        return ok;
+    }
     static bool RunTransport() {
         bool ok = true;
         unsigned passed = 0, failed = 0;
@@ -327,7 +508,7 @@ struct ThumbnailCacheTestAccess {
     }
     static bool Run() {
         ThumbnailCache cache;
-        bool ok = true;
+        bool ok = RunIdleLanes();
         auto check = [&](bool result, const char* name) {
             std::printf("[%s] %s\n", result ? "PASS" : "FAIL", name);
             ok &= result;
@@ -348,6 +529,42 @@ struct ThumbnailCacheTestAccess {
             item.cost = cost;
             cache.StoreResult(request(key), std::move(item));
         };
+        const std::wstring changed_path = LR"(C:\fixtures\same.gif)";
+        const auto content_key = cache.Key(changed_path, 256, 7, 42);
+        const auto frame_key = cache.Key(changed_path, 256, 7, 42, 1);
+        const auto thumbnail_key = cache.Key(changed_path, 128, 7, 42) + L":thumbnail";
+        const auto properties_key = cache.Key(changed_path, 0, 7, 42) + L":properties";
+        const auto sibling_key = cache.Key(changed_path + L".backup", 128, 7, 42);
+        const auto other_folder_key = cache.Key(LR"(C:\fixtures-other\same.gif)", 128, 7, 42);
+        for (const auto& key : {content_key, frame_key, thumbnail_key, properties_key, sibling_key, other_folder_key})
+            insert(key, 3);
+        const auto stale_content = request(content_key);
+        cache.queue_.push_back(stale_content);
+        const auto unaffected = request(other_folder_key);
+        cache.queue_.push_back(unaffected);
+        const auto before_invalidation = cache.ContentRevision();
+        cache.InvalidatePath(LR"(c:\FIXTURES\same.gif)");
+        check(cache.items_.size() == 2 && cache.cache_bytes_ == 6 && cache.lru_.size() == 2 &&
+              cache.items_.contains(sibling_key) && cache.items_.contains(other_folder_key) &&
+              !cache.pending_.contains(content_key) && cache.pending_.contains(other_folder_key) &&
+              cache.queue_.size() == 1 && cache.queue_.front().id == unaffected.id &&
+              cache.ContentRevision() > before_invalidation,
+              "known replacement invalidates successful frames thumbnails and properties with unchanged metadata only for its path");
+        const auto replacement_content = request(content_key);
+        ThumbnailCache::Item replacement_item;
+        replacement_item.kind = ipc::PreviewContentKind::Text;
+        replacement_item.text = L"replacement";
+        replacement_item.cost = 4;
+        check(!cache.StoreResult(stale_content, {}) &&
+              cache.pending_.at(content_key).id == replacement_content.id &&
+              cache.StoreResult(replacement_content, std::move(replacement_item)) &&
+              cache.items_.at(content_key).text == L"replacement",
+              "replacement request for the identical content key rejects an old in-flight decode");
+        cache.InvalidatePath(LR"(C:\fixtures\)", true);
+        check(cache.items_.size() == 1 && cache.items_.contains(other_folder_key) &&
+              cache.cache_bytes_ == 3 && cache.pending_.contains(other_folder_key),
+              "explicit directory refresh respects path boundaries and preserves other folders");
+        cache.Reset();
         for (int i = 0; i < 128; ++i) insert(std::to_wstring(i));
         cache.Touch(cache.items_.at(L"0"));
         insert(L"128");
@@ -452,6 +669,22 @@ struct ThumbnailCacheTestAccess {
         };
         cache.SetNotifyWindow(main_window, main);
         cache.SetNotifyWindow(quick_window, quick);
+        insert(cache.Key(LR"(C:\unrelated\cached.png)", 128, 0, 0));
+        clear_notifications();
+        const auto before_miss = cache.ContentRevision();
+        cache.InvalidatePath(LR"(C:\fixtures\absent.png)");
+        cache.InvalidatePath(LR"(C:\fixtures\absent-folder)", true);
+        check(cache.ContentRevision() == before_miss && main_window && quick_window &&
+              !GetUpdateRect(main_window, nullptr, FALSE) && !GetUpdateRect(quick_window, nullptr, FALSE),
+              "unrelated file changes leave revision and both consumer update regions unchanged");
+        const auto pending_key = cache.Key(LR"(C:\fixtures\pending.png)", 128, 0, 0);
+        const auto stale_pending = enqueue(pending_key, main);
+        const auto before_pending = cache.ContentRevision();
+        cache.InvalidatePath(LR"(C:\fixtures\pending.png)");
+        check(cache.ContentRevision() > before_pending && !cache.pending_.contains(pending_key) &&
+              cache.queue_.empty() && !cache.StoreResult(stale_pending, {}) &&
+              GetUpdateRect(main_window, nullptr, FALSE) && GetUpdateRect(quick_window, nullptr, FALSE),
+              "pending-only invalidation repaints consumers and rejects the cancelled in-flight result");
         clear_notifications();
         auto both = enqueue(L"shared", main);
         auto duplicate = enqueue(L"shared", quick);

@@ -5,6 +5,7 @@
 
 #pragma once
 #include "localization.h"
+#include "path_utils.h"
 #include <shlobj.h>
 #include <array>
 #include <span>
@@ -22,8 +23,7 @@ struct KnownFolderLabel {
 inline std::wstring KnownFolderPathKey(std::wstring_view path) {
     std::wstring key(path);
     for (auto& c : key) if (c == L'/') c = L'\\';
-    if (key.starts_with(L"\\\\?\\UNC\\")) key = L"\\\\" + key.substr(8);
-    else if (key.starts_with(L"\\\\?\\")) key.erase(0, 4);
+    if (key.starts_with(L"\\\\?\\")) key = StripExtendedPathPrefix(key);
     while (key.size() > 3 && key.back() == L'\\') key.pop_back();
     return key;
 }

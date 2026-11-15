@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace pulse::app {
+namespace pulse {
 
 // Workers retain only this mailbox. Closing and posting share a lock, so no
 // producer can post after Close returns. Messages carry identity, never ownership.
@@ -51,4 +51,4 @@ private:
     std::vector<T> results_;
 };
 
-} // namespace pulse::app
+} // namespace pulse

@@ -19,7 +19,6 @@ RecycleResult RecycleAuthorized(const std::vector<std::wstring>& paths,
         [&](float, const std::wstring& path, size_t done, size_t total) { if (progress) progress(done, total, path); }});
     result.error = completed.hr; result.cancelled = completed.cancelled; result.failed_path = completed.failed_path;
     result.identity_mismatch = completed.hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
-    if (result.identity_mismatch) result.error = E_ACCESSDENIED;
     for (const auto& item : completed.items) {
         if (FAILED(item.hr) || item.skipped || item.destination.empty()) continue;
         if (std::find(paths.begin(), paths.end(), item.source) == paths.end()) continue;

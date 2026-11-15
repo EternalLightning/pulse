@@ -21,8 +21,8 @@ struct RecycleResult {
 };
 using RecycleCancelled = std::function<bool()>;
 using RecycleProgress = std::function<void(size_t, size_t, const std::wstring&)>;
-// STA worker only, after host admission. The shared IFileOperation engine
-// requests recycling and retains the Shell permanent-deletion warning.
+// STA worker only, after host admission. Shell's recycle-only API returns
+// failures to Pulse without offering or executing permanent deletion.
 RecycleResult RecycleAuthorized(const std::vector<std::wstring>& paths,
     const RecycleCancelled& cancelled = {}, const RecycleProgress& progress = {},
     const std::vector<FileIdentity>& expected_identities = {});

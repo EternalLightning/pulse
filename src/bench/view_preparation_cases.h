@@ -134,7 +134,7 @@ inline int RunViewPreparationCases(pulse::AppState& s) {
         "hiding details invalidates the outstanding metadata version");
 
     tab.current_path = app::MakeSettingsPath(L"duplicates");
-    s.dup_volumes_mailbox = std::make_shared<app::WindowResultMailbox<std::vector<index::VolumeInfo>>>(
+    s.dup_volumes_mailbox = std::make_shared<WindowResultMailbox<std::vector<index::VolumeInfo>>>(
         s.hwnd, WM_DUP_VOLUMES);
     s.dup_volume_cache_tick = 0;
     s.dup_volume_cache_pending = false;

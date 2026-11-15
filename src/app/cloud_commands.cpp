@@ -6,7 +6,7 @@
 #include "cloud_commands.h"
 #include "cloud_refresh_paths.h"
 #include "cloud_root_catalog.h"
-#include "cloud_sync_probe.h"
+#include "../fs/cloud_sync_probe.h"
 #include "app_commands.h"
 #include "app_navigation.h"
 #include "archive_navigation.h"
@@ -42,7 +42,7 @@ void RunPin(AppState& s, fs::CloudPinAction action) {
     auto cancel = std::make_shared<std::atomic<bool>>(false);
     s.cloud_pin_cancel = cancel;
     if (!s.cloud_pin_mailbox)
-        s.cloud_pin_mailbox = std::make_shared<app::WindowResultMailbox<app::CloudPinCompletion>>(s.hwnd, WM_CLOUD_PIN_DONE);
+        s.cloud_pin_mailbox = std::make_shared<WindowResultMailbox<app::CloudPinCompletion>>(s.hwnd, WM_CLOUD_PIN_DONE);
     const auto mailbox = s.cloud_pin_mailbox;
     try {
         std::thread([paths = std::move(paths), action, cancel, mailbox] {
@@ -166,10 +166,10 @@ bool TickCloudStatus(AppState& s) {
         }
         dirty = true;
     }
-    auto& probe = app::CloudSyncProbe::Instance();
+    auto& probe = fs::CloudSyncProbe::Instance();
     const ULONGLONG now = GetTickCount64();
     const uint64_t sync_revision = probe.Revision();
-    if ((now - s.cloud_status_tick >= app::CloudSyncProbe::kSyncingRecheckMs ||
+    if ((now - s.cloud_status_tick >= fs::CloudSyncProbe::kSyncingRecheckMs ||
         s.cloud_sync_revision != sync_revision) &&
         IsWindowVisible(s.hwnd) && !IsIconic(s.hwnd) && s.hitTestVmValid) {
         s.cloud_status_tick = now;

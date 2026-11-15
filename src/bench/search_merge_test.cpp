@@ -5,18 +5,19 @@
 
 #include "../index/search_result_merge.h"
 #include "../index/index_query.h"
+#include <windows.h>
+#include <shlwapi.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdio>
 #include <limits>
-#include <windows.h>
 
 using namespace pulse::index;
 
 namespace {
 
-// Preserve the former value-based implementation as an independent output oracle.
+// Independent full-sort oracle for the shared provider ordering.
 SearchResult PreviousMerge(const Query& query, SearchResult local, SearchResult network) {
     SearchResult result;
     result.total = local.total + network.total;
@@ -30,18 +31,17 @@ SearchResult PreviousMerge(const Query& query, SearchResult local, SearchResult 
     const CompiledQuery compiled = ParseQuery(query.needle);
     if (query.rank || query.sort != ResultSort::Index) {
         auto compare_name = [](const Hit& a, const Hit& b) {
-            const int name = CompareStringOrdinal(a.name.c_str(), -1, b.name.c_str(), -1, TRUE);
-            if (name != CSTR_EQUAL) return name == CSTR_LESS_THAN ? -1 : 1;
-            const int path = CompareStringOrdinal(a.path.c_str(), -1, b.path.c_str(), -1, TRUE);
-            return path == CSTR_LESS_THAN ? -1 : path == CSTR_GREATER_THAN ? 1 : 0;
+            return StrCmpLogicalW(a.name.c_str(), b.name.c_str());
         };
-        std::sort(result.hits.begin(), result.hits.end(), [&](const Hit& a, const Hit& b) {
+        std::stable_sort(result.hits.begin(), result.hits.end(), [&](const Hit& a, const Hit& b) {
             if (query.rank) {
                 const int as = RankName(a.name.data(), static_cast<uint32_t>(a.name.size()), a.is_dir, compiled);
                 const int bs = RankName(b.name.data(), static_cast<uint32_t>(b.name.size()), b.is_dir, compiled);
                 if (as != bs) return as > bs;
-                return compare_name(a, b) < 0;
+                return false;
             }
+            if ((query.sort == ResultSort::Size || query.sort == ResultSort::Mtime) && a.is_dir != b.is_dir)
+                return a.is_dir;
             int cmp = 0;
             if (query.sort == ResultSort::Size && a.size != b.size) cmp = a.size < b.size ? -1 : 1;
             else if (query.sort == ResultSort::Mtime && a.mtime != b.mtime) cmp = a.mtime < b.mtime ? -1 : 1;
@@ -177,7 +177,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        check(equivalent, "all ranking, sort, direction and page outputs match the former implementation");
+        check(equivalent, "all ranking, sort, direction and page outputs match the full-sort provider ordering");
         check(Same(local, local_before) && Same(network, network_before) &&
               local.hits.data() == local_storage && network.hits.data() == network_storage,
               "provider snapshots and their storage remain unchanged");

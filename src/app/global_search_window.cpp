@@ -83,7 +83,6 @@ struct GlobalSearchWindow::Impl {
     index::SearchResult local_result, network_result;
     bool local_ready = false, network_ready = false;
     index::ContentSearchClient contents;
-    ComPtr<ID2D1Factory> factory;
     ComPtr<ID2D1RenderTarget> target;
     ComPtr<IDWriteFactory> write_factory;
     ComPtr<ID2D1SolidColorBrush> brush;
@@ -130,6 +129,11 @@ struct GlobalSearchWindow::Impl {
     int PageSize() const { return std::max(1, static_cast<int>((height - kHeader - kTabs - kFooter) / kRow)); }
     float ViewHeight() const { return std::max(1.0f, height - kFooter - 136); }
     float MaxScroll() const { return std::max(0.0f, static_cast<float>(rows.size()) * kRow - ViewHeight()); }
+    int ResultRowAt(float x, float y) const {
+        if (x < 0 || x >= width || y < 136 || y >= height - kFooter) return -1;
+        const int row = static_cast<int>((y - 136 + scroll_y) / kRow);
+        return row >= 0 && row < static_cast<int>(rows.size()) ? row : -1;
+    }
     bool AnimationsEnabled() const {
         if (motion_override >= 0) return motion_override != 0;
         BOOL enabled = TRUE;
@@ -351,7 +355,6 @@ struct GlobalSearchWindow::Impl {
     }
     bool EnsureTarget() {
         if (target) return true;
-        if (!factory && FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory.GetAddressOf()))) return false;
         if (!write_factory && FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(write_factory.GetAddressOf())))) return false;
         RECT rect{}; GetClientRect(hwnd, &rect);
         if (compositor.NeedsRecovery()) {
@@ -675,13 +678,18 @@ struct GlobalSearchWindow::Impl {
                 } else if (x >= width - 126 && x < width - 12 && !current_folder.empty()) {
                     FocusControl(Focus::Current); ActivateFocusedControl();
                 }
-            } else if (y >= 136 && y < height - kFooter) {
+            } else if (const int row = ResultRowAt(x, y); row >= 0) {
                 FocusControl(Focus::Results);
-                selected = static_cast<int>((y - 136 + scroll_y) / kRow); ClampSelection(false); Invalidate();
+                selected = row; ClampSelection(false); Invalidate();
             }
             if (IsWindowVisible(hwnd) && y < 76) FocusControl(Focus::Edit); return 0;
         }
-        case WM_LBUTTONDBLCLK: if (GET_Y_LPARAM(lp) >= Px(136) && GET_Y_LPARAM(lp) < Px(height - kFooter)) Open(false); return 0;
+        case WM_LBUTTONDBLCLK: {
+            const int row = ResultRowAt(static_cast<float>(GET_X_LPARAM(lp)) / scale,
+                static_cast<float>(GET_Y_LPARAM(lp)) / scale);
+            if (row >= 0) { selected = row; ClampSelection(false); Open(false); }
+            return 0;
+        }
         case WM_MOUSEWHEEL:
             Scroll(-GET_WHEEL_DELTA_WPARAM(wp) / static_cast<float>(WHEEL_DELTA) * kRow * 3);
             return 0;

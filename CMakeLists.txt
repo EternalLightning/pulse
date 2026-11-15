@@ -165,7 +165,7 @@ target_link_libraries(pulse_crash_reporter PUBLIC shell32 pulse_localization)
 
 add_library(pulse_text STATIC src/common/text_decode.cpp)
 
-add_executable(pulse_text_compare_test src/bench/text_compare_test.cpp src/app/text_diff.cpp)
+add_executable(pulse_text_compare_test src/bench/text_compare_test.cpp src/model/text_diff.cpp)
 target_link_libraries(pulse_text_compare_test PRIVATE pulse_text)
 
 add_executable(pulse_tab_indicator_animation_test src/bench/tab_indicator_animation_test.cpp)
@@ -226,7 +226,7 @@ add_executable(pulse_index_test
     src/index/network_index.cpp
     src/index/search_result_merge.cpp
     src/index/change_tracking.cpp)
-target_link_libraries(pulse_index_test PRIVATE shell32 mpr advapi32 pulse_user_storage)
+target_link_libraries(pulse_index_test PRIVATE shell32 shlwapi mpr advapi32 pulse_user_storage)
 target_sources(pulse_index_test PRIVATE src/bench/network_index_regression_test.cpp)
 target_compile_definitions(pulse_index_test PRIVATE PULSE_NETWORK_INDEX_TESTING=1)
 
@@ -235,12 +235,14 @@ add_executable(pulse_search_merge_test
     src/index/search_result_merge.cpp
     src/index/index_query.cpp
     src/index/search_kinds.cpp)
+target_link_libraries(pulse_search_merge_test PRIVATE shlwapi)
 
 add_executable(pulse_index_migration_test
     src/bench/index_migration_test.cpp
     src/index/index_migration.cpp)
 add_executable(pulse_index_engine_test
     src/bench/index_engine_test.cpp
+    src/index/search_result_merge.cpp
     src/index/index_engine.cpp
     src/index/change_tracking.cpp
     src/index/index_visibility.cpp
@@ -272,7 +274,7 @@ add_executable(pulse_index_perf src/bench/index_perf_main.cpp)
 add_executable(pulse_removable_index_policy_test src/bench/removable_index_policy_test.cpp
     src/index/index_config.cpp src/index/index_query.cpp src/index/search_kinds.cpp
     src/index/search_result_merge.cpp src/index/filename_pinyin.cpp)
-target_link_libraries(pulse_removable_index_policy_test PRIVATE pulse_user_storage advapi32 shell32)
+target_link_libraries(pulse_removable_index_policy_test PRIVATE pulse_user_storage advapi32 shell32 shlwapi)
 
 add_executable(pulse_index_host_stress src/bench/index_host_stress.cpp)
 
@@ -334,7 +336,7 @@ add_executable(pulse_network_access_test src/bench/network_access_test.cpp
     src/app/network_connect.cpp src/app/network_locations.cpp src/bench/localization_test.rc)
 target_link_libraries(pulse_network_access_test PRIVATE pulse_localization ole32 oleaut32 uuid user32)
 
-# Optional static include-boundary check; no third-party Python packages required.
+# Check the UI include boundary on pulse builds when Python is available.
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
     add_custom_target(pulse_ui_dependency_check
@@ -348,8 +350,9 @@ target_link_libraries(pulse_typography_cache_test PRIVATE dwrite user32 gdi32)
 add_executable(pulse_search_client_routing_test
     src/bench/search_client_routing_test.cpp
     src/index/index_client.cpp src/index/network_agent_client.cpp
+    src/index/index_config.cpp
     src/index/index_query.cpp src/index/search_result_merge.cpp src/index/search_kinds.cpp)
-target_link_libraries(pulse_search_client_routing_test PRIVATE user32 shell32 advapi32)
+target_link_libraries(pulse_search_client_routing_test PRIVATE user32 shell32 shlwapi advapi32 pulse_user_storage)
 add_executable(pulse_fs_enumeration_test
     src/bench/fs_enumeration_test.cpp src/fs/fs_enum.cpp)
 target_link_libraries(pulse_fs_enumeration_test PRIVATE shell32 shlwapi netapi32)
@@ -389,6 +392,9 @@ endif()
 list(APPEND PULSE_APP_SOURCES src/index/network_agent_client.cpp)
 if(PULSE_APP_SOURCES)
     add_executable(pulse WIN32 ${PULSE_APP_SOURCES})
+    if(TARGET pulse_ui_dependency_check)
+        add_dependencies(pulse pulse_ui_dependency_check)
+    endif()
     set_target_properties(pulse PROPERTIES OUTPUT_NAME "Pulse")
     add_custom_command(TARGET pulse POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -698,7 +704,7 @@ add_executable(pulse_app_controllers_test
     src/app/system_ctx_model.cpp src/app/system_ctx_registry.cpp
     src/app/context_menu_controller.cpp
     src/shell_host/ctx_handlers.cpp
-    src/app/session.cpp src/app/session_tab_model.cpp
+    src/app/session.cpp
     src/app/tab_group_model.cpp
     src/app/single_instance_coordinator.cpp
     src/app/tray_controller.cpp
@@ -825,7 +831,7 @@ endforeach()
 foreach(model_fixture IN ITEMS quick_access_badges entry_order_hold drive_view breadcrumb staging_tray pane_filter pane_animation folder_grouping)
     add_executable(pulse_${model_fixture}_test
         src/bench/${model_fixture}_test.cpp src/bench/localization_test.rc
-        src/app/app_model.cpp src/app/places.cpp src/app/entry_sort.cpp
+        src/app/app_model.cpp src/model/places.cpp src/app/entry_sort.cpp
         src/app/entry_order_hold.cpp src/app/snapshot_patch.cpp src/app/link_resolve.cpp
         src/app/date_groups.cpp src/ui/view_layout.cpp src/model/search_query.cpp
         src/app/column_view_model.cpp src/index/index_query.cpp src/index/search_kinds.cpp
@@ -870,7 +876,7 @@ add_executable(pulse_high_contrast_frame_test EXCLUDE_FROM_ALL src/bench/high_co
 target_link_libraries(pulse_high_contrast_frame_test PRIVATE user32)
 
 add_executable(pulse_text_diff_ui_test src/bench/text_diff_ui_test.cpp
-    src/bench/localization_test.rc src/app/text_diff.cpp src/ui/text_diff_window.cpp
+    src/bench/localization_test.rc src/model/text_diff.cpp src/ui/text_diff_window.cpp
     src/ui/ui_compositor.cpp src/ui/fluent_components.cpp src/ui/typography.cpp
     src/ui/tab_shape.cpp src/ui/dialog_lifecycle.cpp src/ui/window_material.cpp)
 target_link_libraries(pulse_text_diff_ui_test PRIVATE pulse_text pulse_localization
@@ -885,18 +891,13 @@ add_executable(pulse_utf8_atomic_test src/bench/utf8_atomic_test.cpp)
 get_target_property(json_model_sources pulse_quick_access_badges_test SOURCES)
 list(FILTER json_model_sources EXCLUDE REGEX "quick_access_badges_test\\.cpp$")
 add_executable(pulse_json_persistence_test src/bench/json_persistence_test.cpp ${json_model_sources}
-    src/app/session.cpp src/app/session_tab_model.cpp src/app/tab_group_model.cpp
+    src/app/session.cpp src/app/tab_group_model.cpp
     src/app/app_prefs.cpp src/app/startup_launch.cpp src/app/default_file_manager.cpp
     src/app/folder_view_prefs.cpp src/app/context_menu_prefs.cpp
     src/app/builtin_menu_items.cpp src/model/builtin_menu_items.cpp)
 target_link_libraries(pulse_json_persistence_test PRIVATE
     pulse_sqlite pulse_localization pulse_text pulse_user_storage pulse_shell_query_client
     shell32 ole32 uuid shlwapi netapi32 bcrypt secur32 advapi32 user32)
-get_target_property(session_windows_sources pulse_json_persistence_test SOURCES)
-list(FILTER session_windows_sources EXCLUDE REGEX "json_persistence_test\\.cpp$")
-add_executable(pulse_session_windows_test src/bench/session_windows_test.cpp ${session_windows_sources})
-get_target_property(session_windows_libraries pulse_json_persistence_test LINK_LIBRARIES)
-target_link_libraries(pulse_session_windows_test PRIVATE ${session_windows_libraries})
 
 add_executable(pulse_snapshot_patch_link_test EXCLUDE_FROM_ALL
     src/bench/snapshot_patch_link_test.cpp src/app/snapshot_patch.cpp
@@ -1200,7 +1201,7 @@ target_link_libraries(pulse_app_core_remaining_test PRIVATE user32 shell32 ole32
 
 add_executable(pulse_app_integrations_recovery_test EXCLUDE_FROM_ALL
     src/bench/app_integrations_recovery_test.cpp src/app/system_ctx_registry.cpp
-    src/app/system_ctx_model.cpp src/app/places.cpp src/fs/fs_enum.cpp src/ui/view_layout.cpp)
+    src/app/system_ctx_model.cpp src/model/places.cpp src/fs/fs_enum.cpp)
 target_compile_options(pulse_app_integrations_recovery_test PRIVATE /Gy /Gw)
 target_link_options(pulse_app_integrations_recovery_test PRIVATE /OPT:REF)
 target_link_libraries(pulse_app_integrations_recovery_test PRIVATE
@@ -1235,7 +1236,7 @@ add_executable(pulse_audit_ui_remaining_test EXCLUDE_FROM_ALL
     src/ui/dialog_lifecycle.cpp src/ui/tab_shape.cpp src/ui/edit_host.cpp src/ui/svg_bitmap.cpp
     src/model/batch_rename.cpp src/model/search_query.cpp src/index/index_query.cpp
     src/index/search_kinds.cpp src/index/filename_pinyin.cpp src/fs/fs_enum.cpp
-    src/common/localization.cpp src/common/text_decode.cpp src/app/text_diff.cpp
+    src/common/localization.cpp src/common/text_decode.cpp src/model/text_diff.cpp
     src/ops/file_lock_owner.cpp src/ops/clipboard.cpp src/ipc/shell_interaction_client.cpp
     src/ipc/shell_query_client.cpp src/ipc/shell_client.cpp)
 target_include_directories(pulse_audit_ui_remaining_test PRIVATE src "${CMAKE_BINARY_DIR}/generated")
@@ -1336,6 +1337,8 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
         src/bench/archive_navigation_test.cpp ${architecture_sources})
     add_executable(pulse_multiwindow_application_test
         src/bench/multiwindow_application_test.cpp ${architecture_sources})
+    add_executable(pulse_content_refresh_test EXCLUDE_FROM_ALL
+        src/bench/content_refresh_test.cpp ${architecture_sources})
     add_executable(pulse_titlebar_layout_test
         src/bench/titlebar_layout_test.cpp ${architecture_sources})
     add_executable(pulse_permission_operation_prompt_ui_test
@@ -1400,7 +1403,7 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     target_link_libraries(pulse_playback_ui_test PRIVATE ${architecture_libraries})
     pulse_enable_lumatext(pulse_playback_ui_test)
     add_dependencies(pulse_playback_ui_test pulse_preview)
-    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test pulse_file_selection_ui_test pulse_group_toolbar_ui_test)
+    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_content_refresh_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test pulse_file_selection_ui_test pulse_group_toolbar_ui_test)
         target_link_libraries(${architecture_target} PRIVATE ${architecture_libraries})
         foreach(architecture_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
             get_target_property(architecture_value pulse ${architecture_property})
@@ -1496,7 +1499,7 @@ target_compile_definitions(pulse_network_config_reload_test PRIVATE PULSE_NETWOR
 target_link_libraries(pulse_network_config_reload_test PRIVATE pulse_user_storage shell32 mpr advapi32)
 
 add_executable(pulse_cloud_features_test src/bench/cloud_features_test.cpp
-    src/fs/cloud_hydrate.cpp src/fs/cloud_pin.cpp src/app/cloud_roots.cpp src/app/cloud_root_catalog.cpp src/app/cloud_sync_probe.cpp
+    src/fs/cloud_hydrate.cpp src/fs/cloud_pin.cpp src/app/cloud_roots.cpp src/app/cloud_root_catalog.cpp src/fs/cloud_sync_probe.cpp
     src/app/cloud_download.cpp)
 target_link_libraries(pulse_cloud_features_test PRIVATE pulse_localization advapi32 shell32 shlwapi ole32 uuid propsys)
 
@@ -1624,11 +1627,17 @@ add_library(pulse_shell_file_operations STATIC src/shell_host/file_operations.cp
 target_link_libraries(pulse_shell_file_operations PUBLIC ole32 shell32 uuid user32)
 add_executable(pulse_shell_recycle_contract_test EXCLUDE_FROM_ALL src/bench/shell_recycle_contract_test.cpp)
 target_link_libraries(pulse_shell_recycle_contract_test PRIVATE ole32 shell32 uuid user32)
+add_executable(pulse_shell_transfer_result_test EXCLUDE_FROM_ALL src/bench/shell_transfer_result_test.cpp)
+target_link_libraries(pulse_shell_transfer_result_test PRIVATE ole32 shell32 uuid user32)
 add_executable(pulse_shell_operation_integration_test EXCLUDE_FROM_ALL
     src/bench/shell_operation_integration_test.cpp src/bench/localization_test.rc ${operation_fixture_sources})
 target_include_directories(pulse_shell_operation_integration_test PRIVATE src)
 target_link_libraries(pulse_shell_operation_integration_test PRIVATE ${operation_fixture_libraries} pulse_shell_file_operations)
 add_dependencies(pulse_shell_operation_integration_test pulse_shell)
+add_executable(pulse_operation_permission_policy_test EXCLUDE_FROM_ALL
+    src/bench/operation_permission_policy_test.cpp src/bench/localization_test.rc ${operation_fixture_sources})
+target_include_directories(pulse_operation_permission_policy_test PRIVATE src)
+target_link_libraries(pulse_operation_permission_policy_test PRIVATE ${operation_fixture_libraries})
 add_dependencies(pulse_folder_actions_test pulse_shell)
 
 get_property(folder_operation_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
@@ -1645,7 +1654,7 @@ foreach(folder_operation_target IN LISTS folder_operation_targets)
             target_sources(${folder_operation_target} PRIVATE src/ops/shell_transfer.cpp)
         endif()
     endif()
-    if("${folder_operation_sources}" MATCHES "(recycle_fileop|audit_ops_followup_test|ops_test_main)\\.cpp")
+    if("${folder_operation_sources}" MATCHES "(recycle_fileop|operation_elevation_adapter|audit_ops_followup_test|ops_test_main)\\.cpp")
         target_link_libraries(${folder_operation_target} PRIVATE pulse_shell_file_operations)
     endif()
 endforeach()

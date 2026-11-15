@@ -8,9 +8,9 @@
 #include "../ops/archive.h"
 // app_runtime.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
-#include "frame_profile.h"
+#include "../common/frame_profile.h"
 #include "cloud_roots.h"
-#include "cloud_sync_probe.h"
+#include "../fs/cloud_sync_probe.h"
 #include "../ui/cloud_status.h"
 #include "app_column_view.h"
 #include "app_surface_scroll.h"
@@ -1660,7 +1660,7 @@ void PrepareViewState(AppState& s) {
 
 ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     if (!s.pane) return {};
-    app::VmProfileProbe vm_profile;
+    profile::VmProfileProbe vm_profile;
     s.changes.visible_paths.clear();
     s.changes.visible_badges.clear();
     s.home_catalog.FillDriveLabels(s.sidebar);
@@ -1668,7 +1668,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
         s.pane->focused, s.maximized, s.darkMode, &s.places, s.sidebarCollapsedMask,
         s.sidebarHiddenMask, s.starredExpanded, &s.sidebarOrder,
         s.sidebarQuickAccessHiddenMask, include_status);
-    vm_profile.Mark(app::VmPhase::Base);
+    vm_profile.Mark(profile::VmPhase::Base);
     vm.details_motion_sampled = true;
     vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden,
         s.ctxMenuPrefs.BuiltinOrder(app::BuiltinMenuSurface::RowButtons));
@@ -1680,13 +1680,13 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     auto& toolbar_enabled = vm.toolbar_commands_enabled.emplace();
     for (size_t i = 0; i < toolbar_enabled.size(); ++i)
         toolbar_enabled[i] = app::IsCommandEnabled(toolbar_commands[i], command_context);
-    vm_profile.Mark(app::VmPhase::Commands);
+    vm_profile.Mark(profile::VmPhase::Commands);
     vm.operation_center_open = s.operationCenter && s.operationCenter->IsVisible();
     for (const auto& task : CollectOperationCenterTasks(s)) {
         if (task.active || task.phase == ops::OpPhase::Queued) ++vm.operation_count;
         else if (task.phase == ops::OpPhase::Failed) vm.operation_failed = true;
     }
-    vm_profile.Mark(app::VmPhase::Operations);
+    vm_profile.Mark(profile::VmPhase::Operations);
     const ULONGLONG fold_now = app::PaneAnimationTimeMs();
     for (auto& group : vm.sidebar) {
         if (group.id == static_cast<int>(app::SidebarSectionId::QuickAccess)) {
@@ -1700,9 +1700,9 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
             group.expansion = it->second.from + (it->second.to - it->second.from) * eased;
         }
     }
-    vm_profile.Mark(app::VmPhase::Sidebar);
+    vm_profile.Mark(profile::VmPhase::Sidebar);
     app::FillWindowTabStrip(vm, s.window_tabs);
-    vm_profile.Mark(app::VmPhase::Tabs);
+    vm_profile.Mark(profile::VmPhase::Tabs);
     vm.show_pinned_tab_names = s.appPrefs.show_pinned_tab_names;
     vm.settings_list_smart_date = s.appPrefs.list_smart_date;
     vm.settings_list_zebra_rows = s.appPrefs.list_zebra_rows;
@@ -1724,9 +1724,9 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
         vm.sidebar_pin_drag_index = s.pinDragRun;
         if (s.pinGapVisible) vm.sidebar_pin_gap_line_y = s.pinGapLineY;
     }
-    vm_profile.Mark(app::VmPhase::Other);
+    vm_profile.Mark(profile::VmPhase::Other);
     if (include_status) FillStatusVm(s, vm);
-    vm_profile.Mark(app::VmPhase::Status);
+    vm_profile.Mark(profile::VmPhase::Status);
     // 1B-2 overlays: cut rows, drag feedback, breadcrumb hover.
     if (!s.cutPaths.empty()) {
         app::Tab* tab = ActiveTab(s);
@@ -1794,7 +1794,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
             if (off != s.tagOffsets.end()) it.y_offset = off->second;
         }
     }
-    vm_profile.Mark(app::VmPhase::Other);
+    vm_profile.Mark(profile::VmPhase::Other);
     // Title-bar tabs: emit the tentative drag order and slide offsets.
     if (s.pane && !vm.tabs.empty()) {
         const bool dragging = s.tabDragging && s.tabOrder.size() == vm.tabs.size();
@@ -1833,7 +1833,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
             if (off != s.chipOffsets.end()) vm.tab_groups[gi].x_offset = off->second;
         }
     }
-    vm_profile.Mark(app::VmPhase::Tabs);
+    vm_profile.Mark(profile::VmPhase::Tabs);
     // Staging tray card stack: live window (top first) + exiting ghosts.
     {
         const auto entries = TrayDeckEntries(s.tray, static_cast<size_t>(TrayStackTop(s)),
@@ -1925,7 +1925,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.sidebar_scroll = std::clamp(s.sidebarScroll, 0.0f, s.renderer.SidebarMaxScroll(
         vm, static_cast<float>(s.compositor.Width()),
         static_cast<float>(s.compositor.Height())));
-    vm_profile.Mark(app::VmPhase::Tray);
+    vm_profile.Mark(profile::VmPhase::Tray);
     // Right details panel: selection info + size walk + tag chips.
     vm.details_visible = s.showDetailsPanel;
     if (s.showDetailsPanel) {
@@ -2025,7 +2025,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
         }
     }
     vm.tray_drop = s.dropTray;
-    vm_profile.Mark(app::VmPhase::Details);
+    vm_profile.Mark(profile::VmPhase::Details);
     vm.drag_badge = s.dropBadge;
     vm.drag_badge_x = s.dropBadgeX;
     vm.drag_badge_y = s.dropBadgeY;
@@ -2037,7 +2037,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.tooltip_text = s.tooltipText;
     vm.tooltip_x = static_cast<float>(s.hoverPoint.x);
     vm.tooltip_y = static_cast<float>(s.hoverPoint.y);
-    vm_profile.Mark(app::VmPhase::Other);
+    vm_profile.Mark(profile::VmPhase::Other);
     FillPaneSlots(s, vm);
     s.home_catalog.Fill(vm.pane, &s.places);
     vm.pane.network_discovery_disabled = NetworkDiscoveryDisabled(s);
@@ -2057,7 +2057,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
         vm.status.status_text = l10n::Get(vm.pane.home_loading ? l10n::StringId::HomeLoading : l10n::StringId::Home);
         vm.status.selection_text.clear();
     }
-    vm_profile.Mark(app::VmPhase::Panes);
+    vm_profile.Mark(profile::VmPhase::Panes);
     FillChangePopover(s, vm);
     FillFolderSizes(s, vm);
     vm.window_effect = ui::WindowEffectFromId(s.appPrefs.window_effect);
@@ -2304,7 +2304,7 @@ std::wstring TooltipForHover(AppState& s) {
             if (app::IsUnderCloudFilesRoot(full)) {
                 const uint64_t modified = (static_cast<uint64_t>(entry.mtime.dwHighDateTime) << 32) | entry.mtime.dwLowDateTime;
                 tooltip += L" · " + l10n::Get(ui::CloudStatusLabel(entry.attrs,
-                    app::CloudSyncProbe::Instance().Lookup(full, modified)));
+                    fs::CloudSyncProbe::Instance().Lookup(full, modified)));
             }
             // Narrow panes drop columns; keep their facts reachable on hover.
             if (tab->view_mode == ui::ViewMode::Details) {

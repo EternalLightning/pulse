@@ -35,15 +35,7 @@ bool InScope(const std::wstring &path, const std::wstring &root, bool recursive)
         return false;
     return recursive || key.substr(base.size() + (base.ends_with(L'\\') ? 0 : 1)).find(L'\\') == std::wstring::npos;
 }
-bool SystemPath(const std::wstring &path) {
-    const auto key = ContentScopeKey(path);
-    if (key.size() < 3 || key[1] != L':')
-        return false;
-    const auto top =
-        key.substr(3, key.find(L'\\', 3) == std::wstring::npos ? std::wstring::npos : key.find(L'\\', 3) - 3);
-    return top == L"windows" || top == L"$recycle.bin" || top == L"system volume information" ||
-           top == L"pagefile.sys" || top == L"hiberfil.sys" || top == L"swapfile.sys";
-}
+
 struct Job {
     std::wstring path, version;
     uint64_t size = 0, modified = 0, maximum = 0;
@@ -452,7 +444,7 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                     const auto ext =
                         dot == std::wstring::npos ? std::wstring_view{} : std::wstring_view(path).substr(dot);
                     if (!IsIndexedContentExtension(ext) || cache.excluded(path) ||
-                        (request.skip_system_locations && SystemPath(path)))
+                        (request.skip_system_locations && ContentSystemPath(path)))
                         return true;
                     const auto root = std::find_if(config.roots.begin(), config.roots.end(),
                                                    [&](const auto &scope) { return InScope(path, scope.path, true); });
@@ -541,7 +533,7 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                         }
                     } close_finds{stack};
                     auto open = [&](const std::wstring &path) {
-                        if (cache.excluded(path) || (request.skip_system_locations && SystemPath(path)))
+                        if (cache.excluded(path) || (request.skip_system_locations && ContentSystemPath(path)))
                             return;
                         if (!ContentRequestIntersectsPath(request, path))
                             return;

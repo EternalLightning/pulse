@@ -43,6 +43,7 @@ BuiltinMenuItem CurrentBuiltinItem(BuiltinMenuItem item) {
 } // namespace
 
 void ContextMenuPrefs::ResetToDefaults() {
+    saves_enabled_ = true;
     // Explorer parity for the visible groups; 发送到 and the image / system verbs
     // stay off until the user asks for them from the settings page.
     software = true;
@@ -343,6 +344,7 @@ std::wstring ContextMenuPrefs::ToJson() const {
 bool ContextMenuPrefs::FromJson(const std::wstring& json) {
     const pulse::json::Document doc(json);
     if (!doc.Is(pulse::json::Kind::Object)) return false;
+    saves_enabled_ = true;
     const auto version = pulse::json::ExtractInt(doc, L"version", 1);
     builtin_hidden = 0;
     const auto builtin = ExtractObject(doc, L"pulse_items");
@@ -535,15 +537,23 @@ void ContextMenuPrefs::CoalesceCompressCatalog() {
 }
 
 bool ContextMenuPrefs::Load() {
+    saves_enabled_ = false;
     const std::wstring dir = GetPulseDataDir();
     if (dir.empty()) return false;
     std::wstring json;
-    if (!ReadUtf8File(dir + L"\\context_menu.json", json) || json.empty()) return false;
-    return FromJson(json);
+    const auto path = dir + L"\\context_menu.json";
+    const DWORD attrs = GetFileAttributesW(path.c_str());
+    const DWORD error = attrs == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    const bool missing = attrs == INVALID_FILE_ATTRIBUTES &&
+        (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND);
+    const bool loaded = ReadUtf8File(path, json) && FromJson(json);
+    saves_enabled_ = loaded || missing;
+    return loaded;
 }
 
 bool ContextMenuPrefs::Save() const {
     if (!persist) return true;
+    if (!saves_enabled_) return false;
     const std::wstring dir = GetPulseDataDir();
     if (dir.empty()) return false;
     return WriteUtf8FileAtomic(dir + L"\\context_menu.json", ToJson());

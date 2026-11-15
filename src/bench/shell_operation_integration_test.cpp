@@ -8,10 +8,12 @@
 #include "fixture_cleanup.h"
 #include <objbase.h>
 #include <shlobj.h>
+#include <sddl.h>
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <clocale>
 #include <cwchar>
 #include <filesystem>
 #include <fstream>
@@ -154,6 +156,8 @@ public:
     }
 };
 
+#include "operation_permission_cases.h"
+
 void CopyAndMove(const fs::path& root, HWND owner) {
     Session session(root, owner);
     session.manager.SetVerifyCopies(true);
@@ -204,6 +208,41 @@ void NativeByteProgress(const fs::path& root) {
         observed == fs::file_size(source) && expected == observed,
         "native Shell calls our progress adapter with real transferred byte counts");
     CoUninitialize();
+}
+
+void OverwriteConflicts(const fs::path& root, HWND owner) {
+    Session session(root, owner);
+    const auto source = root / L"source" / L"same.txt", destination = root / L"destination";
+    fs::create_directories(destination);
+    Write(source, "first copy");
+    auto status = session.Run(Request(OpType::Copy, {source}, destination));
+    Check(status.phase == OpPhase::Completed && Read(destination / source.filename()) == "first copy",
+        "initial copy creates the destination and retains its operation history");
+    for (const auto attributes : {FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_HIDDEN}) {
+        const auto incoming = "replacement-" + std::to_string(attributes);
+        Write(source, incoming);
+        if (!SetFileAttributesW((destination / source.filename()).c_str(), attributes))
+            throw std::runtime_error("cannot set isolated overwrite attributes");
+        uint64_t handled = 0;
+        unsigned conflicts = 0;
+        status = session.Run(Request(OpType::Copy, {source}, destination), [&] {
+            const auto pending = session.manager.PendingConflict();
+            if (!pending || pending->token == handled) return;
+            handled = pending->token; ++conflicts;
+            session.manager.ResolveConflict(pending->token, ConflictChoice::Replace, false);
+        });
+        Check(status.phase == OpPhase::Completed && !status.elevation_retry_available && conflicts == 1 && Read(source) == incoming &&
+            Read(destination / source.filename()) == incoming,
+            "repeated same-name Replace preserves source and overwrites destination bytes");
+    }
+    Write(source, "moved replacement");
+    status = session.Run(Request(OpType::Move, {source}, destination), [&] {
+        if (const auto pending = session.manager.PendingConflict())
+            session.manager.ResolveConflict(pending->token, ConflictChoice::Replace, false);
+    });
+    Check(status.phase == OpPhase::Completed && !status.elevation_retry_available && !fs::exists(source) &&
+        Read(destination / source.filename()) == "moved replacement",
+        "same-name move replaces the existing target and removes only its source");
 }
 
 void MergeConflicts(const fs::path& root, HWND owner) {
@@ -639,6 +678,7 @@ void OptionalExfatRead(const fs::path& root, HWND owner) {
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    std::setlocale(LC_CTYPE, ".UTF8");
     setvbuf(stdout, nullptr, _IONBF, 0);
     HANDLE token = nullptr;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
@@ -661,12 +701,13 @@ int wmain(int argc, wchar_t** argv) {
             else if (option == L"--fixture-parent") fixture_parent = argv[++i];
             else cross_volume_parent = argv[++i];
         } else {
-            std::printf("usage: pulse_shell_operation_integration_test [--case transfer|merge|rename|cancel|undo|names-attributes|case-recovery|paths|shell-path|create-delete|cross-volume|exfat-read|native-progress] [--fixture-parent DIRECTORY] [--cross-volume-parent DIRECTORY]\n");
+            std::printf("usage: pulse_shell_operation_integration_test --case CASE [--fixture-parent DIRECTORY] [--cross-volume-parent DIRECTORY]\nCASES: transfer overwrite permissions permissions-admin (real UAC) merge rename cancel undo names-attributes case-recovery paths shell-path create-delete cross-volume exfat-read native-progress\n");
             return 2;
         }
     }
     if (selected.empty()) { std::printf("[FAIL] select an explicit --case before running file operations\n"); return 2; }
-    if (selected != L"transfer" && selected != L"merge" && selected != L"rename" &&
+    if (selected != L"transfer" && selected != L"overwrite" && selected != L"permissions" &&
+        selected != L"permissions-admin" && selected != L"merge" && selected != L"rename" &&
         selected != L"cancel" && selected != L"undo" && selected != L"create-delete" && selected != L"cross-volume" &&
         selected != L"exfat-read" && selected != L"native-progress" && selected != L"names-attributes" &&
         selected != L"case-recovery" && selected != L"paths" && selected != L"shell-path") return 2;
@@ -682,6 +723,9 @@ int wmain(int argc, wchar_t** argv) {
     try {
         if (!owner) throw std::runtime_error("Shell owner creation failed");
         if (run(L"transfer")) CopyAndMove(root / L"transfer", owner);
+        if (run(L"overwrite")) OverwriteConflicts(root / L"overwrite", owner);
+        if (run(L"permissions") || run(L"permissions-admin"))
+            PermissionOperations(root / L"permissions", owner, run(L"permissions-admin"));
         if (run(L"native-progress")) NativeByteProgress(root / L"native-progress");
         if (run(L"merge")) MergeConflicts(root / L"merge", owner);
         if (run(L"rename")) LateRenameConflicts(root / L"rename", owner);

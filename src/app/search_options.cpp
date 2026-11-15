@@ -5,6 +5,7 @@
 
 #include "app_internal.h"
 #include "search_query.h"
+#include "content_search_options.h"
 #include "../index/content_index.h"
 #include "../index/persistent_index_policy.h"
 #include "../ui/address_search_layout.h"
@@ -115,9 +116,7 @@ void StartIndexedContentSearch(AppState& s, app::Tab& tab, const std::wstring& r
     tab.content_sort_override=false;
     tab.content_scanned_files=0;
     tab.content_total_files=0;
-    request.maximum_file_bytes = config.maximum_file_bytes;
-    request.maximum_document_bytes = config.maximum_document_bytes;
-    request.skip_system_locations = true;
+    app::ConfigureContentSearchOptions(config, request);
     if (!request.needles.empty()) request.needle = request.needles.front();
     tab.pending_generation = request.generation;
     tab.search_content_active = true;

@@ -206,6 +206,7 @@ bool Capture(pulse::GlobalSearchWindowTestPeer::State& state, const std::wstring
     Microsoft::WRL::ComPtr<IWICStream> stream;
     Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
     Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
+    Microsoft::WRL::ComPtr<ID2D1Factory> d2d_factory;
     HRESULT result = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
     if (SUCCEEDED(result)) result = factory->CreateBitmap(width, height, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &image);
     state.EnsureTarget();
@@ -214,7 +215,8 @@ bool Capture(pulse::GlobalSearchWindowTestPeer::State& state, const std::wstring
     state.target.Reset(); state.brush.Reset();
     auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE);
     properties.dpiX = properties.dpiY = 96 * state.scale;
-    if (SUCCEEDED(result)) result = state.factory->CreateWicBitmapRenderTarget(image.Get(), properties, &state.target);
+    if (SUCCEEDED(result)) result = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d_factory.GetAddressOf());
+    if (SUCCEEDED(result)) result = d2d_factory->CreateWicBitmapRenderTarget(image.Get(), properties, &state.target);
     if (SUCCEEDED(result)) result = state.target->CreateSolidColorBrush(D2D1::ColorF(0xffffff), &state.brush);
     if (SUCCEEDED(result)) {
         state.Paint();
@@ -275,10 +277,71 @@ int wmain(int argc, wchar_t** argv) {
     const bool smooth_only = argc > 1 && std::wstring_view(argv[1]) == L"--smooth-scroll";
     const bool text_render_only = argc > 1 && std::wstring_view(argv[1]) == L"--text-render-only";
     const bool storage_isolation_only = argc > 1 && std::wstring_view(argv[1]) == L"--storage-isolation-only";
-    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only && !storage_isolation_only && !appearance_only && !text_render_only
+    const bool mouse_only = argc > 1 && std::wstring_view(argv[1]) == L"--mouse-hit-test";
+    std::filesystem::path output = argc > 1 && std::wstring_view(argv[1]) != L"--routing-only" && !smooth_only && !storage_isolation_only && !appearance_only && !text_render_only && !mouse_only
         ? argv[1] : L"bench_data/global-search-window";
     int failed = 0;
     const auto check = [&](bool ok, const char* label) { std::cout << (ok ? "[PASS] " : "[FAIL] ") << label << '\n'; if (!ok) ++failed; };
+    if (mouse_only) {
+        pulse::GlobalSearchWindow window;
+        window.SetAppearance(false, pulse::ui::WindowEffect::None, L"", D2D1::ColorF(0x0078d4));
+        auto& state = pulse::GlobalSearchWindowTestPeer::Get(window);
+        WNDCLASSW cls{};
+        cls.lpfnWndProc = pulse::GlobalSearchWindowTestPeer::State::WindowProc;
+        cls.hInstance = GetModuleHandleW(nullptr);
+        cls.lpszClassName = L"Pulse.GlobalSearch.MouseFixture";
+        RegisterClassW(&cls);
+        state.hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, cls.lpszClassName, L"", WS_POPUP,
+            -30000, -30000, 780, 488, nullptr, nullptr, cls.hInstance, &state);
+        check(state.hwnd != nullptr, "create mouse fixture without starting search workers");
+        if (state.hwnd) {
+            int opened = 0;
+            std::wstring opened_path;
+            window.SetOpenCallback([&](const std::wstring& path, bool location) {
+                if (!location) { ++opened; opened_path = path; }
+            });
+            for (float scale : {1.0f, 1.25f, 1.5f, 1.75f, 2.0f}) {
+                state.scale = scale;
+                state.rows = {{L"first.txt", L"C:\\fixture\\first.txt", {}, false},
+                    {L"last.txt", L"C:\\fixture\\last.txt", {}, false}};
+                state.selected = 0;
+                ShowWindow(state.hwnd, SW_SHOWNOACTIVATE);
+                const auto click = [&](UINT message, float x, float y) {
+                    SendMessageW(state.hwnd, message, 0, MAKELPARAM(state.Px(x), state.Px(y)));
+                };
+                // Include the exact end of the last row and both horizontal client edges.
+                for (const POINT point : {POINT{80, 312}, POINT{80, 400}, POINT{-1, 250},
+                        POINT{780, 250}, POINT{80, 440}}) {
+                    const int before = opened;
+                    click(WM_LBUTTONDOWN, static_cast<float>(point.x), static_cast<float>(point.y));
+                    click(WM_LBUTTONDBLCLK, static_cast<float>(point.x), static_cast<float>(point.y));
+                    check(state.selected == 0 && opened == before && window.Visible(),
+                        "blank or outside clicks preserve selection and keep search open");
+                }
+                click(WM_LBUTTONDOWN, 80, 250);
+                check(state.selected == 1, "click selects an existing result at each DPI");
+                state.selected = 0;
+                const int before = opened;
+                click(WM_LBUTTONDBLCLK, 80, 250);
+                check(opened == before + 1 && opened_path == L"C:\\fixture\\last.txt" && !window.Visible(),
+                    "double-click opens the hit result and hides search at each DPI");
+                state.rows.clear();
+                ShowWindow(state.hwnd, SW_SHOWNOACTIVATE);
+                click(WM_LBUTTONDOWN, 80, 150);
+                click(WM_LBUTTONDBLCLK, 80, 150);
+                check(state.selected == 1 && opened == before + 1 && window.Visible(),
+                    "empty results ignore clicks and keep search open");
+            }
+            state.rows.resize(10);
+            state.scroll_y = 33.5f;
+            check(state.ResultRowAt(80, 190) == 0 && state.ResultRowAt(80, 191) == 1 &&
+                state.ResultRowAt(80, 135) == -1 && state.ResultRowAt(80, 440) == -1,
+                "row hit test uses fractional scroll and clips header and footer");
+        }
+        window.Shutdown();
+        CoUninitialize();
+        return failed ? 1 : 0;
+    }
     if (text_render_only) {
         namespace typography = pulse::ui::typography;
         const auto previous_mode = typography::CurrentTextRenderMode();

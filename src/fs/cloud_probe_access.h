@@ -10,7 +10,7 @@
 #include <wrl/client.h>
 #include <cstdint>
 
-namespace pulse::app::cloud_probe_access {
+namespace pulse::fs::cloud_probe_access {
 
 // System.StorageProviderState.
 inline constexpr PROPERTYKEY kStorageProviderState = {
@@ -31,4 +31,4 @@ uint32_t ReadState(ShellItem& item) {
     return state;
 }
 
-} // namespace pulse::app::cloud_probe_access
+} // namespace pulse::fs::cloud_probe_access

@@ -11,8 +11,8 @@
 #include <cstdio>
 #include <mutex>
 
-namespace pulse::app {
-std::wstring GetPulseDataDir() { return {}; }
+namespace pulse::storage {
+std::wstring ConfigurationRoot() { return {}; }
 }
 
 int main() {

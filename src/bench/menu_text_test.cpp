@@ -5,6 +5,8 @@
 
 #include "../ui/fluent_menu.h"
 #include "../ui/animation_clock.h"
+#include "../ui/edit_frame_scheduler.h"
+#include "../ui/lumatext_renderer.h"
 #include "../ui/popup_origin.h"
 #include "../ui/edit_host.h"
 #include "snapshot_output.h"
@@ -19,6 +21,7 @@
 
 namespace pulse::ui {
 struct FluentMenuTestPeer {
+#include "menu_scroll_render_cases.h"
     static bool Begin(FluentMenu& menu, std::vector<FluentMenuItem> items) {
         menu.model_.SetItems(std::move(items));
         menu.model_.Layout(menu.compositor_->DwriteFactory(), menu.scale_);
@@ -542,6 +545,14 @@ int wmain(int argc, wchar_t** argv) {
             std::printf("[COMMAND_REFRESH] updates=16 maximum_ms=%.3f\n", maximum_ms);
             menu.Dismiss(); DestroyWindow(owner); CoUninitialize();
             return failures ? 1 : 0;
+        }
+        if (argc == 2 && (wcscmp(argv[1], L"--scroll-rendering") == 0 ||
+                         wcscmp(argv[1], L"--scroll-cadence") == 0)) {
+            const int result = wcscmp(argv[1], L"--scroll-cadence") == 0
+                ? FluentMenuTestPeer::RunScrollCadence(owner, compositor)
+                : FluentMenuTestPeer::RunScrollRendering(owner, compositor);
+            DestroyWindow(owner); CoUninitialize();
+            return result;
         }
         if (argc == 2 && wcscmp(argv[1], L"--smooth-scroll") == 0) {
             using Peer = FluentMenuTestPeer;

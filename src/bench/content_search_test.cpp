@@ -6,6 +6,8 @@
 #include "../index/content_search.h"
 #include "../index/content_search_client.h"
 #include "../common/text_decode.h"
+#include "../app/content_search_options.h"
+#include "../index/content_scope.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -101,7 +103,49 @@ void PumpClient(index::ContentSearchClient& client, int polls,
 #include "content_task_enumeration_cases.h"
 #include "content_transient_error_cases.h"
 
+int RunContentScopeCases() {
+    const auto root = std::filesystem::path(FixtureRoot());
+    std::error_code error;
+    std::filesystem::create_directories(root / L"Windows", error);
+    Check(!error && WriteBytes((root / L"Windows" / L"kept.txt").wstring(), {'s', 'c', 'o', 'p', 'e'}),
+        L"prepare an ordinary Windows-named subdirectory in the isolated fixture");
+    index::ContentIndexConfig config;
+    config.maximum_file_bytes = 123456;
+    config.maximum_document_bytes = 234567;
+    index::ContentSearchRequest request;
+    app::ConfigureContentSearchOptions(config, request);
+    Check(request.skip_system_locations && request.maximum_file_bytes == config.maximum_file_bytes &&
+        request.maximum_document_bytes == config.maximum_document_bytes,
+        L"interactive and saved searches share configured limits and system-location policy");
+    request.root = root.wstring(); request.needle = L"scope";
+    index::ContentSearchProgress progress;
+    const auto hits = Search(request, progress);
+    Check(hits.size() == 1 && hits[0].path == (root / L"Windows" / L"kept.txt").wstring(),
+        L"manual scanning retains ordinary Windows-named children");
+    size_t enumerations = 0;
+    index::ContentSearchEnumerationHooks hooks;
+    hooks.first = [&](const auto&, auto&) -> HANDLE {
+        ++enumerations; SetLastError(ERROR_NO_MORE_FILES); return INVALID_HANDLE_VALUE;
+    };
+    std::atomic_bool cancelled{false};
+    for (const auto* system : {LR"(C:\Windows)", LR"(\\?\C:\Windows)", LR"(C:\$Recycle.Bin)"}) {
+        request.root = system;
+        Check(index::RunContentSearch(request, cancelled, [](const auto&, auto) { return true; }, &hooks),
+            L"an excluded system root completes without opening files");
+    }
+    Check(enumerations == 0, L"system roots are excluded before enumeration, including extended paths");
+    request.root.clear();
+    Check(!index::ContentRequestIncludesPath(request, LR"(C:\Windows\file.txt)") &&
+        index::ContentRequestIncludesPath(request, LR"(C:\WindowsOld\file.txt)"),
+        L"cache and manual scan preserve system-path component boundaries");
+    if (root.parent_path().filename() == L"bench_data" && root.filename().wstring().starts_with(L"contenttest-"))
+        std::filesystem::remove_all(root, error);
+    Check(!error, L"isolated content-scope fixture cleaned");
+    return failed ? 1 : 0;
+}
+
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--content-scope-only") return RunContentScopeCases();
     if (argc > 1 && std::wstring_view(argv[1]) == L"--filename-query-boundaries") {
         struct Case { const wchar_t* query; bool foo; bool other; };
         const Case cases[] = {

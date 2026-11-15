@@ -7,8 +7,8 @@
 #include "../common/localization.h"
 #include <cstdio>
 
-namespace pulse::app {
-std::wstring GetPulseDataDir() { return {}; }
+namespace pulse::storage {
+std::wstring ConfigurationRoot() { return {}; }
 }
 
 int wmain() {

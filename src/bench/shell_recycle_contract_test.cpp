@@ -20,14 +20,15 @@ int main() {
     check(sink.PreDeleteItem(0x202, nullptr) == S_OK && sink.failure == S_OK,
         "valid 0x202 transfer flags do not fabricate a recycle-unavailable failure");
     const DWORD flags = OperationFlags(request, false);
-    check((flags & FOFX_RECYCLEONDELETE) && (flags & FOF_WANTNUKEWARNING) && !(flags & FOF_NOCONFIRMATION),
-        "recycle forces the Recycle Bin contract and never automatically confirms permanent deletion");
+    check((flags & FOFX_RECYCLEONDELETE) && !(flags & FOF_WANTNUKEWARNING) && !(flags & FOF_NOCONFIRMATION),
+        "recycle neither requests native permanent-delete confirmation nor automatically approves it");
     callbacks.cancelled = [] { return true; };
     ProgressSink cancelled(request, item, callbacks, 0);
     check(cancelled.PreDeleteItem(0x202, nullptr) == HRESULT_FROM_WIN32(ERROR_CANCELLED),
         "0x202 recycle callbacks still honor cancellation before mutation");
     callbacks.cancelled = {};
     sink.PostDeleteItem(0x202, nullptr, COPYENGINE_E_RECYCLE_FORCE_NUKE, nullptr);
+    sink.FinishOperations(COPYENGINE_E_RECYCLE_FORCE_NUKE);
     check(sink.failure == COPYENGINE_E_RECYCLE_FORCE_NUKE && sink.result.hr == COPYENGINE_E_RECYCLE_FORCE_NUKE,
         "actual provider recycle refusal is preserved for the existing confirmation path");
     ProgressSink unproven(request, item, callbacks, 0);

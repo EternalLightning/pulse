@@ -21,7 +21,8 @@ HRESULT DisconnectResult(uint32_t type) {
 }
 
 const wchar_t* DisconnectMessage(uint32_t type) {
-    if (type == REQ_AUTHORIZED_DELETE || type == REQ_AUTHORIZED_RECYCLE)
+    if (type == REQ_AUTHORIZED_DELETE || type == REQ_AUTHORIZED_RECYCLE ||
+        type == REQ_AUTHORIZED_DELETE_ELEVATED)
         return L"Deletion outcome is unknown; the destructive request was not replayed.";
     if (type == REQ_SHELL_LAUNCH || type == REQ_CTX_INVOKE)
         return L"Shell 操作结果未知；为避免重复执行，未自动重试。";
@@ -331,7 +332,7 @@ uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
 
 uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
                                       bool recycle, HWND owner, const std::vector<FileIdentity>& expected_identities,
-                                      const Owner& callbacks) {
+                                      const Owner& callbacks, bool elevation_authorized) {
     if (!running_.load() || paths.empty() || token == 0 ||
         (callbacks && !callbacks->active.load())) return 0;
     if (!expected_identities.empty() && (expected_identities.size() != paths.size() ||
@@ -339,7 +340,9 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
     Pending pending;
     pending.id = next_id_.fetch_add(1);
     BindOwner(pending.id, callbacks);
-    pending.type = recycle ? REQ_AUTHORIZED_RECYCLE : REQ_AUTHORIZED_DELETE;
+    pending.type = elevation_authorized && !recycle
+        ? REQ_AUTHORIZED_DELETE_ELEVATED
+        : (recycle ? REQ_AUTHORIZED_RECYCLE : REQ_AUTHORIZED_DELETE);
     pending.retried = true; // Never replay a destructive request on a new host.
     bool sent = false;
     std::shared_ptr<Connection> connection;
@@ -351,8 +354,8 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
             epoch.LowPart = created.dwLowDateTime; epoch.HighPart = created.dwHighDateTime;
             PayloadWriter writer;
             writer.PutU64(epoch.QuadPart); writer.PutU64(token); writer.PutStringArray(paths);
-            if (!expected_identities.empty()) WriteFileIdentities(writer, expected_identities);
-            if (recycle) writer.PutU64(reinterpret_cast<uintptr_t>(owner));
+            WriteFileIdentities(writer, expected_identities);
+            if (recycle || elevation_authorized) writer.PutU64(reinterpret_cast<uintptr_t>(owner));
             pending.payload = writer.data();
             connection = CurrentConnection();
             {
@@ -570,15 +573,22 @@ void ShellClient::ReaderThread() {
                     Dispatch(h.request_id, false, [&](Callbacks& cb) {
                         if (cb.transfer_bytes) cb.transfer_bytes(h.request_id, done, total);
                     });
-            } else if (h.type == RSP_FILE_OPERATION_DONE) {
+            } else if (h.type == RSP_FILE_OPERATION_ITEMS || h.type == RSP_FILE_OPERATION_DONE) {
                 ShellOperationResult result;
-                if (!ReadShellOperationResult(r, result)) { result.hr = E_INVALIDARG; result.items.clear(); }
+                if (!ReadShellOperationResult(r, result)) break;
+                const bool terminal = h.type == RSP_FILE_OPERATION_DONE;
+                if (!terminal && (result.hr != S_OK || result.cancelled || !result.failed_path.empty() || result.items.empty())) break;
                 bool pending = false;
                 {
                     std::lock_guard lock(pending_mutex_);
                     const auto found = pending_.find(h.request_id);
                     if (found != pending_.end() && found->second.type == REQ_FILE_OPERATION) {
-                        pending_.erase(found); pending = true;
+                        auto& items = found->second.file_operation_items;
+                        for (auto& item : result.items) items.push_back(std::move(item));
+                        if (terminal) {
+                            result.items = std::move(items);
+                            pending_.erase(found); pending = true;
+                        }
                     }
                 }
                 if (pending) Dispatch(h.request_id, true, [&](Callbacks& cb) {
@@ -606,7 +616,8 @@ void ShellClient::ReaderThread() {
                     std::lock_guard<std::mutex> lock(pending_mutex_);
                     const auto found = pending_.find(h.request_id);
                     if (found != pending_.end() && found->second.type != REQ_SHELL_LAUNCH && found->second.type != REQ_FILE_OPERATION) {
-                        deletion = found->second.type == REQ_AUTHORIZED_DELETE || found->second.type == REQ_AUTHORIZED_RECYCLE;
+                        deletion = found->second.type == REQ_AUTHORIZED_DELETE || found->second.type == REQ_AUTHORIZED_RECYCLE ||
+                            found->second.type == REQ_AUTHORIZED_DELETE_ELEVATED;
                         pending_.erase(found);
                         pending = true;
                     }

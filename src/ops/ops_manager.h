@@ -6,7 +6,7 @@
 // ops_manager.h — Operation queue, progress status, undo stack (UI-process side).
 //
 // Queued operations are serialized on the operation worker. Copy/move/rename
-// execute through IFileOperation in Pulse.Shell.exe (ShellClient). Context menus have a separate
+// execute through Shell APIs in Pulse.Shell.exe (ShellClient). Context menus have a separate
 // client worker. Submit/Cancel/Undo/Status never run blocking operations on the UI.
 //
 // Undo model (stage 1B-1):
@@ -198,6 +198,7 @@ struct OpStatus {
     std::wstring failed_path; // exact failing endpoint, independent of display text
     bool elevation_retry_available = false;
     std::wstring elevation_source_path;
+    std::wstring elevation_destination_path;
     bool lock_retry_available = false; // single rename can retry without Restart Manager owners
     std::vector<RestoreItemResult> restore_results; // exact selected payload and actual per-item outcome
     std::wstring locked_path;
@@ -522,6 +523,7 @@ private:
     std::optional<QueueItem> active_item_;
     std::optional<QueueItem> lock_retry_;
     std::optional<QueueItem> elevation_retry_;
+    bool shell_elevation_authorized_ = false; // operation worker only; scoped to a consented retry
     std::atomic<bool> lock_retry_active_{false};
     std::atomic<bool> lock_retry_cancel_{false};
     std::atomic<uint64_t> lock_retry_generation_{1};

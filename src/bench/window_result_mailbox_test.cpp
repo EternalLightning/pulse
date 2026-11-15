@@ -3,7 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
-#include "../app/window_result_mailbox.h"
+#include "../common/window_result_mailbox.h"
 #include <cstdio>
 #include <future>
 #include <memory>
@@ -11,7 +11,7 @@
 
 namespace {
 constexpr UINT kMessage = WM_APP + 46;
-using Mailbox = pulse::app::WindowResultMailbox<std::shared_ptr<int>>;
+using Mailbox = pulse::WindowResultMailbox<std::shared_ptr<int>>;
 int failures = 0;
 void Check(bool pass, const char* name) {
     std::printf("[%s] %s\n", pass ? "PASS" : "FAIL", name);

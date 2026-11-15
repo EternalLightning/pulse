@@ -22,6 +22,7 @@
 #include "menu_backdrop.h"
 #include "fluent_components.h"
 #include "smooth_scroll.h"
+#include "edit_frame_scheduler.h"
 
 #include <dwrite_3.h>
 #include <chrono>
@@ -291,6 +292,7 @@ private:
     int max_visible_rows_ = 0;
     float scroll_y_ = 0.0f;
     SmoothScroll scroll_motion_;
+    EditFrameScheduler frame_scheduler_;
     float body_limit_px_ = 0.0f;
     HWND tooltip_ = nullptr;
     std::wstring tooltip_text_;

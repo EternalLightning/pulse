@@ -22,10 +22,12 @@ namespace pulse::ui {
 
 struct Compositor::DialogTitleLayout {
     ComPtr<IDWriteTextLayout> layout;
+    ComPtr<IDWriteRenderingParams2> render_params;
     std::wstring text;
     float width = 0, height = 0;
     float baseline = 0;
     std::uint64_t generation = 0;
+    bool natural_sharp = false;
 };
 
 Compositor::Compositor() = default;
@@ -213,12 +215,26 @@ bool Compositor::DrawDialogTitle(std::wstring_view text, const D2D1_RECT_F& boun
     const float width = rect.right - rect.left, height = rect.bottom - rect.top;
     if (width <= 0 || height <= 0) return false;
     const auto generation = typography::Generation();
+    const bool natural_sharp = typography::CurrentTextRenderMode() == typography::TextRenderMode::Sharp &&
+        !IsHighContrast();
     const auto* cached = dialog_title_layout_.get();
     if (!cached || cached->text != text || cached->width != width || cached->height != height ||
-        cached->generation != generation) {
+        cached->generation != generation || cached->natural_sharp != natural_sharp) {
         auto title = std::make_unique<DialogTitleLayout>();
-        if (FAILED(typography::CreateTextLayout(dwriteFactory_.get(), text.data(),
-            static_cast<UINT32>(text.size()), dialogTitleFormat_.get(), width, height, &title->layout))) return false;
+        if (natural_sharp && textRenderingParams_.get()) {
+            auto* const base = textRenderingParams_.get();
+            // Keep Sharp body text intact; captions use the approved natural outline style.
+            if (FAILED(dwriteFactory_->CreateCustomRenderingParams(
+                base->GetGamma(), base->GetEnhancedContrast(), base->GetGrayscaleEnhancedContrast(),
+                base->GetClearTypeLevel(), DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+                DWRITE_GRID_FIT_MODE_DISABLED, &title->render_params))) title->render_params.reset();
+        }
+        const HRESULT result = title->render_params.get()
+            ? dwriteFactory_->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()),
+                dialogTitleFormat_.get(), width, height, &title->layout)
+            : typography::CreateTextLayout(dwriteFactory_.get(), text.data(),
+                static_cast<UINT32>(text.size()), dialogTitleFormat_.get(), width, height, &title->layout);
+        if (FAILED(result)) return false;
         title->layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         DWRITE_TEXT_METRICS metrics{};
         DWRITE_LINE_METRICS line{};
@@ -227,6 +243,7 @@ bool Compositor::DrawDialogTitle(std::wstring_view text, const D2D1_RECT_F& boun
             FAILED(title->layout->GetLineMetrics(&line, 1, &count)) || count != 1) return false;
         title->baseline = metrics.top + line.baseline;
         title->text = text; title->width = width; title->height = height; title->generation = generation;
+        title->natural_sharp = natural_sharp;
         dialog_title_layout_ = std::move(title);
     }
     const auto& title = *dialog_title_layout_;
@@ -243,7 +260,13 @@ bool Compositor::DrawDialogTitle(std::wstring_view text, const D2D1_RECT_F& boun
     if (!drawn) {
         ComPtr<ID2D1SolidColorBrush> brush;
         if (SUCCEEDED(dc_->CreateSolidColorBrush(foreground, &brush))) {
+            ComPtr<IDWriteRenderingParams> previous;
+            if (title.render_params.get()) {
+                dc_->GetTextRenderingParams(&previous);
+                dc_->SetTextRenderingParams(title.render_params.get());
+            }
             dc_->DrawTextLayout(origin, title.layout.get(), brush.get());
+            if (title.render_params.get()) dc_->SetTextRenderingParams(previous.get());
             drawn = true;
         }
     }
@@ -557,6 +580,7 @@ bool Compositor::UpdateTextRenderingParams(HMONITOR monitor) {
     }
     const bool monitor_changed = text_params_monitor_ && text_params_monitor_ != monitor;
     textRenderingParams_ = std::move(next);
+    dialog_title_layout_.reset();
     text_params_monitor_ = monitor;
     text_params_mode_ = mode;
     dc_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);

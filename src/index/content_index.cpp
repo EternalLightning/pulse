@@ -569,6 +569,10 @@ struct ContentIndex::Impl {
         if (!AllowsPersistentIndex(WorkerPersistentDeviceFacts(result.job.root.path))) return;
         if (result.error) {
             if (result.error == ERROR_SHARING_VIOLATION || result.error == ERROR_LOCK_VIOLATION || result.error == ERROR_RETRY) {
+                // Discovery keeps the old body alive until a later read succeeds.
+                Statement alive(db, "UPDATE documents SET epoch=?2 WHERE path=?1");
+                alive.Text(1, result.job.path); alive.Int(2, epoch);
+                if (!alive.Done()) Error(ERROR_WRITE_FAULT);
                 std::lock_guard lock(mu);
                 auto& retry = retries[result.job.path];
                 retry.change.root = result.job.root;
@@ -1409,8 +1413,7 @@ bool ContentIndex::SearchCached(const ContentSearchRequest& r, const std::atomic
             // older versions. Never surface those rows while pruning catches up.
             if (InternalContentPath(path)) continue;
             if (std::none_of(live_roots.begin(), live_roots.end(), [&](const auto& live) { return path::EqualInsensitive(root, live); })) continue;
-            if (r.roots.empty() && !r.root.empty() && !Under(path, r.root, r.recursive)) continue;
-            if (!r.roots.empty() && std::none_of(r.roots.begin(), r.roots.end(), [&](const auto& scope) { return Under(path, scope, r.recursive); })) continue;
+            if (!ContentRequestIncludesPath(r, path)) continue;
             const uint64_t size = static_cast<uint64_t>(sqlite3_column_int64(candidates.p, 1));
             const uint64_t modified = static_cast<uint64_t>(sqlite3_column_int64(candidates.p, 2));
             const auto dot = path.find_last_of(L'.');
@@ -1576,7 +1579,8 @@ bool ContentIndex::SearchTask(const ContentSearchRequest& request, const std::at
                         // A positive that failed live validation must still be
                         // scanned if a transient file-access failure recovers.
                         cached_positive_paths.insert(ContentScopeKey(hit.path));
-                        if (excluded(hit.path) || std::none_of(config.roots.begin(), config.roots.end(),
+                        if (excluded(hit.path) || !ContentRequestIncludesPath(request, hit.path) ||
+                            std::none_of(config.roots.begin(), config.roots.end(),
                             [&](const auto& root) { return Under(hit.path, root.path); })) continue;
                         WIN32_FILE_ATTRIBUTE_DATA data{};
                         if (!GetFileAttributesExW(LongPath(hit.path).c_str(),GetFileExInfoStandard,&data) ||

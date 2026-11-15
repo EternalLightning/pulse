@@ -66,9 +66,9 @@ bool BadgeIs(const pulse::app::PlacesCatalog& places, const std::wstring& path,
 
 } // namespace
 
-namespace pulse::app {
-std::wstring GetPulseDataDir() { return data_dir; }
-} // namespace pulse::app
+namespace pulse::storage {
+std::wstring ConfigurationRoot() { return data_dir; }
+} // namespace pulse::storage
 
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse;

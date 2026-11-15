@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../index/network_index.h"
+#include "../index/search_result_merge.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -40,10 +41,13 @@ struct NetworkIndexAccess {
         info.error = failed ? L"injected synchronization failure" : L"";
     }
     static SearchResult Search(NetworkIndex& index, const std::wstring& prefix) {
+        Query query; query.path_prefix = prefix; query.limit = 100;
+        return Search(index, query);
+    }
+    static SearchResult Search(NetworkIndex& index, const Query& query) {
         if (!index.search_thread_.joinable())
             index.search_thread_ = std::thread([&] { index.SearchLoop(); });
         static uint32_t id = 100;
-        Query query; query.path_prefix = prefix; query.limit = 100;
         index.SearchAsync(query, ++id);
         SearchResult result;
         for (unsigned retry = 0; retry < 1000; ++retry) {
@@ -58,7 +62,7 @@ struct NetworkIndexAccess {
 
 namespace {
 using namespace pulse::index;
-enum class Scan { Complete, ChildDenied, NextFailed, EmptyRoot, EmptyChild, MissingChild, RootDenied };
+enum class Scan { Ordering, Complete, ChildDenied, NextFailed, EmptyRoot, EmptyChild, MissingChild, RootDenied };
 Scan scan = Scan::Complete;
 unsigned root_next = 0;
 unsigned universal_calls = 0;
@@ -83,6 +87,13 @@ HANDLE WINAPI First(LPCWSTR pattern, FINDEX_INFO_LEVELS, LPVOID data,
                     FINDEX_SEARCH_OPS, LPVOID, DWORD) {
     auto* find = static_cast<WIN32_FIND_DATAW*>(data);
     const bool child = std::wstring(pattern).find(L"\\child\\*") != std::wstring::npos;
+    if (scan == Scan::Ordering) {
+        if (std::wstring(pattern).find(L"\\item2\\*") != std::wstring::npos) {
+            SetLastError(ERROR_FILE_NOT_FOUND); return INVALID_HANDLE_VALUE;
+        }
+        root_next = 0; Fill(find, L"item10"); find->nFileSizeLow = 1;
+        return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));
+    }
     if ((!child && (scan == Scan::EmptyRoot || scan == Scan::RootDenied)) ||
         (child && (scan == Scan::ChildDenied || scan == Scan::EmptyChild || scan == Scan::MissingChild))) {
         SetLastError(scan == Scan::EmptyRoot || scan == Scan::EmptyChild ? ERROR_FILE_NOT_FOUND :
@@ -95,6 +106,16 @@ HANDLE WINAPI First(LPCWSTR pattern, FINDEX_INFO_LEVELS, LPVOID data,
 }
 
 BOOL WINAPI Next(HANDLE handle, LPWIN32_FIND_DATAW find) {
+    if (scan == Scan::Ordering) {
+        if (root_next < 2) {
+            const bool directory = root_next++ == 0;
+            Fill(find, directory ? L"item2" : L"item1", directory);
+            find->nFileSizeLow = directory ? 100 : 2;
+            find->ftLastWriteTime.dwLowDateTime = directory ? 100 : 2;
+            return TRUE;
+        }
+        SetLastError(ERROR_NO_MORE_FILES); return FALSE;
+    }
     if (handle == reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1))) {
         if (scan == Scan::NextFailed) {
             SetLastError(ERROR_BAD_NETPATH);
@@ -226,6 +247,29 @@ int RunNetworkIndexRegressionTests() {
         Check(index.Roots()[0].indexed_items == 0 && index.Roots()[0].online &&
               index.Roots()[0].progress == 100 && index.Roots()[0].error.empty(),
               L"empty root publishes an online empty shard");
+        scan = Scan::Ordering;
+        NetworkIndexAccess::Build(index, root);
+        bool ordered_pages = true;
+        for (bool rank : {false, true}) for (bool desc : {false, true})
+            for (auto sort : {ResultSort::Name, ResultSort::Size, ResultSort::Mtime}) {
+                Query query; query.path_prefix = root; query.limit = 100; query.rank = rank;
+                query.sort = sort; query.sort_desc = desc;
+                const auto all = NetworkIndexAccess::Search(index, query);
+                ordered_pages &= all.hits.size() == 3;
+                if (!rank && !all.hits.empty()) ordered_pages &= all.hits[0].name ==
+                    (sort == ResultSort::Name ? (desc ? L"item10" : L"item1") : L"item2");
+                SearchResult local; local.total = 1;
+                local.hits.push_back({L"C:\\fixture\\item3", L"item3", false, 3, 3});
+                for (size_t offset : {size_t{0}, size_t{1}, size_t{2}}) {
+                    auto page = query; page.offset = offset; page.limit = 1;
+                    auto provider = page; provider.offset = 0; provider.limit += offset;
+                    const auto actual = MergeSearchResults(page, local, NetworkIndexAccess::Search(index, provider));
+                    const auto expected = MergeSearchResults(page, local, all);
+                    ordered_pages &= actual.hits.size() == expected.hits.size() && actual.hits.size() == 1 &&
+                        actual.hits[0].path == expected.hits[0].path;
+                }
+            }
+        Check(ordered_pages, L"real network candidate heap and merged pages share natural order, directory priority and stable rank ties");
     }
     Check(NormalizeNetworkRoot(L"Z:\\folder") == L"\\\\server\\share\\folder" &&
           universal_calls == 2, L"mapped path uses WNet status despite unrelated LastError");

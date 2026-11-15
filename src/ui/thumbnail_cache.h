@@ -55,6 +55,8 @@ public:
     bool Prefetch(const std::wstring& path, DWORD attrs, uint32_t pixels,
                   uint64_t generation, uint64_t modified, uint64_t size);
     void Evict(Consumer consumer = Consumer::Main);
+    // Known file changes and explicit refresh bypass successful memory entries too.
+    void InvalidatePath(const std::wstring& path, bool descendants = false);
     uint64_t ContentRevision() const { return content_revision_.load(std::memory_order_relaxed); }
     // pan_x/pan_y non-null: cover mode (fill dest, crop overflow) with a
     // draggable pan offset in DIPs; values are clamped and written back.
@@ -157,6 +159,7 @@ private:
     bool Connect(size_t lane = 0);
     bool FetchResponse(const Request& request, Item& result, size_t lane = 0);
     std::function<void()> before_response_body_; // regression gate, empty in production
+    std::function<ULONGLONG()> worker_clock_; // deterministic idle/retry clock in regressions
     void StopChild(size_t lane = 0);
     std::wstring Key(const std::wstring& path, uint32_t pixels, uint64_t modified,
                      uint64_t size, uint32_t frame_index = 0) const;

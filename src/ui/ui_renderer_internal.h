@@ -9,6 +9,7 @@
 #include "empty_state_layout.h"
 #include "../common/localization.h"
 #include "../common/display_path.h"
+#include "../common/path_utils.h"
 #include "typography.h"
 #include "name_highlight.h"
 #include "dialog_text_fit.h"
@@ -1382,9 +1383,7 @@ StatusBarMetrics MakeStatusBarMetrics(const WindowViewModel& vm, const D2D1_RECT
 // Containing folder of a full item path, for the search-results path column.
 std::wstring FolderOf(const std::wstring& path) {
     if (path.empty()) return {};
-    std::wstring p = path;
-    if (p.starts_with(L"\\\\?\\UNC\\")) p = L"\\\\" + p.substr(8);
-    else if (p.starts_with(L"\\\\?\\")) p = p.substr(4);
+    std::wstring p = pulse::path::StripExtendedPathPrefix(path);
     while (p.size() > 1 && (p.back() == L'\\' || p.back() == L'/')) p.pop_back();
     const size_t slash = p.find_last_of(L"\\/");
     if (slash == std::wstring::npos) return {};

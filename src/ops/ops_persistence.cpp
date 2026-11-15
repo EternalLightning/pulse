@@ -182,6 +182,13 @@ bool OpsManager::RetryRecovery() {
                 status_.summary = status_.last_error; status_.phase = OpPhase::Failed;
                 continue;
             }
+            if (recovery.was_active && (recovery.request.type == OpType::Rename ||
+                recovery.request.type == OpType::BatchRename)) {
+                all_retryable = false;
+                status_.last_error = L"Recovery stopped: a rename may have partially executed and its original identity cannot be proven; it will not be replayed.";
+                status_.summary = status_.last_error; status_.phase = OpPhase::Failed;
+                continue;
+            }
             if (recovery.request.is_undo && IsMutationOperation(recovery.request.type)) {
                 all_retryable = false;
                 status_.last_error = l10n::Get(l10n::StringId::OperationUndoReservationMissing);
@@ -190,7 +197,7 @@ bool OpsManager::RetryRecovery() {
             }
             // A matching .pulse-copy/.pulse-backup name is not ownership proof.
             // Recovery that first requires destructive reconciliation stops.
-            if (!recovery.request.dest_dir.empty()) {
+            if (recovery.was_active && !recovery.request.dest_dir.empty()) {
                 all_retryable = false;
                 status_.last_error = L"Recovery stopped: temporary-file ownership cannot be proven; nothing was deleted.";
                 status_.summary = status_.last_error;

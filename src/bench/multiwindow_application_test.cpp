@@ -5,6 +5,7 @@
 
 #include "../app/app_internal.h"
 #include "../app/app_exit.h"
+#include "../app/settings_transfer_ui.h"
 #include "../app/app_input.h"
 #include "../app/tab_transfer.h"
 #include "../common/file_identity.h"
@@ -564,23 +565,17 @@ int RunSessionChecks() {
     wc.lpszClassName = app::SingleInstanceCoordinator::WindowClassName();
     RegisterClassW(&wc);
 
-    app::SessionSnapshot legacy;
+    app::WindowSessionSnapshot legacy;
     legacy.sidebar_hidden = 1 << static_cast<int>(app::SidebarSectionId::Tags);
     legacy.quick_access_hidden = 5;
     legacy.sidebar_collapsed = 2;
-    legacy.sidebar_order = app::DefaultSidebarOrder();
-    std::reverse(legacy.sidebar_order.begin(), legacy.sidebar_order.end());
-    legacy.active_path = (root / L"folder").wstring();
-    app::LayoutTabSnapshot old_tab;
-    old_tab.panes.push_back({legacy.active_path});
-    legacy.layout_tabs = {old_tab, old_tab};
-    legacy.windows.assign(3, legacy);
-    Check(app::SaveSession(legacy), "prepare an isolated legacy session with three windows and multiple tabs");
+    legacy.sidebar_order = {5, 3, 4, 2, 0, 1, 7, 6};
+    const std::wstring legacy_json = LR"({"version":8,"sidebarHidden":16,"quickAccessHidden":5,"sidebarCollapsed":2,"sidebarOrder":"5,3,4,2,0,1,7,6","path":"C:\\old","layoutTabs":[{},{}],"windows":[{"path":"C:\\first","layoutTabs":[{},{}]},{"path":"C:\\second"},{"path":"C:\\third"}]})";
+    Check(WriteUtf8FileAtomic(app::GetPulseDataDir() + L"\\session.json", legacy_json),
+        "prepare an isolated legacy session with three windows and multiple tabs");
     for (int cycle = 0; cycle < 3; ++cycle) {
         app::WindowSessionSnapshot preferences;
-        Check(app::LoadSessionPreferences(preferences) && preferences.active_path.empty() &&
-            preferences.layout_tabs.empty() && preferences.tab_groups.empty() &&
-            preferences.sidebar_hidden == legacy.sidebar_hidden &&
+        Check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == legacy.sidebar_hidden &&
             preferences.quick_access_hidden == legacy.quick_access_hidden,
             "startup ignores saved navigation while retaining hidden sidebar sections and links");
         AppState state;
@@ -977,9 +972,21 @@ int RunBackgroundChecks() {
     const auto archive_done = std::make_shared<std::atomic_bool>(false);
     const auto archive_cancel = std::make_shared<std::atomic_bool>(false);
     secondary->archive_operations.push_back({archive_done, archive_cancel});
-    RequestApplicationExit(state);
-    Check(automation.confirmations == 2 && !archive_cancel->load() && !state.core.exiting,
-        "an archive lifetime alone participates in application exit confirmation; decline preserves it");
+    bool restart_handoff = false;
+    RequestApplicationExit(state, [&] { restart_handoff = true; return true; });
+    Check(automation.confirmations == 2 && !archive_cancel->load() && !state.core.exiting && !restart_handoff,
+        "declining application exit preserves archive work and never starts the restart handoff");
+    automation.accept = true;
+    RequestApplicationExit(state, [&] {
+        restart_handoff = true;
+        Check(!state.core.exiting && !state.exit_requested && !secondary->exit_requested,
+            "restart handoff runs after confirmation and before shutting down either window");
+        return false;
+    });
+    Check(automation.confirmations == 3 && restart_handoff && !archive_cancel->load() &&
+        !state.core.exiting && !state.exit_requested && !secondary->exit_requested,
+        "a failed restart handoff leaves every window and its operations running");
+    automation.accept = false;
 
     const auto third = StartBlockedCopy(state, root, L"third");
     Check(third.has_value(), "prepare pending work in the window being closed normally");
@@ -988,26 +995,27 @@ int RunBackgroundChecks() {
     ShowWindow(secondary->hwnd, SW_SHOWNOACTIVATE);
     state.appPrefs.global_search_enabled = true;
     SendMessageW(primary, WM_CLOSE, 0, 0);
-    Check(IsWindowVisible(primary) && automation.confirmations == 3 && state.ops.HasPendingFileOperations(),
+    Check(IsWindowVisible(primary) && automation.confirmations == 4 && state.ops.HasPendingFileOperations(),
         "global search cannot silently hide pending work when close-to-tray is disabled");
     state.appPrefs.global_search_enabled = false;
     SendMessageW(primary, WM_CLOSE, 0, 0);
-    Check(IsWindowVisible(primary) && !state.exit_requested && automation.confirmations == 4 &&
+    Check(IsWindowVisible(primary) && !state.exit_requested && automation.confirmations == 5 &&
         state.ops.HasPendingFileOperations(),
         "declining a multiwindow close keeps its unfinished operation visible");
     automation.accept = true;
     SendMessageW(primary, WM_CLOSE, 0, 0);
-    Check(!IsWindowVisible(primary) && !state.exit_requested && automation.confirmations == 5,
+    Check(!IsWindowVisible(primary) && !state.exit_requested && automation.confirmations == 6,
         "accepting a multiwindow close continues its pending work in the background");
     automation.accept = false;
     SendMessageW(secondary->hwnd, WM_CLOSE, 0, 0);
-    Check(automation.confirmations == 6 && !state.core.exiting && !secondary->exit_requested &&
+    Check(automation.confirmations == 7 && !state.core.exiting && !secondary->exit_requested &&
         state.ops.HasPendingFileOperations(),
         "closing the last visible window confirms exit across retained hidden operations; decline preserves them");
     automation.accept = true;
-    RequestApplicationExit(*secondary);
-    Check(automation.confirmations == 7 && state.core.exiting && archive_cancel->load(),
-        "explicit application exit asks once for all hidden pending work");
+    restart_handoff = false;
+    RequestApplicationExit(*secondary, [&] { restart_handoff = true; return true; });
+    Check(automation.confirmations == 8 && restart_handoff && state.core.exiting && archive_cancel->load(),
+        "a successful restart handoff starts the confirmed exit of all hidden pending work");
     Check(Wait([&] { return secondary->exit_stop_finished.load(std::memory_order_acquire); }) &&
         IsWindow(secondary->hwnd) && !CompleteApplicationExit(*secondary),
         "confirmed exit cancels archives while retaining their owner until the extraction scope unwinds");
@@ -1027,6 +1035,26 @@ int main(int argc, char** argv) {
     wchar_t executable_name[32768]{};
     const DWORD executable_length = GetModuleFileNameW(nullptr, executable_name, ARRAYSIZE(executable_name));
     if (!executable_length || executable_length >= ARRAYSIZE(executable_name)) return 2;
+    if (argc == 2 && std::string(argv[1]) == "--settings-restart-wait-child") {
+        Sleep(31000);
+        return 0;
+    }
+    if (argc == 2 && std::string(argv[1]) == "--settings-restart-wait-only") {
+        std::wstring command = L"\"" + std::wstring(executable_name) + L"\" --settings-restart-wait-child";
+        STARTUPINFOW start{sizeof(start)};
+        PROCESS_INFORMATION child{};
+        if (!CreateProcessW(executable_name, command.data(), nullptr, nullptr, FALSE,
+            CREATE_NO_WINDOW, nullptr, nullptr, &start, &child)) return 2;
+        const bool waited = WaitForSettingsRestart(child.dwProcessId);
+        Check(waited && WaitForSingleObject(child.hProcess, 0) == WAIT_OBJECT_0,
+            "restart receiver waits for the retiring process even when shutdown exceeds thirty seconds");
+        WaitForSingleObject(child.hProcess, INFINITE);
+        CloseHandle(child.hThread);
+        CloseHandle(child.hProcess);
+        Check(!WaitForSettingsRestart(GetCurrentProcessId()) && !WaitForSettingsRestart(0),
+            "restart receiver rejects invalid and self process identities");
+        return failures ? 1 : 0;
+    }
     const std::filesystem::path executable(executable_name);
     if (executable.filename() == L"pulse-open-marker.exe") {
         std::ofstream marker(executable.parent_path() / L"opened.marker", std::ios::binary | std::ios::trunc);

@@ -15,7 +15,7 @@
 // modified time) are queued to one background thread that exits when idle.
 // Syncing rows are re-read every two seconds so they settle on their own.
 // Revision() moves when any answer changes, so a window repaints only then.
-#include "../fs/cloud_state.h"
+#include "cloud_state.h"
 #include <windows.h>
 #include <condition_variable>
 #include <cstdint>
@@ -25,7 +25,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace pulse::app {
+namespace pulse::fs {
 
 class CloudSyncProbe {
 public:
@@ -42,7 +42,7 @@ public:
 
     // UI thread, per drawn row. Answers from the cache (Idle until known) and
     // queues the row when it is new, modified, or a syncing row due a re-read.
-    fs::CloudSync Lookup(const std::wstring& path, uint64_t modified, ULONGLONG now = GetTickCount64());
+    CloudSync Lookup(const std::wstring& path, uint64_t modified, ULONGLONG now = GetTickCount64());
     uint64_t Revision() const;
     bool ChangedSince(const std::wstring& path, uint64_t revision) const;
 
@@ -56,14 +56,14 @@ private:
     struct Entry {
         uint64_t modified = 0;
         uint64_t revision = 0;
-        fs::CloudSync state = fs::CloudSync::Idle;
+        CloudSync state = CloudSync::Idle;
         ULONGLONG checked = 0;
         bool queued = false;
         bool known = false;
     };
     void Enqueue(const std::wstring& path, Entry& entry);
     bool TakeOne(std::wstring& path, uint64_t& modified);
-    void Store(const std::wstring& path, uint64_t modified, fs::CloudSync state);
+    void Store(const std::wstring& path, uint64_t modified, CloudSync state);
     void Worker();
 
     Query query_;
@@ -79,4 +79,4 @@ private:
 // The real query: System.StorageProviderState of the shell item, 0 on failure.
 uint32_t QueryStorageProviderState(const std::wstring& path);
 
-} // namespace pulse::app
+} // namespace pulse::fs

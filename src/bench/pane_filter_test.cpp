@@ -11,8 +11,11 @@
 #include <cstdio>
 #include <cwctype>
 
+namespace pulse::storage {
+std::wstring ConfigurationRoot() { return {}; }
+}
+
 namespace pulse::app {
-std::wstring GetPulseDataDir() { return {}; }
 namespace filter_reference {
 // Preserve the previous implementation as an independent behavior and timing oracle.
 static std::wstring EntryPathOf(const Tab& tab, const fs::DirEntry& e) {

@@ -624,7 +624,7 @@ std::unique_ptr<LayoutTab> MakeSingleLayoutTab(const std::wstring& path, const T
         pane->view.column_layout = source->column_layout;
         pane->view.column_widths_dip = source->column_widths_dip;
     }
-    pane->NewTab(path.empty() ? pulse::path::DefaultNavigationRoot() : path);
+    pane->NewTab(path);
     tab->panes.push_back(std::move(pane));
     tab->root = SplitContainer::CreateLeaf(tab->panes[0].get());
     tab->layout = LayoutPreset::Single;
@@ -867,8 +867,7 @@ static std::wstring ParentDir(std::wstring path) {
 }
 
 static std::wstring FindGitRootImpl(std::wstring path) {
-    if (path.starts_with(L"\\\\?\\UNC\\")) path = L"\\\\" + path.substr(8);
-    else if (path.starts_with(L"\\\\?\\")) path = path.substr(4);
+    path = pulse::path::StripExtendedPathPrefix(path);
     for (int i = 0; i < 12 && !path.empty(); ++i) {
         if (pulse::path::Exists(path + L"\\.git")) return path;
         std::wstring parent = ParentDir(path);

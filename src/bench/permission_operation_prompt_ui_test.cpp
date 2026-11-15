@@ -25,6 +25,7 @@ struct TransferIntegrationProbe {
         retry.seq = id;
         retry.req.type = status.type;
         retry.req.sources = {status.elevation_source_path};
+        retry.req.dest_dir = status.elevation_destination_path;
         retry.req.new_name = L"Fixture volume";
         retry.retry_failure_hr = E_ACCESSDENIED;
         retry.retry_failed_path = status.failed_path;
@@ -48,6 +49,12 @@ struct TransferIntegrationProbe {
             manager.queue_.front().req.sources == std::vector<std::wstring>{L"Z:\\"} &&
             manager.queue_.front().req.new_name == L"Fixture volume";
     }
+    static bool QueuedCopy(const OpsManager& manager, uint64_t id, const OpStatus& status) {
+        return manager.queue_.size() == 1 && manager.queue_.front().seq == id &&
+            manager.queue_.front().elevated_retry && manager.queue_.front().req.type == OpType::Copy &&
+            manager.queue_.front().req.sources == std::vector<std::wstring>{status.elevation_source_path} &&
+            manager.queue_.front().req.dest_dir == status.elevation_destination_path;
+    }
 };
 }
 
@@ -58,6 +65,7 @@ int opened = 0;
 int dpi = 96;
 bool narrow = false;
 bool captured = false;
+size_t expected_rows = 2;
 std::wstring screenshot;
 pulse::AppState* state = nullptr;
 enum class Action { Enter, Space, Escape, Close, CancelButton, Accept, Stale, Exit, OwnerClose };
@@ -95,7 +103,7 @@ void CALLBACK Drive(HWND, UINT, UINT_PTR, DWORD) {
     GetClientRect(dialog, &client);
     pulse::ui::ConfirmDialogInspection info;
     Check(SendMessageW(dialog, pulse::ui::kConfirmInspectMessage, 0,
-        reinterpret_cast<LPARAM>(&info)) != 0 && info.row_count == 2 &&
+        reinterpret_cast<LPARAM>(&info)) != 0 && info.row_count == expected_rows &&
         info.content.bottom <= std::min(info.primary.top, info.cancel.top) &&
         info.primary.left >= 0 && info.cancel.left >= 0 &&
         info.primary.right <= client.right && info.cancel.right <= client.right &&
@@ -158,12 +166,63 @@ pulse::ops::OpStatus DriveLabelFailure(uint64_t id) {
 
 int wmain(int argc, wchar_t** argv) {
     using namespace pulse;
+    const bool file_only = argc > 1 && std::wstring_view(argv[1]) == L"--file-operation-only";
+    HDESK private_desktop = nullptr;
+    if (file_only) {
+        const auto name = L"PulsePermissionFixture-" + std::to_wstring(GetCurrentProcessId());
+        private_desktop = CreateDesktopW(name.c_str(), nullptr, nullptr, 0, GENERIC_ALL, nullptr);
+        if (!private_desktop || !SetThreadDesktop(private_desktop)) {
+            std::printf("[BLOCKED] private UI test desktop unavailable; no dialog was opened\n");
+            return 2;
+        }
+    }
     compat::EnableDpiAwareness();
     OleInitialize(nullptr);
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const auto output = std::filesystem::absolute(argc > 1 ? std::filesystem::path(argv[1])
+    const auto output = std::filesystem::absolute(file_only ? (argc > 2 ? std::filesystem::path(argv[2])
+        : std::filesystem::path(L"bench_data/permission_prompt_file_ui")) : argc > 1 ? std::filesystem::path(argv[1])
         : std::filesystem::path(L"bench_data/permission_prompt_ui"));
     std::filesystem::create_directories(output);
+    if (file_only) {
+        expected_rows = 4;
+        for (bool dark : {false, true}) {
+            auto owned = std::make_unique<AppState>();
+            state = owned.get(); state->isolatedTest = true;
+            state->appPrefs.persist = state->places.persist = state->searchHistory.persist = false;
+            state->hwnd = CreateWindowExW(0, L"STATIC", L"Pulse file permission fixture", 0,
+                0, 0, 0, 0, HWND_MESSAGE, nullptr, nullptr, nullptr);
+            state->darkMode = dark; state->accentColor = ui::GetAccentColor();
+            dpi = dark ? 144 : 96; narrow = dark;
+            for (auto next : {Action::Escape, Action::Accept, Action::Stale}) {
+                action = next;
+                auto failure = DriveLabelFailure(300 + static_cast<unsigned>(next));
+                failure.type = ops::OpType::Copy;
+                failure.elevation_source_path = L"E:\\permission-fixture\\source\\same-name.txt";
+                failure.elevation_destination_path = L"E:\\permission-fixture\\protected destination";
+                ops::TransferIntegrationProbe::Seed(state->ops, failure.task_id, failure);
+                const auto confirmation = BuildPermissionOperationConfirmationSpec(state->ops.Status());
+                Check(confirmation.rows.size() == 4 && confirmation.cancel_is_default &&
+                    confirmation.rows[1].text == failure.elevation_source_path &&
+                    confirmation.rows[3].text == failure.elevation_destination_path,
+                    "file permission confirmation shows the exact source and destination with safe default");
+                screenshot = (output / (std::wstring(dark ? L"dark_144_" : L"light_96_") +
+                    std::to_wstring(static_cast<unsigned>(next)) + L".png")).wstring();
+                const auto before = opened; captured = false;
+                timer = SetTimer(nullptr, 0, 200, Drive);
+                PumpPermissionOperationPrompt(*state);
+                KillTimer(nullptr, timer);
+                Check(opened == before + 1 && captured && !state->permissionOperationPromptActive,
+                    "ordinary file permission failure opens the Pulse confirmation window");
+                Check(next == Action::Accept ? ops::TransferIntegrationProbe::QueuedCopy(state->ops, failure.task_id, failure)
+                    : ops::TransferIntegrationProbe::Queued(state->ops) == 0,
+                    "only explicit current consent queues the exact file retry; no worker or UAC runs in this UI test");
+            }
+            DestroyWindow(state->hwnd); state->hwnd = nullptr;
+            state->ops.Stop(); state = nullptr;
+        }
+        OleUninitialize();
+        return failures ? 1 : 0;
+    }
     const auto failure = DriveLabelFailure(100);
     const auto spec = BuildPermissionOperationConfirmationSpec(failure);
     Check(spec.cancel_is_default && spec.fit_to_work_area && !spec.danger && spec.rows.size() == 2 &&

@@ -6,13 +6,25 @@
 #include "ops_manager.h"
 #include "../common/file_operation_error.h"
 #include "../common/path_utils.h"
+#include <filesystem>
+#include <algorithm>
 
 namespace pulse::ops {
 
 bool OpsManager::CaptureElevationFailure(QueueItem retry, HRESULT error, const std::wstring& failed_item) {
-    // Ordinary file operations already request elevation through IFileOperation.
-    if (retry.req.type != OpType::Rename || retry.req.sources.size() != 1 ||
-        !pulse::path::IsDriveRootPath(retry.req.sources.front())) return false;
+    if (retry.elevated_retry || shell_elevation_authorized_ || retry.req.sources.empty()) return false;
+    switch (retry.req.type) {
+    case OpType::Copy: case OpType::Move: case OpType::Rename: case OpType::BatchRename:
+    case OpType::CreateFolder: case OpType::CreateTextFile: case OpType::RecycleDelete: case OpType::RealDelete:
+        break;
+    default: return false;
+    }
+    const auto remote = [](const std::wstring& value) {
+        const auto plain = path::StripExtendedPathPrefix(value);
+        const auto root = std::filesystem::path(plain).root_path().wstring();
+        return plain.starts_with(L"\\\\") || (!root.empty() && GetDriveTypeW(root.c_str()) == DRIVE_REMOTE);
+    };
+    if (remote(retry.req.dest_dir) || std::any_of(retry.req.sources.begin(), retry.req.sources.end(), remote)) return false;
     const DWORD code = format::FileOperationMessageCode(error);
     if (!FAILED(error) || (code != ERROR_ACCESS_DENIED && code != ERROR_PRIVILEGE_NOT_HELD &&
         code != ERROR_ELEVATION_REQUIRED) || stopping_.load() ||
@@ -23,7 +35,7 @@ bool OpsManager::CaptureElevationFailure(QueueItem retry, HRESULT error, const s
     retry.retry_generation = generation;
     retry.close_first.clear();
     std::lock_guard lock(mutex_);
-    if (!running_ || !accepting_ || stopping_.load() || generation != lock_retry_generation_.load()) return false;
+    if (!running_ || !accepting_ || stopping_.load() || lock_retry_ || generation != lock_retry_generation_.load()) return false;
     elevation_retry_ = std::move(retry);
     status_.elevation_retry_available = true;
     return true;
@@ -35,8 +47,11 @@ void OpsManager::RefreshElevationStatusLocked() {
         elevation_retry_->retry_generation == lock_retry_generation_.load() &&
         !status_.active && status_.phase == OpPhase::Failed;
     status_.elevation_source_path.clear();
-    if (status_.elevation_retry_available)
+    status_.elevation_destination_path.clear();
+    if (status_.elevation_retry_available) {
         status_.elevation_source_path = elevation_retry_->req.sources.front();
+        status_.elevation_destination_path = elevation_retry_->req.dest_dir;
+    }
 }
 
 bool OpsManager::IsElevationFailureCurrent(uint64_t task_id) const {

@@ -13,8 +13,8 @@
 #include "fluent_components.h"
 #include "smooth_scroll.h"
 #include "window_material.h"
-#include "../app/text_diff.h"
-#include "../app/window_result_mailbox.h"
+#include "../model/text_diff.h"
+#include "../common/window_result_mailbox.h"
 
 #include <atomic>
 #include <memory>
@@ -133,7 +133,7 @@ private:
 
     // Worker
     std::shared_ptr<std::atomic<bool>> cancel_;
-    std::shared_ptr<app::WindowResultMailbox<std::unique_ptr<JobResult>>> mailbox_;
+    std::shared_ptr<WindowResultMailbox<std::unique_ptr<JobResult>>> mailbox_;
     uint64_t generation_ = 0;
     bool computing_ = false;
     bool first_result_ = true;

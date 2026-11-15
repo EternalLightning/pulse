@@ -80,7 +80,8 @@ bool MoveTabGroupAcrossFreeTab(std::vector<int>& order,
 void NormalizeGroupRuns(WindowTabs& tabs) {
     std::vector<int> groups;
     std::unordered_set<int> seen;
-    for (const auto& tab : tabs.items) {
+    for (auto& tab : tabs.items) {
+        if (tab->pinned) tab->tab_group = 0;
         const int group = tab->tab_group;
         if (group != 0 && seen.insert(group).second) groups.push_back(group);
     }

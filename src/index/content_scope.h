@@ -6,6 +6,7 @@
 #pragma once
 #include "content_index.h"
 #include "index_config.h"
+#include "../common/path_utils.h"
 #include <algorithm>
 #include <cwctype>
 
@@ -15,6 +16,15 @@ inline std::wstring ContentScopeKey(std::wstring path) {
     while (path.size() > 3 && path.back() == L'\\') path.pop_back();
     std::transform(path.begin(), path.end(), path.begin(), towlower);
     return path;
+}
+inline bool ContentSystemPath(const std::wstring &path) {
+    const auto key = ContentScopeKey(pulse::path::StripExtendedPathPrefix(path));
+    if (key.size() < 3 || key[1] != L':')
+        return false;
+    const auto top =
+        key.substr(3, key.find(L'\\', 3) == std::wstring::npos ? std::wstring::npos : key.find(L'\\', 3) - 3);
+    return top == L"windows" || top == L"$recycle.bin" || top == L"system volume information" ||
+           top == L"pagefile.sys" || top == L"hiberfil.sys" || top == L"swapfile.sys";
 }
 inline bool ContentPathUnder(std::wstring_view path, std::wstring_view root) {
     return path == root || (path.size() > root.size() && path.starts_with(root) &&
@@ -26,6 +36,7 @@ inline bool AnyContentRequestRoot(const ContentSearchRequest& request, Predicate
     return request.root.empty() || predicate(request.root);
 }
 inline bool ContentRequestIncludesPath(const ContentSearchRequest& request, const std::wstring& path) {
+    if (request.skip_system_locations && ContentSystemPath(path)) return false;
     const auto key = ContentScopeKey(path);
     return AnyContentRequestRoot(request, [&](const auto& root) {
         const auto base = ContentScopeKey(root);

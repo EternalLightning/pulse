@@ -5,6 +5,7 @@
 
 #include "drop_staging.h"
 #include "destination_guard.h"
+#include "../common/path_utils.h"
 
 #include <windows.h>
 #include <atomic>
@@ -17,8 +18,7 @@ namespace {
 // Plain Win32 form without the \\?\ prefix or trailing separators.
 std::wstring Plain(std::wstring path) {
     for (auto& c : path) if (c == L'/') c = L'\\';
-    if (path.starts_with(L"\\\\?\\UNC\\")) path = L"\\\\" + path.substr(8);
-    else if (path.starts_with(L"\\\\?\\")) path = path.substr(4);
+    path = pulse::path::StripExtendedPathPrefix(path);
     while (path.size() > 3 && path.back() == L'\\') path.pop_back();
     return path;
 }

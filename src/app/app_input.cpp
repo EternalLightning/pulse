@@ -2578,9 +2578,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 } else {
                     NewTab(*s, fs::ParentPath(target));
                     if (app::Tab* tab = ActiveTab(*s)) {
-                        std::wstring leaf = target;
-                        if (leaf.starts_with(L"\\\\?\\UNC\\")) leaf = L"\\\\" + leaf.substr(8);
-                        else if (leaf.starts_with(L"\\\\?\\")) leaf = leaf.substr(4);
+                        std::wstring leaf = pulse::path::StripExtendedPathPrefix(target);
                         const auto slash = leaf.find_last_of(L"\\/");
                         if (slash != std::wstring::npos) leaf = leaf.substr(slash + 1);
                         tab->pending_selected_name = leaf;
@@ -2782,7 +2780,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 s->pinGapVisible = false;
                 s->pinGapLineY = 0.0f;
                 SetCapture(hwnd);
-            } else if (hit.path.starts_with(L"pulse:tag:")) {
+            } else if (hit.path.starts_with(L"pulse:tag:") && s->places.CanEditTags()) {
                 // Tags defer navigation to release; a press may become a reorder drag.
                 s->tagDragPending = true;
                 s->tagDragStartPt = POINT{ mx, my };
@@ -3022,7 +3020,7 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                         }
                     }
                 }
-                if (wasActive && s->tagOrder.size() == s->places.tags.size() &&
+                if (wasActive && s->places.CanEditTags() && s->tagOrder.size() == s->places.tags.size() &&
                     !s->tagOrder.empty()) {
                     bool changed = false;
                     for (size_t i = 0; i < s->tagOrder.size(); ++i)

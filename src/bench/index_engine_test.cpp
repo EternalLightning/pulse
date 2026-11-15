@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../index/index_engine.h"
+#include "../index/search_result_merge.h"
 #include "../index/usn_stream.h"
 #include <cstring>
 #include "../index/index_shard.h"
@@ -1099,7 +1100,46 @@ void LegacyRepairTests(const std::filesystem::path& dir, const std::filesystem::
     }
 }
 
+int MergeOrderTests() {
+    Engine local, network;
+    for (const auto& item : std::vector<Hit>{
+        {L"C:\\fixture\\z\\item2", L"item2", false, 1, 30},
+        {L"C:\\fixture\\a\\item10", L"item10", false, 2, 20},
+        {L"C:\\fixture\\a\\item2", L"item2", true, 100, 100},
+        {L"C:\\fixture\\b\\ITEM2", L"ITEM2", false, 1, 30},
+        {L"C:\\fixture\\item1", L"item1", true, 90, 90}})
+        local.AddForTest(item.path, item.name, item.is_dir, item.size, item.mtime);
+    network.AddForTest(L"D:\\fixture\\item3", L"item3", false, 0, 0);
+    network.AddForTest(L"D:\\fixture\\item20", L"item20", true, 200, 200);
+    bool ok = true;
+    for (bool rank : {false, true}) for (bool desc : {false, true})
+        for (auto sort : {ResultSort::Name, ResultSort::Size, ResultSort::Mtime}) {
+            Query full; full.needle = L"item"; full.limit = 100; full.rank = rank;
+            full.sort = sort; full.sort_desc = desc;
+            const auto all_local = local.Search(full), all_network = network.Search(full);
+            const auto ordered = MergeSearchResults(full, all_local, all_network);
+            bool preserved = true;
+            size_t next = 0;
+            for (const auto& hit : ordered.hits)
+                if (hit.path.starts_with(L"C:")) preserved &= next < all_local.hits.size() && hit.path == all_local.hits[next++].path;
+            ok &= preserved && next == all_local.hits.size();
+            for (size_t offset : {size_t{0}, size_t{1}, size_t{2}, size_t{4}}) {
+                Query page = full; page.offset = offset; page.limit = 2;
+                Query provider = page; provider.offset = 0; provider.limit += offset;
+                const auto actual = MergeSearchResults(page, local.Search(provider), network.Search(provider));
+                const auto expected = MergeSearchResults(page, all_local, all_network);
+                bool same = actual.total == expected.total && actual.hits.size() == expected.hits.size();
+                for (size_t i = 0; same && i < actual.hits.size(); ++i) same &= actual.hits[i].path == expected.hits[i].path;
+                if (!same) std::cout << "[FAIL] rank=" << rank << " desc=" << desc << " sort=" << int(sort) << " offset=" << offset << '\n';
+                ok &= same;
+            }
+        }
+    Check(ok, "real provider truncation preserves natural order, directory grouping and stable equal keys across merged pages");
+    return ok ? 0 : 1;
+}
+
 int wmain(int argc, wchar_t** argv) {
+    if (argc > 1 && std::wstring_view(argv[1]) == L"--merge-order-only") return MergeOrderTests();
     if (argc > 1 && std::wstring_view(argv[1]) == L"--offline-retention-only") {
         std::cout << std::unitbuf;
         const bool parents = EngineTestAccess::InvalidMemoryParentFixture();

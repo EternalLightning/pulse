@@ -150,14 +150,17 @@ public:
         return RespondPayload(type, id, writer);
     }
     bool RespondPayload(uint32_t type, uint32_t id, const PayloadWriter& writer) {
+        return RespondBytes(type, id, writer.data());
+    }
+    bool RespondBytes(uint32_t type, uint32_t id, const std::vector<uint8_t>& payload) {
         MsgHeader header;
         header.type = type;
         header.request_id = id;
-        header.payload_size = static_cast<uint32_t>(writer.data().size());
+        header.payload_size = static_cast<uint32_t>(payload.size());
         PipeIoOptions options;
         options.pending_timeout_ms = kDeadlineMs;
         return PipeWrite(server_.get(), &header, static_cast<DWORD>(sizeof(header)), options) &&
-            PipeWrite(server_.get(), writer.data().data(), header.payload_size, options);
+            PipeWrite(server_.get(), payload.data(), header.payload_size, options);
     }
 private:
     static bool Failed(const char* stage, DWORD error) {
@@ -217,6 +220,73 @@ ShellLaunchRequest LaunchRequest() {
 
 namespace pulse::ipc {
 struct ShellLaunchClientTestProbe {
+    static void FileOperationBatches() {
+        Recorder recorder;
+        PipePair pair;
+        ShellClient client;
+        Check(pair.Connect(), "connect isolated file-operation result transport");
+        const auto endpoint = pair.ReleaseClient();
+        if (endpoint == INVALID_HANDLE_VALUE) return;
+        Prepare(client, endpoint, recorder);
+        Handle completed(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+        if (!completed.valid()) return;
+        ShellOperationResult expected;
+        std::atomic<unsigned> callbacks{0};
+        std::atomic<bool> valid{false};
+        client.cb_.on_file_operation_done = [&](uint32_t, ShellOperationResult result) {
+            bool matches = result.hr == expected.hr && result.cancelled == expected.cancelled &&
+                result.failed_path == expected.failed_path && result.items.size() == expected.items.size();
+            for (size_t i = 0; matches && i < result.items.size(); ++i) {
+                const auto& a = result.items[i]; const auto& b = expected.items[i];
+                matches = a.source == b.source && a.destination == b.destination && a.hr == b.hr && a.skipped == b.skipped;
+            }
+            valid.store(matches); ++callbacks; SetEvent(completed.get());
+        };
+        Read(client);
+        for (const bool partial_failure : {false, true}) {
+            expected = {};
+            const size_t count = partial_failure ? 8193 : 65537;
+            const std::wstring prefix = L"C:\\result-fixture\\" + std::wstring(64, L'x');
+            for (size_t i = 0; i < count; ++i) {
+                const auto name = prefix + std::to_wstring(i);
+                expected.items.push_back({name, name + L"-destination", S_OK, false});
+            }
+            if (partial_failure) {
+                expected.hr = HRESULT_FROM_WIN32(ERROR_CANCELLED); expected.cancelled = true;
+                expected.failed_path = expected.items.back().source;
+                expected.items.back().hr = E_ACCESSDENIED; expected.items.back().skipped = true;
+            }
+            ResetEvent(completed.get()); valid.store(false);
+            const unsigned previous = callbacks.load();
+            ShellOperationRequest request;
+            request.items.push_back({L"C:\\result-fixture\\source", L"C:\\result-fixture\\destination", {}, {}});
+            const auto id = client.RunFileOperation(request);
+            Check(id && pair.ReadRequest(REQ_FILE_OPERATION, id), "file-operation request reaches the isolated peer");
+            size_t frames = 0, bytes = 0;
+            bool bounded = true, only_terminal_completes = true;
+            const bool sent = SendShellOperationResultBatches(expected, [&](bool terminal, const auto& payload) {
+                ++frames; bytes += payload.size();
+                PayloadReader reader(payload.data(), payload.size());
+                ShellOperationResult batch;
+                bounded &= payload.size() <= kMaxPayload && ReadShellOperationResult(reader, batch) && batch.items.size() <= 65536;
+                if (terminal) only_terminal_completes &= callbacks.load() == previous;
+                return pair.RespondBytes(terminal ? RSP_FILE_OPERATION_DONE : RSP_FILE_OPERATION_ITEMS, id, payload);
+            });
+            const bool received = sent && WaitForSingleObject(completed.get(), kDeadlineMs) == WAIT_OBJECT_0;
+            Check(received && frames > 2 && bounded && only_terminal_completes && valid.load() &&
+                callbacks.load() == previous + 1 && Empty(client) && (partial_failure || bytes > kMaxPayload),
+                partial_failure ? "partial cancellation retains every successful child and the final failure without early completion" :
+                    "over 65536 child results and over 16 MiB arrive intact through bounded frames and one final callback");
+            if (!received) { client.Stop(); return; }
+        }
+        ShellOperationResult oversized;
+        oversized.items.resize(65537);
+        const auto malformed = WriteShellOperationResult(oversized);
+        PayloadReader reader(malformed.data(), malformed.size());
+        ShellOperationResult rejected;
+        Check(!ReadShellOperationResult(reader, rejected), "individual result frames still reject excessive item counts");
+        client.Stop();
+    }
     static void MultiwindowOwners() {
         Recorder first, second, fallback;
         ShellClient client;
@@ -728,6 +798,10 @@ struct ShellLaunchClientTestProbe {
 int main(int argc, char** argv) {
     std::cout << std::unitbuf;
     if (argc == 2 && std::string(argv[1]) == "--exit-before-pipe") return 7;
+    if (argc == 2 && std::string(argv[1]) == "--file-operation-batches") {
+        pulse::ipc::ShellLaunchClientTestProbe::FileOperationBatches();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::string(argv[1]) == "--malformed-results") {
         pulse::ipc::ShellLaunchClientTestProbe::MalformedResults();
         return failures ? 1 : 0;

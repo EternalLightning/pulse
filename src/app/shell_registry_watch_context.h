@@ -4,7 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #pragma once
-#include "window_result_mailbox.h"
+#include "../common/window_result_mailbox.h"
 #include <memory>
 
 namespace pulse::app {

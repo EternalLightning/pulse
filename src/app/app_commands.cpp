@@ -357,6 +357,7 @@ void ShowTagPicker(AppState& s, POINT screen_pt) {
             ui::FluentMenuItem item;
             item.command = kTagPickerBase + i;
             item.text = tag.name;
+            item.enabled = s.places.CanEditTags();
             item.has_swatch = true;
             item.swatch_color = ui::HexColor(tag.rgb);
             const auto state = s.places.GetSelectionState(tag.id, paths);
@@ -368,6 +369,7 @@ void ShowTagPicker(AppState& s, POINT screen_pt) {
             ui::FluentMenuItem create;
             create.command = kCreateTag;
             create.text = TagLabel(l10n::StringId::TagCreateFormat, query);
+            create.enabled = s.places.CanEditTags();
             create.glyph = L"\xE710";
             if (!items.empty()) items.back().separator_after = true;
             items.push_back(std::move(create));
@@ -403,11 +405,13 @@ void ShowTagPicker(AppState& s, POINT screen_pt) {
             tag_id = s.places.tags[static_cast<size_t>(command - kTagPickerBase)].id;
         }
         if (!tag_id.empty()) ToggleTagForSelection(s, tag_id, paths);
+        else if (command == kCreateTag) MessageBeep(MB_ICONWARNING);
     }
     s.menu->SetFilterPlaceholder(l10n::Get(l10n::StringId::TabMenuSearch));
 }
 
 void ShowCreateTagPicker(AppState& s, POINT screen_pt) {
+    if (!s.places.CanEditTags()) { MessageBeep(MB_ICONWARNING); return; }
     if (!EnsureMenu(s)) return;
     constexpr int kCreateTag = 29999;
     constexpr int kColorStrip = 30050;
@@ -469,7 +473,7 @@ void ShowCreateTagPicker(AppState& s, POINT screen_pt) {
         }
         if ((command == kCreateTag ||
              (command == app::CmdNone && s.menu->LastFilterCommitted())) && !name.empty()) {
-            s.places.CreateTag(name, selected_rgb);
+            if (s.places.CreateTag(name, selected_rgb).empty()) MessageBeep(MB_ICONWARNING);
         }
         break;
     }
@@ -492,12 +496,14 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
     ui::FluentMenuItem rename;
     rename.command = kRename;
     rename.text = l10n::Get(l10n::StringId::TagRename);
+    rename.enabled = s.places.CanEditTags();
     rename.glyph = L"\xE8AC";
     items.push_back(std::move(rename));
     for (int i = 0; i < static_cast<int>(palette.size()); ++i) {
         const uint32_t rgb = palette[static_cast<size_t>(i)];
         ui::FluentMenuItem color;
         color.command = kColorBase + i;
+        color.enabled = s.places.CanEditTags();
         if (i < 7) {
             constexpr l10n::StringId colors[] = {
                 l10n::StringId::ColorRed, l10n::StringId::ColorOrange,
@@ -520,6 +526,7 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
     ui::FluentMenuItem remove;
     remove.command = kDelete;
     remove.text = l10n::Get(l10n::StringId::TagDelete);
+    remove.enabled = s.places.CanEditTags();
     remove.glyph = L"\xE74D";
     items.push_back(std::move(remove));
     const int command = s.menu->TrackPopup(screen_pt, std::move(items));

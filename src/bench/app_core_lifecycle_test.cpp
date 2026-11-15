@@ -401,7 +401,7 @@ void AttributeCompletionChecks() {
     Check(!!owned, "IP01 initialize stale attribute completion fixture");
     if (!owned) return;
     auto& s = *owned;
-    s.details_attribute_mailbox = std::make_shared<app::WindowResultMailbox<app::DetailsAttributeResult>>(
+    s.details_attribute_mailbox = std::make_shared<WindowResultMailbox<app::DetailsAttributeResult>>(
         s.hwnd, WM_DETAILS_ATTRIBUTE_RESULT);
     app::DetailsAttributeResult result;
     result.pane = s.pane;

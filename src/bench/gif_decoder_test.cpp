@@ -18,7 +18,8 @@ void Check(bool value, const char* label) {
 }
 
 std::vector<uint8_t> FixtureBytes(uint16_t canvas_w = 3, uint16_t canvas_h = 2,
-                                  uint8_t red_green = 0, bool small_first = false) {
+                                  uint8_t red_green = 0, bool small_first = false,
+                                  uint16_t loops = 2, bool animexts = false) {
     std::vector<uint8_t> bytes{'G', 'I', 'F', '8', '9', 'a'};
     const auto word = [&](uint16_t value) {
         bytes.push_back(static_cast<uint8_t>(value));
@@ -27,8 +28,11 @@ std::vector<uint8_t> FixtureBytes(uint16_t canvas_w = 3, uint16_t canvas_h = 2,
     word(canvas_w); word(canvas_h);
     bytes.insert(bytes.end(), {0x81, 0, 0,
         0, 0, 0, 255, red_green, 0, 0, 255, 0, 0, 0, 255});
-    bytes.insert(bytes.end(), {0x21, 0xFF, 11, 'N', 'E', 'T', 'S', 'C', 'A', 'P', 'E', '2', '.', '0',
-                              3, 1, 2, 0, 0});
+    bytes.insert(bytes.end(), {0x21, 0xFF, 11});
+    const std::string_view application = animexts ? "ANIMEXTS1.0" : "NETSCAPE2.0";
+    bytes.insert(bytes.end(), application.begin(), application.end());
+    bytes.insert(bytes.end(), {3, 1});
+    word(loops); bytes.push_back(0);
     const auto frame = [&](uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                            uint8_t color, uint8_t disposal, uint16_t delay) {
         bytes.insert(bytes.end(), {0x21, 0xF9, 4, static_cast<uint8_t>((disposal << 2) | 1)});
@@ -108,6 +112,7 @@ int wmain() {
         Check(decode(0) && PixelsEqual(pixels, {red, red, red, red, red, red}) &&
               count == 4 && delay == 50 && w == 3 && h == 2 && sw == 3 && sh == 2,
               "first GIF frame preserves canvas dimensions and delay");
+        Check(loops == 2, "NETSCAPE application metadata preserves finite GIF loop count");
         Check(decode(1) && PixelsEqual(pixels, {blue, red, red, red, red, red}) && delay == 60,
               "forward GIF frame overlays its offset rectangle");
         Check(decode(2) && PixelsEqual(pixels, {clear, green, red, red, red, red}) && delay == 70,
@@ -159,6 +164,20 @@ int wmain() {
               state.opened_decoders == before_replace + 1 &&
               PixelsEqual(pixels, {red, red, red, red, red, red}),
               "same path size and timestamp with replaced file identity invalidates GIF state");
+        state.Clear();
+        Check(state.encoded.capacity() == 0 && state.canvas.capacity() == 0 &&
+              state.saved.capacity() == 0 && !state.decoder && !state.stream && !state.factory,
+              "releasing GIF state returns encoded canvas and restore buffers with decoder resources");
+        const auto loop_fixture = root / L"loops.gif";
+        Check(WriteFixture(loop_fixture, FixtureBytes(3, 2, 0, false, 513, true)) &&
+              DecodeGifFrame(state, loop_fixture.wstring(), FILE_ATTRIBUTE_NORMAL, 32, 0,
+                  pixels, w, h, stride, count, delay, loops, sw, sh) && loops == 513,
+              "ANIMEXTS application metadata reads both finite loop count bytes");
+        state.Clear();
+        Check(WriteFixture(loop_fixture, FixtureBytes(3, 2, 0, false, 0)) &&
+              DecodeGifFrame(state, loop_fixture.wstring(), FILE_ATTRIBUTE_NORMAL, 32, 0,
+                  pixels, w, h, stride, count, delay, loops, sw, sh) && loops == 0,
+              "zero GIF loop count remains infinite");
         state.Clear();
         const auto budget = root / L"canvas-budget.gif";
         Check(WriteFixture(budget, FixtureBytes(4096, 2048, 0, true)) &&

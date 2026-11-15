@@ -95,7 +95,7 @@ inline int pulse::ui::ItemReflowUiTest::RunFrameProfile(bool presented) {
         int scenario, repeat, frame;
         bool active;
         double interval, input, wait;
-        app::FrameProfileSample sample;
+        profile::FrameProfileSample sample;
         bool view_reused;
         size_t pixel_rows;
     };
@@ -130,7 +130,7 @@ inline int pulse::ui::ItemReflowUiTest::RunFrameProfile(bool presented) {
             return 1;
         }
     }
-    app::ObserveFrameDrawProfile observe_gpu(gpu_requested ? gpu_profile.Hooks() : app::FrameDrawProfileHooks{});
+    profile::ObserveFrameDrawProfile observe_gpu(gpu_requested ? gpu_profile.Hooks() : profile::FrameDrawProfileHooks{});
     bench::PresentationStatisticsProfile presentation_profile;
     const bool presentation_requested = bench::PresentationStatisticsProfile::Requested();
     if (presentation_requested) presentation_profile.Start(s.compositor);
@@ -225,10 +225,10 @@ inline int pulse::ui::ItemReflowUiTest::RunFrameProfile(bool presented) {
             const double input = std::chrono::duration<double, std::milli>(Clock::now() - input_begin).count();
             const bool measurement = began - started >= std::chrono::milliseconds(400);
             if (gpu_requested) gpu_profile.SetFrame(scenario, repeat, measurement ? frame : -1, measurement);
-            app::FrameProfileSample sample;
+            profile::FrameProfileSample sample;
             bool active;
             {
-                app::ObserveFrameProfile observe(sample);
+                profile::ObserveFrameProfile observe(sample);
                 active = Render(s);
             }
             if (presentation_requested) presentation_profile.Sample(s.compositor, "after-render", render_id++,
@@ -301,7 +301,7 @@ inline int pulse::ui::ItemReflowUiTest::RunVmProfile() {
         {"normal", 24, 1, 0}, {"sidebar", 256, 1, 0},
         {"tabs", 256, 48, 0}, {"tray", 256, 48, 2048}
     };
-    struct Row { const char* scenario; int repeat, sample; double total_ms; app::FrameProfileSample profile; };
+    struct Row { const char* scenario; int repeat, sample; double total_ms; profile::FrameProfileSample profile; };
     std::vector<Row> rows;
     rows.reserve(std::size(cases) * measured_samples * repeats);
     bench::ProfileMemory memory;
@@ -346,10 +346,10 @@ inline int pulse::ui::ItemReflowUiTest::RunVmProfile() {
         for (int repeat = 0; repeat < repeats; ++repeat) {
             memory.Sample(test.name, repeat);
             for (int sample = -warmup_samples; sample < measured_samples; ++sample) {
-                app::FrameProfileSample profile;
+                profile::FrameProfileSample profile;
                 const auto started = Clock::now();
                 {
-                    app::ObserveFrameProfile observe(profile);
+                    profile::ObserveFrameProfile observe(profile);
                     const auto vm = BuildVm(s);
                     checksum += vm.tabs.size() + vm.pane.EntryCount() + vm.tray_deck.cards.size();
                     if (sample == 0 && (vm.tabs.size() != static_cast<size_t>(test.tabs) ||

@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "content_search.h"
+#include "content_scope.h"
 #include "document_reader.h"
 #include "../common/text_decode.h"
 #include "../common/path_utils.h"
@@ -161,18 +162,6 @@ ContentHit MakeContentHit(const Candidate& file, std::wstring_view content, size
 }
 
 
-bool IsSkippedSystemDirectory(std::wstring_view name) {
-    return path::EqualInsensitive(name, L"$Recycle.Bin") ||
-           path::EqualInsensitive(name, L"System Volume Information") ||
-           path::EqualInsensitive(name, L"Windows");
-}
-
-bool IsSkippedSystemFile(std::wstring_view name) {
-    return path::EqualInsensitive(name, L"pagefile.sys") ||
-           path::EqualInsensitive(name, L"hiberfil.sys") ||
-           path::EqualInsensitive(name, L"swapfile.sys");
-}
-
 std::vector<std::wstring> EffectiveRoots(const ContentSearchRequest& request) {
     if (!request.roots.empty()) return request.roots;
     if (!request.root.empty()) return {request.root};
@@ -206,6 +195,7 @@ bool LoadCandidatePaths(const ContentSearchRequest& request,
     progress.total_files = request.candidate_paths.size();
     if (!callback(progress, {})) return false;
     for (const auto& path : request.candidate_paths) {
+        if (request.skip_system_locations && ContentSystemPath(path)) continue;
         WIN32_FILE_ATTRIBUTE_DATA data{};
         if (!GetFileAttributesExW(Win32Path(path).c_str(), GetFileExInfoStandard, &data))
             continue;
@@ -294,11 +284,11 @@ bool EnumerateCandidates(const ContentSearchRequest& request,
         if (cancelled.load()) return false;
         progress.current_root = root;
         if (!publish_progress(true)) return false;
-        std::deque<std::pair<std::wstring, int>> queue;
-        queue.push_back({NormalizeWalkRoot(root), 0});
+        std::deque<std::wstring> queue{NormalizeWalkRoot(root)};
         while (!queue.empty() && !cancelled.load()) {
-            const auto [dir, depth] = queue.front();
+            const auto dir = std::move(queue.front());
             queue.pop_front();
+            if (request.skip_system_locations && ContentSystemPath(dir)) continue;
             WIN32_FIND_DATAW data{};
             HANDLE find = hooks && hooks->first ? hooks->first(dir, data) : OpenDirectoryListing(dir, data);
             if (find == INVALID_HANDLE_VALUE) {
@@ -314,19 +304,17 @@ bool EnumerateCandidates(const ContentSearchRequest& request,
                 if (IsDotOrDotDot(data.cFileName)) continue;
                 const DWORD attributes = data.dwFileAttributes;
                 const bool is_dir = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                const auto path = JoinPath(dir, data.cFileName);
+                if (request.skip_system_locations && ContentSystemPath(path)) continue;
                 if (is_dir) {
-                    if (request.skip_system_locations && depth == 0 &&
-                        IsSkippedSystemDirectory(data.cFileName)) continue;
                     if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
                     if (request.recursive)
-                        queue.push_back({JoinPath(dir, data.cFileName), depth + 1});
+                        queue.push_back(path);
                     continue;
                 }
-                if (request.skip_system_locations && depth == 0 &&
-                    IsSkippedSystemFile(data.cFileName)) continue;
                 ++visited;
                 Candidate candidate;
-                if (ReadCandidate(JoinPath(dir, data.cFileName), data,
+                if (ReadCandidate(path, data,
                                   request.minimum_file_bytes, candidate))
                     files.push_back(std::move(candidate));
                 if (!publish_progress(false)) {

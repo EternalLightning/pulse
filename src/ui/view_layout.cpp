@@ -7,43 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cwctype>
 #include <iterator>
 
 namespace pulse::ui {
-
-const wchar_t* ViewModeName(ViewMode mode) noexcept {
-    switch (mode) {
-    case ViewMode::ExtraLargeIcons: return L"extra-large-icons";
-    case ViewMode::LargeIcons: return L"large-icons";
-    case ViewMode::MediumIcons: return L"medium-icons";
-    case ViewMode::SmallIcons: return L"small-icons";
-    case ViewMode::List: return L"list";
-    case ViewMode::Details: return L"details";
-    case ViewMode::Tiles: return L"tiles";
-    case ViewMode::Content: return L"content";
-    }
-    return L"details";
-}
-
-ViewMode ParseViewMode(const std::wstring& value) noexcept {
-    std::wstring lower = value;
-    for (auto& c : lower) c = static_cast<wchar_t>(std::towlower(c));
-    for (int i = 0; i < 8; ++i) {
-        const ViewMode mode = ViewModeFromIndex(i);
-        if (lower == ViewModeName(mode)) return mode;
-    }
-    return ViewMode::Details;
-}
-
-int ViewModeIndex(ViewMode mode) noexcept {
-    const int value = static_cast<int>(mode);
-    return value >= 0 && value < 8 ? value : 5;
-}
-
-ViewMode ViewModeFromIndex(int index) noexcept {
-    return index >= 0 && index < 8 ? static_cast<ViewMode>(index) : ViewMode::Details;
-}
 
 bool ShowsColumnHeader(ViewMode mode) noexcept { return mode == ViewMode::Details; }
 

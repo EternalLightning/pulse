@@ -21,7 +21,7 @@
 #include "app_visual_animation.h"
 #include "app_ui_schedule.h"
 #include "app_surface_scroll.h"
-#include "frame_profile.h"
+#include "../common/frame_profile.h"
 #include "app_hover.h"
 #include "app_column_view.h"
 #include "../ui/animation_clock.h"
@@ -177,7 +177,7 @@ static bool IndexStatusVisible(AppState& s) {
 }
 
 bool Render(AppState& s, bool schedule_frame) {
-    app::FrameProfileProbe frame_profile;
+    profile::FrameProfileProbe frame_profile;
     auto t0 = std::chrono::steady_clock::now();
 
     if (s.compositor.NeedsRecovery()) {
@@ -202,7 +202,7 @@ bool Render(AppState& s, bool schedule_frame) {
 
     ID2D1DeviceContext* dc = s.compositor.Dc();
     const auto draw_start = std::chrono::steady_clock::now();
-    app::BeginFrameDrawProfile();
+    profile::BeginFrameDrawProfile();
     dc->BeginDraw();
     dc->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
 
@@ -235,7 +235,7 @@ bool Render(AppState& s, bool schedule_frame) {
     RefreshStationaryHover(s, vm);
 
     D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)s.compositor.Width(), (float)s.compositor.Height());
-    frame_profile.Mark(app::FramePhase::Prepare);
+    frame_profile.Mark(profile::FramePhase::Prepare);
     s.renderer.Render(vm, rect, theme);
     s.hitTestVm = std::move(vm);
     s.hitTestVmWidth = s.compositor.Width();
@@ -244,12 +244,12 @@ bool Render(AppState& s, bool schedule_frame) {
     s.notification_toast.SetMotionEnabled(s.renderer.MotionEnabled());
     s.notification_toast.Draw(s.compositor, theme, s.scale, hc);
 
-    frame_profile.Mark(app::FramePhase::Paint);
+    frame_profile.Mark(profile::FramePhase::Paint);
 
     const HRESULT end_hr = dc->EndDraw();
-    app::EndFrameDrawProfile(end_hr);
+    profile::EndFrameDrawProfile(end_hr);
     frame_profile.Submitted(end_hr);
-    frame_profile.Mark(app::FramePhase::Submit);
+    frame_profile.Mark(profile::FramePhase::Submit);
     const auto draw_end = std::chrono::steady_clock::now();
     s.timing.draw_ms = std::chrono::duration<double, std::milli>(draw_end - draw_start).count();
     if (end_hr == D2DERR_RECREATE_TARGET || end_hr == DXGI_ERROR_DEVICE_REMOVED ||
@@ -265,7 +265,7 @@ bool Render(AppState& s, bool schedule_frame) {
     // An occluded flip chain advances to an unpainted buffer after Present.
     if (!hidden_capture) s.compositor.Present();
     frame_profile.Presented(!hidden_capture && s.compositor.CanScheduleAnimationFrame());
-    frame_profile.Mark(app::FramePhase::Present);
+    frame_profile.Mark(profile::FramePhase::Present);
     s.first_frame_drawn = true;
     const auto present_end = std::chrono::steady_clock::now();
     s.timing.present_ms = std::chrono::duration<double, std::milli>(present_end - present_start).count();
@@ -353,7 +353,8 @@ static app::WindowSessionSnapshot CaptureWindowPreferences(AppState& s, HWND hwn
 
 static void SaveApplicationPreferences(AppState& s, HWND hwnd, bool save_window) {
     if (s.shot.active || s.menushot || s.isolatedTest) return;
-    if (save_window) app::SaveSessionPreferences(CaptureWindowPreferences(s, hwnd));
+    if (save_window && s.core.session_preferences_saves_enabled)
+        app::SaveSessionPreferences(CaptureWindowPreferences(s, hwnd));
     s.places.Save();
     s.ctxMenuPrefs.Save();
     s.appPrefs.Save();
@@ -418,16 +419,16 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (!s->core.instance) s->core.instance = cs->hInstance;
         s->core.windows.Add(hwnd, s);
         if (!s->core.global_ui_owner) s->core.global_ui_owner = hwnd;
-        s->device_operation_mailbox = std::make_shared<app::WindowResultMailbox<app::DeviceOperationResult>>(
+        s->device_operation_mailbox = std::make_shared<WindowResultMailbox<app::DeviceOperationResult>>(
             hwnd, app::WM_DEVICE_OPERATION_DONE);
-        s->shell_verbs_mailbox = std::make_shared<app::WindowResultMailbox<ShellVerbsResult>>(hwnd, WM_SHELL_VERBS);
-        s->shell_registry_mailbox = std::make_shared<app::WindowResultMailbox<bool>>(hwnd, WM_SHELL_CACHE_INVALIDATE);
-        s->clipboard_paste_mailbox = std::make_shared<app::WindowResultMailbox<bool>>(hwnd, WM_CLIPBOARD_PASTE_RESULT);
-        s->details_attribute_mailbox = std::make_shared<app::WindowResultMailbox<app::DetailsAttributeResult>>(hwnd, WM_DETAILS_ATTRIBUTE_RESULT);
-        s->shortcut_drop_mailbox = std::make_shared<app::WindowResultMailbox<app::ShortcutDropResult>>(hwnd, WM_DROP_SHORTCUTS_RESULT);
-        s->external_open_mailbox = std::make_shared<app::WindowResultMailbox<app::ExternalOpenResult>>(
+        s->shell_verbs_mailbox = std::make_shared<WindowResultMailbox<ShellVerbsResult>>(hwnd, WM_SHELL_VERBS);
+        s->shell_registry_mailbox = std::make_shared<WindowResultMailbox<bool>>(hwnd, WM_SHELL_CACHE_INVALIDATE);
+        s->clipboard_paste_mailbox = std::make_shared<WindowResultMailbox<bool>>(hwnd, WM_CLIPBOARD_PASTE_RESULT);
+        s->details_attribute_mailbox = std::make_shared<WindowResultMailbox<app::DetailsAttributeResult>>(hwnd, WM_DETAILS_ATTRIBUTE_RESULT);
+        s->shortcut_drop_mailbox = std::make_shared<WindowResultMailbox<app::ShortcutDropResult>>(hwnd, WM_DROP_SHORTCUTS_RESULT);
+        s->external_open_mailbox = std::make_shared<WindowResultMailbox<app::ExternalOpenResult>>(
             hwnd, WM_EXTERNAL_OPEN_READY);
-        s->dup_volumes_mailbox = std::make_shared<app::WindowResultMailbox<std::vector<index::VolumeInfo>>>(hwnd, WM_DUP_VOLUMES);
+        s->dup_volumes_mailbox = std::make_shared<WindowResultMailbox<std::vector<index::VolumeInfo>>>(hwnd, WM_DUP_VOLUMES);
         s->dup_volume_cache_pending = false;
         s->tray_controller.SetBeforeRestore([s] {
             s->tray_controller.SetVisible(s->appPrefs.keep_running_on_close || s->appPrefs.global_search_enabled);
@@ -2396,7 +2397,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
 
     // Only appearance and retained user data survive a launch. Navigation starts fresh.
     app::WindowSessionSnapshot session;
-    if (!state.isolatedTest && app::LoadSessionPreferences(session)) {
+    if (!state.isolatedTest && app::LoadSessionPreferences(session,
+        &state.core.session_preferences_saves_enabled)) {
         RestoreWindowPreferences(state, session);
     }
 

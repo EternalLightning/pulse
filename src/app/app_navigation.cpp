@@ -35,6 +35,7 @@
 #include "context_menu.h"
 #include "batch_rename.h"
 #include "search_query.h"
+#include "content_search_options.h"
 #include "search_refresh_log.h"
 #include "link_resolve.h"
 #include "resource.h"
@@ -530,6 +531,7 @@ void RequestSavedSearch(AppState& s, app::Tab& tab, size_t saved_index) {
     request.session_id=tab.search_session_id;
     request.mode = search.mode == app::SavedSearchMode::Duplicates
         ? index::ContentSearchMode::Duplicates : index::ContentSearchMode::Content;
+    app::ConfigureContentSearchOptions(s.contentSearch.GetConfig(), request);
     ConfigureContentSort(tab,request);
     request.paged_results = search.mode == app::SavedSearchMode::Content;
     if (previous && request.paged_results) {
@@ -1464,8 +1466,24 @@ bool PathHasPendingRefresh(AppState& s, const std::wstring& path) {
     return pending;
 }
 
+static void InvalidateThumbnailPath(AppState& s, const std::wstring& path, bool descendants = false) {
+    s.renderer.SharedThumbnailCache()->InvalidatePath(path, descendants);
+    if (!s.quickPreview.visible()) return;
+    const auto shown = s.quickPreview.item();
+    const auto shown_path = fs::NormalizePath(shown.path);
+    std::wstring root = path;
+    while (root.size() > 1 && (root.back() == L'\\' || root.back() == L'/')) root.pop_back();
+    const bool same = pulse::path::EqualInsensitive(root, shown_path);
+    const bool child = descendants && shown_path.size() > root.size() &&
+        (shown_path[root.size()] == L'\\' || shown_path[root.size()] == L'/') &&
+        pulse::path::EqualInsensitive(root, std::wstring_view(shown_path).substr(0, root.size()));
+    if (same || child) s.quickPreview.Update(shown);
+}
+
 void RefreshPath(AppState& s, const std::wstring& path, RefreshReason reason) {
     const std::wstring normalized = fs::NormalizePath(path);
+    if (reason != RefreshReason::Background && !normalized.empty() && !fs::IsVirtualPath(normalized))
+        InvalidateThumbnailPath(s, normalized, true);
     if (reason == RefreshReason::Explicit && !normalized.empty() && !fs::IsVirtualPath(normalized))
         s.renderer.InvalidateShellIcon(normalized);
     if (s.notify_patches.pending.erase(normalized)) s.store.MarkDirty(normalized);
@@ -1661,13 +1679,29 @@ void DrainDirNotifies(AppState& s) {
     // single tick. Group the whole drain per folder and patch each folder once.
     std::vector<std::pair<std::wstring, std::vector<fs::DirNotifyEvent>>> structural_by_path;
     std::vector<std::pair<std::wstring, std::vector<std::wstring>>> modified_by_path;
+    std::unordered_set<std::wstring> invalidated_paths;
+    std::unordered_set<std::wstring> invalidated_trees;
+    const auto invalidate = [&](const std::wstring& path, bool descendants = false) {
+        auto& seen = descendants ? invalidated_trees : invalidated_paths;
+        if (!seen.insert(path).second) return;
+        s.renderer.InvalidateShellIcon(path);
+        InvalidateThumbnailPath(s, path, descendants);
+    };
     for (auto& item : batch) {
         const std::wstring path = fs::NormalizePath(item.path);
         if (!path.empty() && !fs::IsVirtualPath(path)) {
-            if (item.overflow) s.renderer.InvalidateShellIcon(path);
+            if (item.overflow) {
+                invalidate(path, true);
+            }
             else for (const auto& event : item.events) {
-                if (!event.name.empty()) s.renderer.InvalidateShellIcon(fs::NormalizePath(path + L"\\" + event.name));
-                if (!event.old_name.empty()) s.renderer.InvalidateShellIcon(fs::NormalizePath(path + L"\\" + event.old_name));
+                if (!event.name.empty()) {
+                    const auto changed_path = fs::NormalizePath(path + L"\\" + event.name);
+                    invalidate(changed_path);
+                }
+                if (!event.old_name.empty()) {
+                    const auto old_path = fs::NormalizePath(path + L"\\" + event.old_name);
+                    invalidate(old_path);
+                }
             }
         }
         InvalidateColumnStripPath(s, path);
@@ -2108,10 +2142,7 @@ std::wstring NewTabPath(const AppState& s) {
 
 void OpenTabAt(AppState& s, const std::wstring& path) {
     RememberLayoutFocus(s);
-    auto& layout = s.window_tabs.NewTab(path);
-    // The model's ordinary NewTab factory also defaults empty to C:. Override
-    // only this explicit opener before binding watches or starting enumeration.
-    if (path.empty()) layout.FocusedPane()->NewTab(L"");
+    s.window_tabs.NewTab(path);
     BindCurrentLayout(s);
     if (app::Tab* tab = ActiveTab(s)) {
         StartLoadingPath(s, *tab, tab->current_path);
@@ -2121,7 +2152,7 @@ void OpenTabAt(AppState& s, const std::wstring& path) {
 }
 
 void NewTab(AppState& s, const std::wstring& path) {
-    OpenTabAt(s, path.empty() ? pulse::path::DefaultNavigationRoot() : path);
+    OpenTabAt(s, path);
 }
 
 void OpenSettingsTab(AppState& s, int page) {

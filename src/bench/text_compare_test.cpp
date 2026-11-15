@@ -3,7 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
-#include "../app/text_diff.h"
+#include "../model/text_diff.h"
 #include "../app/text_compare_selection.h"
 #include "../app/app_model.h"
 #include "../app/context_menu.h"
@@ -13,7 +13,7 @@
 #include <fstream>
 #include <iostream>
 
-namespace pulse::app { std::wstring GetPulseDataDir() { return {}; } }
+namespace pulse::storage { std::wstring ConfigurationRoot() { return {}; } }
 
 int wmain() {
     namespace diff = pulse::diff;

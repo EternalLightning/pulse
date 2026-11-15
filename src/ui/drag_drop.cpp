@@ -7,6 +7,7 @@
 #include "drag_drop.h"
 #include "../ipc/shell_query_client.h"
 #include "../ops/clipboard.h"
+#include "../common/path_utils.h"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -171,9 +172,7 @@ DWORD ReadDwordFormat(IDataObject* obj, CLIPFORMAT format) {
 // Pure helpers
 // ---------------------------------------------------------------------------
 std::wstring VolumeRoot(const std::wstring& path) {
-    std::wstring p = path;
-    if (p.starts_with(L"\\\\?\\UNC\\")) p = L"\\\\" + p.substr(8);
-    else if (p.starts_with(L"\\\\?\\")) p = p.substr(4);
+    std::wstring p = pulse::path::StripExtendedPathPrefix(path);
     if (p.size() >= 3 && std::iswalpha(p[0]) && p[1] == L':') return p.substr(0, 3);
     if (p.size() >= 5 && p[0] == L'\\' && p[1] == L'\\') {
         auto s3 = p.find(L'\\', 2);

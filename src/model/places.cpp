@@ -5,8 +5,9 @@
 
 // places.cpp — Persist workspaces / tags / network pins + NTFS ADS.
 #include "places.h"
-#include "session.h"
-#include "../ui/view_layout.h"
+#include "tag_id.h"
+#include "../common/user_storage.h"
+#include "../common/path_utils.h"
 #include "../fs/fs_enum.h"
 #include "../common/json_utils.h"
 #include "../common/utf8_file.h"
@@ -23,9 +24,14 @@ namespace {
 
 constexpr const wchar_t* kAdsSuffix = L":Pulse.Tag";
 
+static std::wstring PlacesDataDir() {
+    const auto root = storage::ConfigurationRoot();
+    if (!root.empty()) CreateDirectoryW(root.c_str(), nullptr);
+    return root;
+}
+
 static std::wstring FolderTitle(std::wstring path) {
-    if (path.starts_with(L"\\\\?\\UNC\\")) path = L"\\\\" + path.substr(8);
-    else if (path.starts_with(L"\\\\?\\")) path = path.substr(4);
+    path = pulse::path::StripExtendedPathPrefix(path);
     while (path.size() > 1 && path.back() == L'\\') path.pop_back();
     auto pos = path.find_last_of(L"\\/");
     if (pos != std::wstring::npos && pos + 1 < path.size()) return path.substr(pos + 1);
@@ -54,17 +60,7 @@ static std::wstring TagKey(const std::wstring& p) {
     return key;
 }
 
-static TagId NewTagId() {
-    GUID guid{};
-    if (FAILED(CoCreateGuid(&guid))) return L"tag-" + std::to_wstring(GetTickCount64());
-    wchar_t text[40]{};
-    StringFromGUID2(guid, text, ARRAYSIZE(text));
-    std::wstring id = text;
-    if (!id.empty() && id.front() == L'{') id.erase(id.begin());
-    if (!id.empty() && id.back() == L'}') id.pop_back();
-    for (auto& c : id) c = static_cast<wchar_t>(std::towlower(c));
-    return id;
-}
+using detail::NewTagId;
 
 static std::wstring TrimTagName(std::wstring value) {
     const auto first = value.find_first_not_of(L" \t\r\n");
@@ -122,7 +118,7 @@ PlacesCatalog::~PlacesCatalog() {
 }
 
 bool PlacesCatalog::SaveTagFile(const std::vector<ColorTag>& snapshot) {
-    const std::wstring dir = app::GetPulseDataDir();
+    const std::wstring dir = PlacesDataDir();
     if (dir.empty()) return false;
     std::wostringstream file;
     auto write_array = [&](const std::vector<std::wstring>& values) {
@@ -215,6 +211,7 @@ void PlacesCatalog::EnsureDefaults() {
 
 bool PlacesCatalog::Load() {
     tag_saves_enabled_ = true;
+    places_saves_enabled_ = false;
     workspaces.clear();
     tags.clear();
     networks.clear();
@@ -225,12 +222,19 @@ bool PlacesCatalog::Load() {
     recent_items.clear();
     starred_index_.clear();
     active_workspace = -1;
-    std::wstring dir = app::GetPulseDataDir();
+    std::wstring dir = PlacesDataDir();
     if (dir.empty()) { EnsureDefaults(); return false; }
     std::wstring json;
-    ReadUtf8File(dir + L"\\places.json", json);
+    const auto places_path = dir + L"\\places.json";
+    const DWORD attrs = GetFileAttributesW(places_path.c_str());
+    const DWORD places_error = attrs == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    const bool places_missing = attrs == INVALID_FILE_ATTRIBUTES &&
+        (places_error == ERROR_FILE_NOT_FOUND || places_error == ERROR_PATH_NOT_FOUND);
+    const bool places_read = ReadUtf8File(places_path, json);
     const pulse::json::Document doc(json, true);
-    const bool places_loaded = doc.Is(pulse::json::Kind::Object);
+    const bool places_loaded = places_read && doc.Is(pulse::json::Kind::Object);
+    // An unreadable existing file must survive the fallback catalog and shutdown save.
+    places_saves_enabled_ = places_loaded || places_missing;
 
     active_workspace = pulse::json::ExtractInt(doc, L"active_workspace", -1);
 
@@ -242,9 +246,9 @@ bool PlacesCatalog::Load() {
         w.layout = pulse::json::ExtractInt(block_doc, L"layout");
         w.pane_paths = pulse::json::ExtractStringArray(block_doc, L"panes");
         for (const auto& value : pulse::json::ExtractStringArray(block_doc, L"views"))
-            w.pane_views.push_back(ui::ParseViewMode(value));
+            w.pane_views.push_back(ParseViewMode(value));
         while (w.pane_views.size() < w.pane_paths.size())
-            w.pane_views.push_back(ui::ViewMode::Details);
+            w.pane_views.push_back(ViewMode::Details);
         w.focused_pane = pulse::json::ExtractInt(block_doc, L"focused_pane", -1);
         if (w.focused_pane < 0 || static_cast<size_t>(w.focused_pane) >= w.pane_paths.size()) {
             w.focused_pane = 0;
@@ -284,11 +288,13 @@ bool PlacesCatalog::Load() {
         if (!w.root.empty()) workspaces.push_back(std::move(w));
     }
 
+    bool legacy_tag_ids_valid = true;
     for (const auto& block : ExtractObjectArray(doc, L"tags")) {
         const pulse::json::Document block_doc(block, true);
         ColorTag t;
         t.id = pulse::json::ExtractString(block_doc, L"id");
         if (t.id.empty()) t.id = NewTagId();
+        if (t.id.empty()) legacy_tag_ids_valid = false;
         t.name = pulse::json::ExtractString(block_doc, L"name");
         t.rgb = ExtractRgb(block_doc);
         t.paths = pulse::json::ExtractStringArray(block_doc, L"paths");
@@ -380,7 +386,7 @@ bool PlacesCatalog::Load() {
         const DWORD error = GetLastError();
         tags_missing = attributes == INVALID_FILE_ATTRIBUTES &&
             (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND);
-        tag_saves_enabled_ = tags_missing;
+        tag_saves_enabled_ = tags_missing && legacy_tag_ids_valid;
     } else {
         std::vector<ColorTag> loaded;
         const pulse::json::Document tags_doc(tag_json, true);
@@ -437,7 +443,7 @@ bool PlacesCatalog::Load() {
     RebuildTagIndex();
     RebuildStarIndex();
     if (places_loaded && tags_missing) QueueTagSave();
-    return tag_saves_enabled_ && (places_loaded || tags_loaded);
+    return places_saves_enabled_ && tag_saves_enabled_ && (places_loaded || tags_loaded);
 }
 
 bool ParsePulsePath(const std::wstring& path, std::wstring* kind, std::wstring* rest) {
@@ -471,12 +477,13 @@ PlacesCatalog::SaveSnapshot PlacesCatalog::CaptureSaveSnapshot() const {
 }
 
 void PlacesCatalog::MarkPlacesDirty() const {
+    if (!places_saves_enabled_) return;
     places_save_revision_.fetch_add(1, std::memory_order_relaxed);
     places_save_due_.store(GetTickCount64() + 1000, std::memory_order_release);
 }
 
 void PlacesCatalog::QueuePlacesSave() const {
-    if (!persist) return;
+    if (!persist || !places_saves_enabled_) return;
     auto snapshot = CaptureSaveSnapshot();
     const uint64_t revision = places_save_revision_.load(std::memory_order_acquire);
     {
@@ -536,6 +543,7 @@ void PlacesCatalog::StopPlacesWriter() {
 
 bool PlacesCatalog::Save() const {
     if (!persist) return true;
+    if (!places_saves_enabled_) return false;
     places_save_revision_.fetch_add(1, std::memory_order_acq_rel);
     const SaveSnapshot snapshot = CaptureSaveSnapshot();
     std::lock_guard<std::mutex> lock(places_save_io_mutex_);
@@ -545,7 +553,7 @@ bool PlacesCatalog::Save() const {
 }
 
 bool PlacesCatalog::SaveSnapshotFile(const SaveSnapshot& snapshot) {
-    std::wstring dir = app::GetPulseDataDir();
+    std::wstring dir = PlacesDataDir();
     if (dir.empty()) return false;
     DeleteFileW((dir + L"\\places.tmp").c_str());
     return WriteUtf8FileAtomic(dir + L"\\places.json", SnapshotJson(snapshot));
@@ -580,7 +588,7 @@ std::wstring PlacesCatalog::SnapshotJson(const SaveSnapshot& snapshot) {
         writeArr(w.pane_paths);
         std::vector<std::wstring> views;
         views.reserve(w.pane_views.size());
-        for (ui::ViewMode mode : w.pane_views) views.push_back(ui::ViewModeName(mode));
+        for (ViewMode mode : w.pane_views) views.push_back(ViewModeName(mode));
         f << L",\"views\":";
         writeArr(views);
         std::vector<std::wstring> freq;
@@ -702,7 +710,7 @@ int PlacesCatalog::FindWorkspaceForPath(const std::wstring& path) const {
 
 int PlacesCatalog::PinWorkspace(const std::wstring& root, const std::wstring& name, int layout,
                                 const std::vector<std::wstring>& pane_paths,
-                                const std::vector<ui::ViewMode>& pane_views, int focused_pane) {
+                                const std::vector<ViewMode>& pane_views, int focused_pane) {
     const std::wstring n = Norm(root);
     auto paths = pane_paths;
     if (paths.empty()) paths.push_back(n);
@@ -724,7 +732,7 @@ int PlacesCatalog::PinWorkspace(const std::wstring& root, const std::wstring& na
     w.pane_views = pane_views;
     w.focused_pane = focused_pane;
     while (w.pane_views.size() < w.pane_paths.size())
-        w.pane_views.push_back(ui::ViewMode::Details);
+        w.pane_views.push_back(ViewMode::Details);
     workspaces.push_back(std::move(w));
     active_workspace = static_cast<int>(workspaces.size()) - 1;
     Save();
@@ -762,7 +770,7 @@ bool PlacesCatalog::UnpinWorkspace(const std::wstring& root) {
 
 void PlacesCatalog::UpdateWorkspaceSnapshot(int index, int layout,
                                             const std::vector<std::wstring>& pane_paths,
-                                            const std::vector<ui::ViewMode>& pane_views, int focused_pane) {
+                                            const std::vector<ViewMode>& pane_views, int focused_pane) {
     if (index < 0 || index >= static_cast<int>(workspaces.size())) return;
     auto& w = workspaces[static_cast<size_t>(index)];
     w.layout = layout;
@@ -771,7 +779,7 @@ void PlacesCatalog::UpdateWorkspaceSnapshot(int index, int layout,
     w.focused_pane = w.pane_paths.empty() ? 0 :
         std::clamp(focused_pane, 0, static_cast<int>(w.pane_paths.size()) - 1);
     while (w.pane_views.size() < w.pane_paths.size())
-        w.pane_views.push_back(ui::ViewMode::Details);
+        w.pane_views.push_back(ViewMode::Details);
 }
 
 int PlacesCatalog::FindNetwork(const std::wstring& unc) const {
@@ -879,11 +887,13 @@ std::vector<std::wstring> PlacesCatalog::PathsForTag(const TagId& id) const {
 }
 
 TagId PlacesCatalog::CreateTag(const std::wstring& raw_name, uint32_t rgb) {
+    if (!CanEditTags()) return {};
     const std::wstring name = TrimTagName(raw_name);
     if (name.empty()) return {};
     for (const auto& tag : tags) if (EqualI(tag.name, name)) return {};
     ColorTag tag;
     tag.id = NewTagId();
+    if (tag.id.empty()) return {};
     tag.name = name;
     tag.rgb = rgb & 0xFFFFFFu;
     const TagId id = tag.id;
@@ -894,6 +904,7 @@ TagId PlacesCatalog::CreateTag(const std::wstring& raw_name, uint32_t rgb) {
 }
 
 bool PlacesCatalog::RenameTag(const TagId& id, const std::wstring& raw_name) {
+    if (!CanEditTags()) return false;
     const std::wstring name = TrimTagName(raw_name);
     const int index = FindTagIndex(id);
     if (index < 0 || name.empty()) return false;
@@ -907,6 +918,7 @@ bool PlacesCatalog::RenameTag(const TagId& id, const std::wstring& raw_name) {
 }
 
 bool PlacesCatalog::SetTagColor(const TagId& id, uint32_t rgb) {
+    if (!CanEditTags()) return false;
     const int index = FindTagIndex(id);
     if (index < 0) return false;
     rgb &= 0xFFFFFFu;
@@ -936,7 +948,13 @@ TagSelectionState PlacesCatalog::GetSelectionState(
 void PlacesCatalog::RebuildTagIndex() {
     tag_index_.clear();
     for (int i = 0; i < static_cast<int>(tags.size()); ++i) {
-        if (tags[static_cast<size_t>(i)].id.empty()) tags[static_cast<size_t>(i)].id = NewTagId();
+        if (tags[static_cast<size_t>(i)].id.empty()) {
+            tags[static_cast<size_t>(i)].id = NewTagId();
+            if (tags[static_cast<size_t>(i)].id.empty()) {
+                tag_saves_enabled_ = false;
+                continue;
+            }
+        }
         for (const auto& path : tags[static_cast<size_t>(i)].paths) {
             const std::wstring n = TagKey(path);
             if (!n.empty() && !fs::IsVirtualPath(n)) tag_index_[n].push_back(i);
@@ -1138,6 +1156,7 @@ std::vector<std::wstring> PlacesCatalog::RecentFolderPaths(size_t limit) const {
 }
 
 void PlacesCatalog::TagsReordered() {
+    if (!CanEditTags()) return;
     RebuildTagIndex();
     QueueTagSave();
 }
@@ -1166,6 +1185,7 @@ bool PlacesCatalog::SetTagged(int tag_index, const std::wstring& path, bool tagg
 
 bool PlacesCatalog::SetTaggedBatch(int tag_index, const std::vector<std::wstring>& paths,
                                    bool tagged, std::vector<TagAdsUpdate>* deferred_ads) {
+    if (!CanEditTags()) return false;
     if (tag_index < 0 || tag_index >= static_cast<int>(tags.size())) return false;
     auto& t = tags[static_cast<size_t>(tag_index)];
     std::unordered_set<std::wstring> membership;
@@ -1201,6 +1221,7 @@ bool PlacesCatalog::ToggleTag(int tag_index, const std::wstring& path) {
 
 bool PlacesCatalog::ToggleTagBatch(int tag_index, const std::vector<std::wstring>& paths,
                                    std::vector<TagAdsUpdate>* deferred_ads) {
+    if (!CanEditTags()) return false;
     if (tag_index < 0 || tag_index >= static_cast<int>(tags.size())) return false;
     auto& tagged_paths = tags[static_cast<size_t>(tag_index)].paths;
     std::unordered_set<std::wstring> membership;
@@ -1227,6 +1248,7 @@ bool PlacesCatalog::ToggleTagBatch(int tag_index, const std::vector<std::wstring
 }
 
 size_t PlacesCatalog::DeleteTag(const TagId& id, std::vector<TagAdsUpdate>* deferred_ads) {
+    if (!CanEditTags()) return 0;
     const int index = FindTagIndex(id);
     if (index < 0) return 0;
     const std::vector<std::wstring> affected = tags[static_cast<size_t>(index)].paths;
@@ -1338,14 +1360,16 @@ void PlacesCatalog::RemapPaths(const std::wstring& old_path, const std::wstring&
     const std::wstring new_norm = Norm(new_path);
     if (old_norm.empty() || new_norm.empty() || EqualI(old_norm, new_norm)) return;
     bool changed = false;
-    for (auto& tag : tags) {
-        for (auto& path : tag.paths) {
-            if (!PathIsOrDescendant(path, old_norm)) continue;
-            path = new_norm + path.substr(old_norm.size());
-            changed = true;
+    if (CanEditTags()) {
+        for (auto& tag : tags) {
+            for (auto& path : tag.paths) {
+                if (!PathIsOrDescendant(path, old_norm)) continue;
+                path = new_norm + path.substr(old_norm.size());
+                changed = true;
+            }
+            std::sort(tag.paths.begin(), tag.paths.end());
+            tag.paths.erase(std::unique(tag.paths.begin(), tag.paths.end()), tag.paths.end());
         }
-        std::sort(tag.paths.begin(), tag.paths.end());
-        tag.paths.erase(std::unique(tag.paths.begin(), tag.paths.end()), tag.paths.end());
     }
     std::unordered_set<std::wstring> quick_seen;
     for (auto& path : quick_access_paths) {
@@ -1398,15 +1422,17 @@ void PlacesCatalog::CloneAssignments(const std::wstring& source,
     const std::wstring dst = Norm(destination);
     if (src.empty() || dst.empty()) return;
     bool changed = false;
-    for (auto& tag : tags) {
-        std::vector<std::wstring> clones;
-        for (const auto& path : tag.paths) {
-            if (PathIsOrDescendant(path, src)) clones.push_back(dst + path.substr(src.size()));
-        }
-        for (auto& clone : clones) {
-            if (std::find(tag.paths.begin(), tag.paths.end(), clone) == tag.paths.end()) {
-                tag.paths.push_back(std::move(clone));
-                changed = true;
+    if (CanEditTags()) {
+        for (auto& tag : tags) {
+            std::vector<std::wstring> clones;
+            for (const auto& path : tag.paths) {
+                if (PathIsOrDescendant(path, src)) clones.push_back(dst + path.substr(src.size()));
+            }
+            for (auto& clone : clones) {
+                if (std::find(tag.paths.begin(), tag.paths.end(), clone) == tag.paths.end()) {
+                    tag.paths.push_back(std::move(clone));
+                    changed = true;
+                }
             }
         }
     }
@@ -1435,13 +1461,15 @@ void PlacesCatalog::RemoveAssignments(const std::wstring& path, bool include_des
     const std::wstring normalized = Norm(path);
     if (normalized.empty()) return;
     bool changed = false;
-    for (auto& tag : tags) {
-        const size_t before = tag.paths.size();
-        std::erase_if(tag.paths, [&](const std::wstring& candidate) {
-            return include_descendants ? PathIsOrDescendant(candidate, normalized)
-                                       : EqualI(candidate, normalized);
-        });
-        changed = changed || before != tag.paths.size();
+    if (CanEditTags()) {
+        for (auto& tag : tags) {
+            const size_t before = tag.paths.size();
+            std::erase_if(tag.paths, [&](const std::wstring& candidate) {
+                return include_descendants ? PathIsOrDescendant(candidate, normalized)
+                                           : EqualI(candidate, normalized);
+            });
+            changed = changed || before != tag.paths.size();
+        }
     }
     const size_t starred_before = starred_items.size();
     std::erase_if(starred_items, [&](const StarredItem& item) {
@@ -1472,6 +1500,7 @@ void PlacesCatalog::RemoveAssignments(const std::wstring& path, bool include_des
 void PlacesCatalog::MergeAdsRecords(const std::wstring& path,
                                     const std::vector<TagAdsRecord>& records,
                                     const std::vector<std::wstring>& legacy_names) {
+    if (!CanEditTags()) return;
     const std::wstring n = Norm(path);
     if (n.empty() || fs::IsVirtualPath(n)) return;
     if (!records.empty()) {
@@ -1490,6 +1519,7 @@ void PlacesCatalog::MergeAdsRecords(const std::wstring& path,
                 if (index < 0) {
                     ColorTag tag;
                     tag.id = record.id.empty() ? NewTagId() : record.id;
+                    if (tag.id.empty()) continue;
                     tag.name = imported_name.empty() ? L"导入的标签" : imported_name;
                     tag.rgb = record.rgb;
                     tags.push_back(std::move(tag));

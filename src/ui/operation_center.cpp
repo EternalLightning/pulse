@@ -292,13 +292,14 @@ void OperationCenter::Layout() {
     content_height_ = y + 8 * s;
     const float maximum=(std::max)(0.0f,content_height_-body_height_);
     scroll_=std::clamp(scroll_,0.0f,maximum);
-    if (scroll_motion_.Pending()) TickScroll(AnimationTimeMs());
     AnimateCardLayout();
     const float offset = margin + kHeader * s - scroll_;
     for (auto& button : buttons_) if (button.action != Action::Clear) {
         button.content_top = button.bounds.top; button.content_bottom = button.bounds.bottom;
         button.bounds.top += offset; button.bounds.bottom += offset;
     }
+    // Scrolling needs the rebuilt buttons' content coordinates to be initialized.
+    if (scroll_motion_.Pending()) TickScroll(AnimationTimeMs());
 }
 
 void OperationCenter::Position(RECT anchor) {
@@ -475,9 +476,10 @@ bool OperationCenter::Render(bool allow_capture) {
         painter_.DrawMenuSurface(surface, acrylic_);
         float title_right = surface.right - kContentInset * s;
         if (!buttons_.empty() && buttons_[0].action == Action::Clear) title_right = buttons_[0].bounds.left - 8 * s;
-        compositor_->DrawDialogTitle(labels_.title,
-            D2D1::RectF(surface.left + kContentInset * s, margin + 17 * s, title_right, top - 8 * s),
-            theme.text);
+        const auto title_bounds = D2D1::RectF(surface.left + kContentInset * s,
+            margin + 17 * s, title_right, top - 8 * s);
+        if (!compositor_->DrawDialogTitle(labels_.title, title_bounds, theme.text))
+            painter_.DrawTextNative(labels_.title, title_bounds, compositor_->DialogTitleFormat(), theme.text);
         const auto viewport = D2D1::RectF(surface.left, top, surface.right, surface.bottom);
         dc->PushAxisAlignedClip(viewport, D2D1_ANTIALIAS_MODE_ALIASED);
         if (tasks_.empty()) {

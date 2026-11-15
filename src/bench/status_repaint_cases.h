@@ -2,7 +2,7 @@
 #pragma once
 #include "../app/cloud_commands.h"
 #include "../app/cloud_roots.h"
-#include "../app/cloud_sync_probe.h"
+#include "../fs/cloud_sync_probe.h"
 #include "../app/change_time.h"
 
 namespace pulse::bench {
@@ -10,8 +10,8 @@ template<class Check>
 void StatusRepaintCases(AppState& s, Check check) {
     uint32_t provider = 0;
     unsigned queries = 0;
-    app::CloudSyncProbe probe([&](const std::wstring&) { ++queries; return provider; },
-        app::CloudSyncProbe::Mode::Manual);
+    fs::CloudSyncProbe probe([&](const std::wstring&) { ++queries; return provider; },
+        fs::CloudSyncProbe::Mode::Manual);
     probe.Lookup(L"fixture", 1);
     probe.RunPendingForTest();
     check(probe.Revision() == 0, "initial neutral cloud result does not change displayed status");
@@ -54,11 +54,11 @@ void StatusRepaintCases(AppState& s, Check check) {
     TickCloudStatus(s);
     bool cloud_quiet = true;
     for (int i = 0; i < 3; ++i) {
-        s.cloud_status_tick = GetTickCount64() - app::CloudSyncProbe::kSyncingRecheckMs;
+        s.cloud_status_tick = GetTickCount64() - fs::CloudSyncProbe::kSyncingRecheckMs;
         cloud_quiet &= !TickCloudStatus(s);
     }
     check(cloud_quiet, "production cloud timer does not dirty an unchanged cloud folder");
-    app::CloudSyncProbe::Instance().Lookup(s.open_path + L"\\unseen.txt", 1);
+    fs::CloudSyncProbe::Instance().Lookup(s.open_path + L"\\unseen.txt", 1);
     check(!TickCloudStatus(s), "offscreen cloud status changes do not repaint the current window");
 
     auto& state = s.changes;

@@ -99,7 +99,7 @@ private:
     uint32_t DeleteAuthorized(const std::vector<std::wstring>& paths, uint64_t token,
                               bool recycle = false, HWND owner = nullptr,
                               const std::vector<FileIdentity>& expected_identities = {},
-                              const Owner& callbacks = {});
+                              const Owner& callbacks = {}, bool elevation_authorized = false);
     ShellClient() = default;
     ~ShellClient();
 
@@ -108,6 +108,7 @@ private:
         uint32_t id = 0;
         std::vector<uint8_t> payload;
         bool retried = false;
+        std::vector<ShellOperationItemResult> file_operation_items;
     };
 
     struct Connection {

@@ -15,7 +15,7 @@ namespace pulse::index {
 // Append is called by the IPC reader, never by the window thread.
 class ContentResultStore {
 public:
-    struct Row { fs::DirEntry entry; std::wstring snippet; uint64_t file_id=0; };
+    struct Row { fs::DirEntry entry; std::wstring snippet; uint64_t file_id=0, spool_sequence=0; };
     using Filter = std::function<bool(const fs::DirEntry&)>;
     struct Selection {
         std::vector<std::pair<size_t, Row>> rows;

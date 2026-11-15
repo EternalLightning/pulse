@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "../app/app_internal.h"
 #include "../app/app_ui_schedule.h"
-#include "../app/frame_profile.h"
+#include "../common/frame_profile.h"
 #include "../app/cloud_root_catalog.h"
 #include "../common/user_storage.h"
 #include "../common/windows_compat.h"
@@ -71,9 +71,9 @@ int main(int argc, char** argv) {
     }
     const auto sample = [&](const char* label, uint64_t duration, bool verify) {
         unsigned paints = 0, draws = 0, presents = 0, timers = 0;
-        app::FrameProfileSample frame;
-        app::ObserveFrameProfile observe(frame);
-        app::ObserveFrameDrawProfile hooks({&draws,
+        profile::FrameProfileSample frame;
+        profile::ObserveFrameProfile observe(frame);
+        profile::ObserveFrameDrawProfile hooks({&draws,
             [](void* count) noexcept { ++*static_cast<unsigned*>(count); }, nullptr});
         const auto until = GetTickCount64() + duration;
         while (GetTickCount64() < until) {

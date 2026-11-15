@@ -262,7 +262,7 @@ void TextDiffWindow::StartJob(bool reload) {
     computing_ = true;
     spans_.clear();
     cancel_ = std::make_shared<std::atomic<bool>>(false);
-    mailbox_ = std::make_shared<app::WindowResultMailbox<std::unique_ptr<JobResult>>>(hwnd_, kMsgJobDone);
+    mailbox_ = std::make_shared<WindowResultMailbox<std::unique_ptr<JobResult>>>(hwnd_, kMsgJobDone);
     const auto cancel = cancel_;
     const auto mailbox = mailbox_;
     const std::wstring left_path = path_[0];

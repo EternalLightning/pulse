@@ -83,6 +83,7 @@ struct Request {
     uint64_t delete_token = 0;
     std::vector<pulse::FileIdentity> expected_identities;
     HWND owner = nullptr;
+    bool elevation_authorized = false;
     pulse::shell::DeviceOperation device_operation;
     ShellOperationRequest file_operation;
 };
@@ -255,7 +256,13 @@ void ExecuteRequest(std::unique_ptr<Request> req) {
             }});
         { std::lock_guard lock(g.paused_mutex); g.paused_ids.erase(req->id); }
         if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
-        SendMsg(RSP_FILE_OPERATION_DONE, req->id, WriteShellOperationResult(result));
+        if (!SendShellOperationResultBatches(result, [&](bool terminal, const auto& payload) {
+            return SendMsg(terminal ? RSP_FILE_OPERATION_DONE : RSP_FILE_OPERATION_ITEMS, req->id, payload);
+        })) {
+            g.running.store(false);
+            CancelIoEx(g.pipe, nullptr);
+            PostQuitMessage(0);
+        }
         return;
     }
     if (req->type == REQ_DEVICE_OPERATION) {
@@ -284,7 +291,7 @@ void ExecuteRequest(std::unique_ptr<Request> req) {
             [id = req->id] { return g.cancel_id.load() == id; },
             [id = req->id](size_t done, size_t total, const std::wstring& path) {
                 SendProgress(id, total ? static_cast<float>(done * 100.0 / total) : 0.0f, path, done, total);
-            });
+            }, req->elevation_authorized, req->owner);
         const auto error = FAILED(result.error) && !result.cancelled
             ? pulse::format::FileOperationErrorText(result.error) + L" | " + result.failed_path : std::wstring{};
         if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
@@ -491,6 +498,7 @@ DWORD WINAPI ReaderThreadImpl() {
             case REQ_REALDELETE:
             case REQ_AUTHORIZED_RECYCLE:
             case REQ_AUTHORIZED_DELETE:
+            case REQ_AUTHORIZED_DELETE_ELEVATED:
             case REQ_NEW_FOLDER:
             case REQ_NEW_FILE: {
                 if (g_context_worker) {
@@ -500,6 +508,8 @@ DWORD WINAPI ReaderThreadImpl() {
                 auto* req = new Request();
                 req->type = h.type;
                 req->id = h.request_id;
+                req->elevation_authorized = h.type == REQ_AUTHORIZED_DELETE_ELEVATED;
+                if (req->elevation_authorized) req->type = REQ_AUTHORIZED_DELETE;
                 PayloadReader r(payload.data(), payload.size());
                 bool ok = true;
                 if (req->type == REQ_NEW_FOLDER || req->type == REQ_NEW_FILE) {
@@ -510,9 +520,10 @@ DWORD WINAPI ReaderThreadImpl() {
                     if (IsAuthorizedDeletion(req->type)) {
                         DeleteWirePlan plan;
                         const bool recycle = req->type == REQ_AUTHORIZED_RECYCLE;
-                        ok = ReadDeleteWirePlan(r, plan, !recycle);
+                        const bool has_owner = recycle || req->elevation_authorized;
+                        ok = ReadDeleteWirePlan(r, plan, !has_owner);
                         uint64_t owner = 0;
-                        if (recycle) {
+                        if (has_owner) {
                             ok = ok && r.GetU64(owner) && r.remaining() == 0;
                             req->owner = reinterpret_cast<HWND>(static_cast<uintptr_t>(owner));
                         }

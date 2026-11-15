@@ -57,12 +57,12 @@ int main() {
     Check(hwnd != nullptr, "message-only window created");
     if (!hwnd) return 1;
     constexpr UINT message = WM_APP + 49;
-    auto previous = std::make_shared<WindowResultMailbox<bool>>(hwnd, message);
+    auto previous = std::make_shared<pulse::WindowResultMailbox<bool>>(hwnd, message);
     previous->Publish(true);
     previous->Close();
     MSG stale{};
     PeekMessageW(&stale, hwnd, message, message, PM_REMOVE);
-    WindowResultMailbox<bool> current(hwnd, message);
+    pulse::WindowResultMailbox<bool> current(hwnd, message);
     current.Publish(true);
     Check(stale.message == message && current.Take(stale.wParam).empty(),
         "old registry notification cannot invalidate replacement window session");

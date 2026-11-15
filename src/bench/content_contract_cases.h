@@ -91,3 +91,115 @@ int RunContentConfigErrorCases(const std::filesystem::path& base) {
         "failed constructor leaves existing database and bad sidecar bytes unchanged");
     return failed ? 1 : 0;
 }
+
+
+bool AdvanceLockedContentVersion(HANDLE locked, const std::filesystem::path& file) {
+    BY_HANDLE_FILE_INFORMATION before{};
+    if (!GetFileInformationByHandle(locked, &before)) return false;
+    ULARGE_INTEGER changed{};
+    changed.LowPart = before.ftLastWriteTime.dwLowDateTime;
+    changed.HighPart = before.ftLastWriteTime.dwHighDateTime;
+    changed.QuadPart += 10000000;
+    FILETIME time{changed.LowPart, changed.HighPart};
+    if (!SetFileTime(locked, nullptr, nullptr, &time)) return false;
+    WIN32_FILE_ATTRIBUTE_DATA after{};
+    return GetFileAttributesExW(file.c_str(), GetFileExInfoStandard, &after) &&
+        CompareFileTime(&after.ftLastWriteTime, &before.ftLastWriteTime) != 0;
+}
+
+int RunContentRetryRetentionCases(const std::filesystem::path& base) {
+    using namespace pulse::index;
+    const auto root = base / L"files", database = base / L"retry.sqlite";
+    std::filesystem::create_directories(root);
+    const auto file = root / L"locked.txt";
+    Check(Write(file, "retry_retained_marker"), "seed old cached body for locked-file rescan");
+    std::atomic<size_t> scans{0};
+    ContentIndexScanHooks hooks;
+    hooks.enumeration.first = [&](const auto& path, auto& data) {
+        if (ContentScopeKey(path) == ContentScopeKey(root.wstring())) ++scans;
+        return FindFirstFileExW((path + L"\\*").c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr, 0);
+    };
+    ContentIndex db(database.wstring(), ContentAgentMode::LegacyWriter, hooks);
+    ContentIndexConfig config; config.roots = {{root.wstring()}};
+    Check(db.Configure(config) && db.WaitUntilIdle(10000), "locked-file cache initialized");
+    HANDLE locked = CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    Check(locked != INVALID_HANDLE_VALUE, "lock already cached file without deleting it");
+    if (locked == INVALID_HANDLE_VALUE) return 1;
+    struct Unlock { HANDLE h; ~Unlock() { if (h != INVALID_HANDLE_VALUE) CloseHandle(h); } } unlock{locked};
+    Check(AdvanceLockedContentVersion(locked, file), "change cached metadata while the old file remains exclusively locked");
+    config.excluded_directories.push_back(L"unused-retry-rescan");
+    Check(db.Configure(config), "force a complete scan while old file cannot be read");
+    const auto deadline = GetTickCount64() + 10000;
+    bool completed = false;
+    while (GetTickCount64() < deadline) {
+        const auto state = db.Status();
+        if (scans >= 2 && !state.indexing && state.pending_files) { completed = true; break; }
+        Sleep(10);
+    }
+    ContentSearchRequest request; request.needle = L"retry_retained_marker";
+    const auto retained = Search(db, request).size();
+    if (!completed || retained != 1) {
+        const auto state = db.Status();
+        std::fprintf(stderr, "[DIAG] local retry: scans=%zu completed=%d hits=%zu indexing=%d pending=%llu error=%lu\n",
+            scans.load(), completed, retained, state.indexing, state.pending_files, state.error);
+    }
+    Check(completed && retained == 1, "completed initial scan retains discovered body pending sharing retry");
+    CloseHandle(unlock.h); unlock.h = INVALID_HANDLE_VALUE;
+    Check(db.WaitUntilIdle(10000) && Search(db, request).size() == 1, "retry after unlock retains searchable document");
+    std::filesystem::remove(file);
+    Check(AwaitHit(db, request, 0), "real deletion still removes retained document");
+    return failed ? 1 : 0;
+}
+
+int RunContentSystemCacheCases(const std::filesystem::path& base) {
+    using namespace pulse::index;
+    const auto root = base / L"files", database = base / L"system.sqlite";
+    std::filesystem::create_directories(root);
+    const auto first = root / L"a.txt", second = root / L"b.txt";
+    Check(Write(first, "system_cache_marker") && Write(second, "system_cache_marker"), "seed two isolated cached bodies");
+    ContentIndex db(database.wstring(), ContentAgentMode::LegacyWriter);
+    ContentIndexConfig config; config.roots = {{root.wstring()}};
+    Check(db.Configure(config) && db.WaitUntilIdle(10000), "index isolated cache before changing only its stored paths");
+    db.Pause(true);
+    // Only SQLite rows acquire these synthetic paths; no system file is opened or written.
+    const std::wstring system = LR"(C:\Windows\pulse-system-cache.txt)", ordinary = LR"(C:\WindowsOld\pulse-system-cache.txt)";
+    sqlite3* connection = nullptr;
+    bool seeded = sqlite3_open16(database.c_str(), &connection) == SQLITE_OK;
+    if (seeded) {
+        sqlite3_busy_timeout(connection, 5000);
+        for (const auto& pair : std::vector<std::pair<std::wstring, std::wstring>>{
+            {first.wstring(), system}, {second.wstring(), ordinary}}) {
+            sqlite3_stmt* update = nullptr;
+            const bool prepared = sqlite3_prepare_v2(connection, "UPDATE documents SET path=?2 WHERE path=?1", -1, &update, nullptr) == SQLITE_OK;
+            if (prepared) {
+                sqlite3_bind_text16(update, 1, pair.first.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text16(update, 2, pair.second.c_str(), -1, SQLITE_TRANSIENT);
+            }
+            seeded = prepared && sqlite3_step(update) == SQLITE_DONE && sqlite3_changes(connection) == 1 && seeded;
+            sqlite3_finalize(update);
+        }
+    }
+    if (!seeded) std::fprintf(stderr, "[DIAG] synthetic cache metadata: sqlite=%d %s\n",
+        connection ? sqlite3_errcode(connection) : SQLITE_CANTOPEN, connection ? sqlite3_errmsg(connection) : "open failed");
+    if (connection) sqlite3_close(connection);
+    Check(seeded, "store synthetic system and sibling paths without filesystem access");
+    if (!seeded) return 1;
+    ContentSearchRequest request; request.needle = L"system_cache_marker";
+    Check(Search(db, request).size() == 2, "explicitly included system location remains searchable from cache");
+    request.skip_system_locations = true;
+    auto hits = Search(db, request);
+    Check(hits.size() == 1 && hits[0].path == ordinary, "cached publication excludes system location and admits WindowsOld");
+    request.maximum_hits = 1;
+    hits = Search(db, request);
+    Check(hits.size() == 1 && hits[0].path == ordinary, "filtered cached system row does not consume the result cap");
+    bool scopes = true;
+    for (const wchar_t* path : {LR"(C:\Windows\file.txt)", LR"(d:/WINDOWS/file.txt)", LR"(C:\$Recycle.Bin\file.txt)",
+            LR"(C:\System Volume Information\file.txt)", LR"(C:\pagefile.sys)", LR"(C:\hiberfil.sys)", LR"(C:\swapfile.sys)"}) {
+        scopes &= !ContentRequestIncludesPath(request, path);
+        request.skip_system_locations = false;
+        scopes &= ContentRequestIncludesPath(request, path);
+        request.skip_system_locations = true;
+    }
+    Check(scopes && ContentRequestIncludesPath(request, ordinary), "live candidate scope uses the same system policy and component boundaries");
+    return failed ? 1 : 0;
+}

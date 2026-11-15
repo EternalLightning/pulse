@@ -5,6 +5,8 @@
 
 #include "operation_elevation_adapter.h"
 #include "operation_elevation_transport.h"
+#include "elevated_recycle_request.h"
+#include "../shell_host/file_operations.h"
 #include "../common/path_utils.h"
 #include "../common/localization.h"
 #include "../common/file_operation_error.h"
@@ -13,6 +15,7 @@
 #include <array>
 #include <cstring>
 #include <filesystem>
+#include <objbase.h>
 
 namespace pulse::ops {
 namespace {
@@ -66,6 +69,24 @@ OperationElevationResult Apply(const VolumeLabelRequest& request, bool cancelled
 }
 OperationElevationResult ExecuteWorker(void*, std::span<const uint8_t> bytes,
     OperationElevationWorkerChannel& channel) {
+    ipc::ShellOperationRequest recycle;
+    if (DecodeElevatedRecycle(bytes, recycle)) {
+        const HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (FAILED(initialized)) return {initialized, false, false, {}};
+        ipc::ShellOperationResult completed;
+        auto single = recycle;
+        single.items.clear();
+        for (const auto& item : recycle.items) {
+            single.items = {item};
+            auto result = shell::ExecuteFileOperation(single, {[&] { return channel.IsCancelled(); }});
+            completed.items.insert(completed.items.end(), result.items.begin(), result.items.end());
+            completed.hr = result.hr; completed.cancelled = result.cancelled; completed.failed_path = result.failed_path;
+            const bool reported = channel.ReportProgress(ipc::WriteShellOperationResult(result));
+            if (!reported || FAILED(result.hr) || result.cancelled) break;
+        }
+        CoUninitialize();
+        return {completed.hr, completed.cancelled, false, ipc::WriteShellOperationResult(completed)};
+    }
     VolumeLabelRequest request;
     if (!Decode(bytes, request)) return {E_INVALIDARG, false, false, {}};
     return Apply(request, channel.IsCancelled());
@@ -78,6 +99,57 @@ std::wstring HelperPath() {
     return (std::filesystem::path(executable).parent_path() / L"Pulse.Shell.exe").wstring();
 }
 } // namespace
+
+ipc::ShellOperationResult OperationElevationAdapter::Recycle(const ipc::ShellOperationRequest& request, HWND owner,
+    const std::function<bool()>& cancelled, const std::function<void(size_t, size_t, const std::wstring&)>& progress) {
+    struct Context {
+        const ipc::ShellOperationRequest& request;
+        const std::function<bool()>& cancelled;
+        const std::function<void(size_t, size_t, const std::wstring&)>& progress;
+        ipc::ShellOperationResult known;
+        std::set<std::wstring> allowed, reported;
+        std::atomic<bool> malformed{false};
+        bool Read(std::span<const uint8_t> bytes, ipc::ShellOperationResult& result) const {
+            ipc::PayloadReader reader(bytes.data(), bytes.size());
+            if (!ipc::ReadShellOperationResult(reader, result) || reader.remaining()) return false;
+            std::set<std::wstring> sources;
+            for (const auto& item : result.items)
+                if (!sources.insert(item.source).second || !allowed.contains(item.source)) return false;
+            return true;
+        }
+    } context{request, cancelled, progress};
+    for (const auto& item : request.items) context.allowed.insert(item.source);
+    const auto payload = EncodeElevatedRecycle(request);
+    if (payload.empty()) { context.known.hr = E_INVALIDARG; return context.known; }
+    OperationElevationCallbacks callbacks;
+    callbacks.context = &context;
+    callbacks.cancelled = [](void* raw) {
+        const auto& state = *static_cast<Context*>(raw);
+        return state.malformed.load() || (state.cancelled && state.cancelled());
+    };
+    callbacks.on_progress = [](void* raw, std::span<const uint8_t> bytes) {
+        auto& state = *static_cast<Context*>(raw);
+        ipc::ShellOperationResult snapshot;
+        if (!state.Read(bytes, snapshot) || snapshot.items.size() != 1 ||
+            !state.reported.insert(snapshot.items.front().source).second) state.malformed.store(true);
+        else {
+            state.known.hr = snapshot.hr; state.known.cancelled = snapshot.cancelled;
+            state.known.failed_path = std::move(snapshot.failed_path);
+            state.known.items.push_back(std::move(snapshot.items.front()));
+            if (state.progress && !state.known.items.empty())
+                state.progress(state.known.items.size(), state.request.items.size(), state.known.items.back().source);
+        }
+        return std::vector<uint8_t>{};
+    };
+    const auto result = RunElevatedOperation(HelperPath(), owner, payload, callbacks);
+    ipc::ShellOperationResult final;
+    if (result.outcome_unknown || context.malformed.load()) context.known.hr = HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE);
+    else if (!result.response.empty()) {
+        if (context.Read(result.response, final)) context.known = std::move(final);
+        else context.known.hr = HRESULT_FROM_WIN32(ERROR_BROKEN_PIPE);
+    } else { context.known.hr = result.error; context.known.cancelled = result.cancelled; }
+    return context.known;
+}
 
 void OperationElevationAdapter::RunParent(OpsManager& manager, const OpsManager::QueueItem& item) {
     manager.SetStatus([&](OpStatus& status) {

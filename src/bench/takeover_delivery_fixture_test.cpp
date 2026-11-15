@@ -188,7 +188,7 @@ int main() {
     Check(answers.contains(12) && answers[12] && tab->IsSelected(0),
         "changed-folder replacement acknowledges only after the latest destination is ready");
     route_external = true;
-    s.external_open_mailbox = std::make_shared<app::WindowResultMailbox<app::ExternalOpenResult>>(
+    s.external_open_mailbox = std::make_shared<WindowResultMailbox<app::ExternalOpenResult>>(
         s.hwnd, WM_EXTERNAL_OPEN_READY);
     Check(s.worker.Start([&](app::WorkResult result) { PostWorkerResult(s, std::move(result)); }),
         "start production workers for routed delivery");

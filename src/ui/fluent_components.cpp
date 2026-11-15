@@ -333,7 +333,7 @@ bool Painter::BeginFrame(const Theme& theme, bool high_contrast) {
 
 void Painter::EnsureTextFormats() {
     if (!compositor_ || !compositor_->DwriteFactory() ||
-        (body_format_.get() && caption_format_.get() &&
+        (body_format_.get() && nav_format_.get() && caption_format_.get() &&
          small_icon_format_.get() && micro_icon_format_.get() &&
          std::abs(format_scale_ - scale_) <= 0.001f)) {
         return;

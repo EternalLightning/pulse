@@ -6,6 +6,7 @@
 // app_state.h — Window process state, shot request, and WM_APP message ids.
 #pragma once
 
+#include "../common/path_utils.h"
 #include "../ui/ui_compositor.h"
 #include "../ui/smooth_scroll.h"
 #include "../ui/notification_toast.h"
@@ -33,7 +34,7 @@
 #include "app_worker.h"
 #include "app_notify_patch.h"
 #include "tray_metadata.h"
-#include "window_result_mailbox.h"
+#include "../common/window_result_mailbox.h"
 #include "cloud_commands.h"
 #include "cloud_download.h"
 #include "app_drop_shortcuts.h"
@@ -227,23 +228,23 @@ struct AppState : AppCoreOwner {
     app::CloudDownloads cloud_downloads;
     std::optional<app::CloudPreviewIntent> cloud_preview_intent;
     std::shared_ptr<std::atomic<bool>> cloud_pin_cancel;
-    std::shared_ptr<app::WindowResultMailbox<app::CloudPinCompletion>> cloud_pin_mailbox;
+    std::shared_ptr<WindowResultMailbox<app::CloudPinCompletion>> cloud_pin_mailbox;
     uint64_t cloud_roots_revision = 0;
     uint64_t cloud_sync_revision = 0;
     ULONGLONG cloud_status_tick = 0;
     ipc::ShellClient::Owner device_shell_owner;
-    std::shared_ptr<app::WindowResultMailbox<app::DeviceOperationResult>> device_operation_mailbox;
-    std::shared_ptr<app::WindowResultMailbox<ShellVerbsResult>> shell_verbs_mailbox;
-    std::shared_ptr<app::WindowResultMailbox<bool>> shell_registry_mailbox;
-    std::shared_ptr<app::WindowResultMailbox<bool>> clipboard_paste_mailbox;
-    std::shared_ptr<app::WindowResultMailbox<app::ShortcutDropResult>> shortcut_drop_mailbox;
-    std::shared_ptr<app::WindowResultMailbox<app::ExternalOpenResult>> external_open_mailbox;
-    std::shared_ptr<app::WindowResultMailbox<app::DetailsAttributeResult>> details_attribute_mailbox;
+    std::shared_ptr<WindowResultMailbox<app::DeviceOperationResult>> device_operation_mailbox;
+    std::shared_ptr<WindowResultMailbox<ShellVerbsResult>> shell_verbs_mailbox;
+    std::shared_ptr<WindowResultMailbox<bool>> shell_registry_mailbox;
+    std::shared_ptr<WindowResultMailbox<bool>> clipboard_paste_mailbox;
+    std::shared_ptr<WindowResultMailbox<app::ShortcutDropResult>> shortcut_drop_mailbox;
+    std::shared_ptr<WindowResultMailbox<app::ExternalOpenResult>> external_open_mailbox;
+    std::shared_ptr<WindowResultMailbox<app::DetailsAttributeResult>> details_attribute_mailbox;
     std::unordered_map<std::wstring, size_t> details_attribute_pending;
     uint64_t external_open_issued_sequence = 0;
     uint64_t external_open_next_apply_sequence = 1;
     std::unordered_map<uint64_t, app::ExternalOpenResult> external_open_pending;
-    std::shared_ptr<app::WindowResultMailbox<std::vector<index::VolumeInfo>>> dup_volumes_mailbox;
+    std::shared_ptr<WindowResultMailbox<std::vector<index::VolumeInfo>>> dup_volumes_mailbox;
     app::UiScheduleState ui_schedule;
     unsigned deferred_startup_step = 0;
     bool first_frame_drawn = false;
@@ -899,9 +900,7 @@ inline AppState* GetAppState(HWND hwnd) {
 }
 
 inline std::wstring ClipboardPath(const std::wstring& p) {
-    if (p.starts_with(L"\\\\?\\UNC\\")) return L"\\\\" + p.substr(8);
-    if (p.starts_with(L"\\\\?\\")) return p.substr(4);
-    return p;
+    return path::StripExtendedPathPrefix(p);
 }
 
 } // namespace pulse

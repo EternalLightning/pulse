@@ -9,13 +9,8 @@
 #include "../common/json_utils.h"
 #include "../common/utf8_file.h"
 #include "../common/user_storage.h"
-#include <commctrl.h>
-#include <prsht.h>
-#include <shlobj.h>
 #include <sstream>
 #include <algorithm>
-#include <cmath>
-#include <cstdio>
 
 namespace pulse::app {
 
@@ -26,225 +21,8 @@ namespace {
 //   6 -> 7: BuiltinQuickAccess lost its reserved "starred" bit, so the stored
 //           quick-access mask is dropped for files written before 7.
 constexpr int kSessionVersion = 8;
-constexpr size_t kMaxSessionWindows = 32;
-
-template<size_t Count>
-std::wstring FormatScaledColumns(const std::array<float, Count>& edges) {
-    std::wstring result;
-    for (size_t i = 0; i < Count; ++i) {
-        if (i) result += L",";
-        result += std::to_wstring(static_cast<int>(std::lround(edges[i] * 10000.0f)));
-    }
-    return result;
-}
-
-template<size_t Count>
-std::array<float, Count> ParseScaledColumns(const std::wstring& value) {
-    std::array<float, Count> output{};
-    const size_t stored_count = std::count(value.begin(), value.end(), L',') + 1;
-    if (stored_count != Count && stored_count != Count - 1) return {};
-    size_t pos = 0;
-    for (size_t i = 0; i < stored_count; ++i) {
-        const size_t comma = value.find(L',', pos);
-        if ((comma == std::wstring::npos) != (i + 1 == stored_count)) return {};
-        const auto token = std::wstring_view(value).substr(pos,
-            comma == std::wstring::npos ? value.size() - pos : comma - pos);
-        int scaled = 0;
-        if (!pulse::json::ParseInteger(token, scaled) || scaled < 0 || scaled > 40000000) return {};
-        output[i] = static_cast<float>(scaled) / 10000.0f;
-        pos = comma == std::wstring::npos ? value.size() : comma + 1;
-    }
-    return output;
-}
-
-std::wstring FormatScaledList(const std::vector<float>& values) {
-    std::wstring out;
-    for (size_t i = 0; i < values.size() && i + 1 < kMaxSessionPanes; ++i) {
-        if (i) out += L",";
-        out += std::to_wstring(static_cast<int>(std::lround(values[i] * 10000.0f)));
-    }
-    return out;
-}
-
-std::vector<float> ParseScaledList(const std::wstring& value) {
-    std::vector<float> out;
-    size_t pos = 0;
-    while (!value.empty() && out.size() < kMaxSessionPanes) {
-        const size_t comma = value.find(L',', pos);
-        const auto token = std::wstring_view(value).substr(
-            pos, comma == std::wstring::npos ? value.size() - pos : comma - pos);
-        int scaled = 0;
-        const bool valid = pulse::json::ParseInteger(token, scaled) && scaled > 0 && scaled < 10000;
-        out.push_back(valid ? static_cast<float>(scaled) / 10000.0f : 0.5f);
-        if (comma == std::wstring::npos) break;
-        pos = comma + 1;
-    }
-    return out;
-}
-
-// Column view widths: whole DIP values, 0 = default width for that slot.
-std::wstring FormatDipList(const std::vector<float>& values) {
-    std::wstring out;
-    for (size_t i = 0; i < values.size(); ++i) {
-        if (i) out += L",";
-        out += std::to_wstring(std::max(0, static_cast<int>(std::lround(values[i]))));
-    }
-    return out;
-}
-
-std::vector<float> ParseDipList(const std::wstring& value) {
-    std::vector<float> out;
-    size_t pos = 0;
-    while (pos < value.size() && out.size() < 64) {
-        const size_t comma = value.find(L',', pos);
-        const std::wstring token = value.substr(
-            pos, comma == std::wstring::npos ? std::wstring::npos : comma - pos);
-        int dip = 0;
-        pulse::json::ParseInteger(token, dip);
-        out.push_back(dip > 0 && dip < 4096 ? static_cast<float>(dip) : 0.0f);
-        if (comma == std::wstring::npos) break;
-        pos = comma + 1;
-    }
-    while (!out.empty() && out.back() <= 0.0f) out.pop_back();
-    return out;
-}
 
 } // namespace
-
-std::wstring LayoutTabsToJson(const std::vector<LayoutTabSnapshot>& tabs) {
-    std::wstring out = L"[";
-    for (size_t i = 0; i < tabs.size() && i < kMaxSessionLayoutTabs; ++i) {
-        if (i) out += L",";
-        const LayoutTabSnapshot& tab = tabs[i];
-        out += L"{\"pinned\":";
-        out += tab.pinned ? L"true" : L"false";
-        out += L",\"group\":" + std::to_wstring(tab.group);
-        out += L",\"marker_rgb\":" + std::to_wstring(tab.marker_rgb);
-        out += L",\"title\":\"";
-        std::wstring escaped;
-        pulse::json::Escape(tab.title, escaped);
-        out += escaped;
-        out += L"\",\"layout\":" + std::to_wstring(tab.layout);
-        out += L",\"focused\":" + std::to_wstring(tab.focused);
-        out += L",\"target\":" + std::to_wstring(tab.target);
-        out += L",\"splitRatios\":\"";
-        out += FormatScaledList(tab.split_ratios);
-        out += L"\",\"panes\":[";
-        for (size_t p = 0; p < tab.panes.size() && p < kMaxSessionPanes; ++p) {
-            if (p) out += L",";
-            const PaneFolderSnapshot& pane = tab.panes[p];
-            out += L"{\"path\":\"";
-            escaped.clear();
-            pulse::json::Escape(pane.path, escaped);
-            out += escaped;
-            out += L"\",\"view\":\"";
-            out += ui::ViewModeName(pane.view);
-            out += L"\",\"cols\":\"";
-            out += FormatScaledColumns(pane.columns);
-            out += L"\",\"searchCols\":\"";
-            out += FormatScaledColumns(pane.search_columns);
-            out += L"\",\"colLayout\":";
-            out += pane.column_layout ? L"true" : L"false";
-            out += L",\"colWidths\":\"";
-            out += FormatDipList(pane.column_widths);
-            out += L"\"}";
-        }
-        out += L"]}";
-    }
-    out += L"]";
-    return out;
-}
-
-std::wstring TabGroupsToJson(const std::vector<GroupSessionSnapshot>& groups) {
-    std::wstring out = L"[";
-    for (size_t g = 0; g < groups.size() && g < kMaxSessionTabGroups; ++g) {
-        if (g) out += L",";
-        const GroupSessionSnapshot& grp = groups[g];
-        out += L"{\"id\":" + std::to_wstring(grp.id);
-        out += L",\"name\":\"";
-        std::wstring escaped;
-        pulse::json::Escape(grp.name, escaped);
-        out += escaped;
-        out += L"\",\"color\":" + std::to_wstring(grp.color_rgb);
-        out += L",\"collapsed\":";
-        out += grp.collapsed ? L"true" : L"false";
-        out += L"}";
-    }
-    out += L"]";
-    return out;
-}
-
-static bool IsObjectArray(const pulse::json::Value* array, size_t limit) {
-    return array && array->kind == pulse::json::Kind::Array && array->children.size() <= limit &&
-        std::all_of(array->children.begin(), array->children.end(), [](const auto& item) {
-            return item.kind == pulse::json::Kind::Object;
-        });
-}
-
-static bool ParseTabGroups(const pulse::json::Value* array,
-                           std::vector<GroupSessionSnapshot>& out) {
-    out.clear();
-    if (!IsObjectArray(array, kMaxSessionTabGroups)) return false;
-    for (const auto& group : array->children) {
-        GroupSessionSnapshot grp;
-        grp.id = pulse::json::Int(group.Find(L"id"));
-        grp.name = pulse::json::String(group.Find(L"name"));
-        grp.color_rgb = static_cast<uint32_t>(std::max(
-            0, pulse::json::Int(group.Find(L"color"))));
-        grp.collapsed = pulse::json::Bool(group.Find(L"collapsed"));
-        out.push_back(std::move(grp));
-    }
-    return true;
-}
-
-bool ParseTabGroups(const std::wstring& array_json,
-                    std::vector<GroupSessionSnapshot>& out) {
-    const pulse::json::Document doc(array_json);
-    return ParseTabGroups(doc.Valid() ? &doc.Root() : nullptr, out);
-}
-
-static bool ParseLayoutTabs(const pulse::json::Value* array,
-                            std::vector<LayoutTabSnapshot>& out) {
-    out.clear();
-    if (!IsObjectArray(array, kMaxSessionLayoutTabs)) return false;
-    for (const auto& tab_value : array->children) {
-        LayoutTabSnapshot tab;
-        tab.pinned = pulse::json::Bool(tab_value.Find(L"pinned"));
-        tab.group = pulse::json::Int(tab_value.Find(L"group"));
-        tab.title = pulse::json::String(tab_value.Find(L"title"));
-        tab.marker_rgb = static_cast<uint32_t>(std::clamp(
-            pulse::json::Int(tab_value.Find(L"marker_rgb")), 0, 0xFFFFFF));
-        tab.layout = pulse::json::Int(tab_value.Find(L"layout"));
-        tab.focused = pulse::json::Int(tab_value.Find(L"focused"));
-        if (const auto* target = tab_value.Find(L"target")) tab.target = pulse::json::Int(target);
-        tab.split_ratios = ParseScaledList(
-            pulse::json::String(tab_value.Find(L"splitRatios")));
-
-        const auto* panes = tab_value.Find(L"panes");
-        if (panes && panes->kind == pulse::json::Kind::Array) {
-            if (!IsObjectArray(panes, kMaxSessionPanes)) return false;
-            for (const auto& pane_value : panes->children) {
-                PaneFolderSnapshot pane;
-                pane.path = pulse::json::String(pane_value.Find(L"path"));
-                pane.view = ui::ParseViewMode(pulse::json::String(pane_value.Find(L"view")));
-                pane.columns = ParseScaledColumns<4>(pulse::json::String(pane_value.Find(L"cols")));
-                pane.search_columns = ParseScaledColumns<5>(
-                    pulse::json::String(pane_value.Find(L"searchCols")));
-                pane.column_layout = pulse::json::Bool(pane_value.Find(L"colLayout"));
-                pane.column_widths = ParseDipList(pulse::json::String(pane_value.Find(L"colWidths")));
-                tab.panes.push_back(std::move(pane));
-            }
-        }
-        out.push_back(std::move(tab));
-    }
-    return true;
-}
-
-bool ParseLayoutTabs(const std::wstring& array_json,
-                     std::vector<LayoutTabSnapshot>& out) {
-    const pulse::json::Document doc(array_json);
-    return ParseLayoutTabs(doc.Valid() ? &doc.Root() : nullptr, out);
-}
 
 std::wstring GetPulseDataDir() {
     const auto root = storage::ConfigurationRoot();
@@ -252,7 +30,7 @@ std::wstring GetPulseDataDir() {
     return root;
 }
 
-static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap, bool navigation = true) {
+std::wstring SessionPreferencesToJson(const WindowSessionSnapshot& snap) {
     std::wostringstream f;
     f << L"{\n";
     f << L"  \"version\":" << kSessionVersion << L",\n";
@@ -262,12 +40,6 @@ static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap, bool 
     f << L"  \"bottom\":" << snap.window_rect.bottom << L",\n";
     f << L"  \"maximized\":" << (snap.maximized ? L"true" : L"false") << L",\n";
     f << L"  \"dark\":" << (snap.dark ? L"true" : L"false") << L",\n";
-    if (navigation) {
-        f << L"  \"path\":\"";
-        std::wstring escaped;
-        pulse::json::Escape(snap.active_path, escaped);
-        f << escaped << L"\",\n";
-    }
     f << L"  \"sidebarCollapsed\":" << snap.sidebar_collapsed << L",\n";
     f << L"  \"sidebarHidden\":" << snap.sidebar_hidden << L",\n";
     f << L"  \"sidebarOrder\":\"";
@@ -285,17 +57,12 @@ static std::wstring WindowSessionToJson(const WindowSessionSnapshot& snap, bool 
       << L",\n";
     f << L"  \"detailsPreviewOnly\":" << (snap.details_preview_only ? L"true" : L"false") << L",\n";
     f << L"  \"detailsPreview\":" << (snap.details_preview ? L"true" : L"false");
-    if (navigation) {
-        f << L",\n  \"activeTab\":" << snap.active_layout_tab << L",\n";
-        f << L"  \"tabGroups\":" << TabGroupsToJson(snap.tab_groups) << L",\n";
-        f << L"  \"layoutTabs\":" << LayoutTabsToJson(snap.layout_tabs);
-    }
     f << L"\n";
     f << L"}\n";
     return f.str();
 }
 
-static bool ParseWindowSession(const pulse::json::Value& doc, WindowSessionSnapshot& snap, bool navigation = true) {
+static bool ParseWindowPreferences(const pulse::json::Value& doc, WindowSessionSnapshot& snap) {
     if (doc.kind != pulse::json::Kind::Object) return false;
     snap = {};
 
@@ -305,7 +72,6 @@ static bool ParseWindowSession(const pulse::json::Value& doc, WindowSessionSnaps
     snap.window_rect.bottom = pulse::json::Int(doc.Find(L"bottom"));
     snap.maximized = pulse::json::Bool(doc.Find(L"maximized"));
     snap.dark = pulse::json::Bool(doc.Find(L"dark"));
-    if (navigation) snap.active_path = pulse::json::String(doc.Find(L"path"));
     const auto sidebar_mask = (1u << kSidebarSectionCount) - 1u;
     snap.sidebar_collapsed = static_cast<int>(static_cast<uint32_t>(std::max(0,
         pulse::json::Int(doc.Find(L"sidebarCollapsed")))) & sidebar_mask);
@@ -369,61 +135,12 @@ static bool ParseWindowSession(const pulse::json::Value& doc, WindowSessionSnaps
                 static_cast<float>(columnEdges[i]) / 10000.0f;
     }
 
-    if (!navigation) return true;
-    snap.active_layout_tab = pulse::json::Int(doc.Find(L"activeTab"));
-    ParseTabGroups(doc.Find(L"tabGroups"), snap.tab_groups);
-    if (!ParseLayoutTabs(doc.Find(L"layoutTabs"), snap.layout_tabs)) snap.layout_tabs.clear();
     return true;
 }
 
-static bool ParseWindowSessionJson(const std::wstring& json, WindowSessionSnapshot& snap, bool navigation) {
+static bool ParseWindowPreferencesJson(const std::wstring& json, WindowSessionSnapshot& snap) {
     const pulse::json::Document doc(json);
-    return doc.Is(pulse::json::Kind::Object) && ParseWindowSession(doc.Root(), snap, navigation);
-}
-
-std::wstring SessionToJson(const SessionSnapshot& snap) {
-    const WindowSessionSnapshot& primary = snap.windows.empty()
-        ? static_cast<const WindowSessionSnapshot&>(snap) : snap.windows.front();
-    auto out = WindowSessionToJson(primary);
-    const auto closing = out.find_last_of(L'}');
-    out.resize(closing);
-    out += L",\n  \"windows\":[";
-    if (snap.windows.empty()) {
-        out += WindowSessionToJson(primary);
-    } else {
-        const size_t count = (std::min)(snap.windows.size(), kMaxSessionWindows);
-        for (size_t i = 0; i < count; ++i) {
-            if (i) out += L",";
-            out += WindowSessionToJson(snap.windows[i]);
-        }
-    }
-    out += L"]\n}\n";
-    return out;
-}
-
-bool ParseSessionJson(const std::wstring& json, SessionSnapshot& snap) {
-    const pulse::json::Document doc(json);
-    if (!doc.Is(pulse::json::Kind::Object)) return false;
-    SessionSnapshot parsed;
-    const auto* windows = doc.Find(L"windows");
-    if (windows && windows->kind == pulse::json::Kind::Array && !windows->children.empty() &&
-        std::all_of(windows->children.begin(), windows->children.end(), [](const auto& item) {
-            return item.kind == pulse::json::Kind::Object;
-        })) {
-        for (const auto& item : windows->children) {
-            if (parsed.windows.size() == kMaxSessionWindows) break;
-            WindowSessionSnapshot window;
-            if (!ParseWindowSession(item, window)) return false;
-            parsed.windows.push_back(std::move(window));
-        }
-    }
-    if (parsed.windows.empty()) {
-        if (!ParseWindowSession(doc.Root(), parsed)) return false;
-        parsed.windows.push_back(parsed);
-    }
-    static_cast<WindowSessionSnapshot&>(parsed) = parsed.windows.front();
-    snap = std::move(parsed);
-    return true;
+    return doc.Is(pulse::json::Kind::Object) && ParseWindowPreferences(doc.Root(), snap);
 }
 
 static bool SaveSessionJson(const std::wstring& path, const std::wstring& json) {
@@ -435,36 +152,32 @@ static bool SaveSessionJson(const std::wstring& path, const std::wstring& json) 
     return WriteUtf8FileAtomic(path, json);
 }
 
-bool SaveSession(const SessionSnapshot& snap) {
-    const auto dir = GetPulseDataDir();
-    return !dir.empty() && SaveSessionJson(dir + L"\\session.json", SessionToJson(snap));
-}
-
-bool LoadSession(SessionSnapshot& snap) {
-    const auto dir = GetPulseDataDir();
-    std::wstring json;
-    return !dir.empty() && ReadUtf8File(dir + L"\\session.json", json) && ParseSessionJson(json, snap);
-}
-
 bool SaveSessionPreferences(const WindowSessionSnapshot& snap) {
     const auto dir = GetPulseDataDir();
-    return !dir.empty() && SaveSessionJson(dir + L"\\preferences.json", WindowSessionToJson(snap, false));
+    return !dir.empty() && SaveSessionJson(dir + L"\\preferences.json", SessionPreferencesToJson(snap));
 }
 
-std::wstring SessionPreferencesToJson(const WindowSessionSnapshot& snap) {
-    return WindowSessionToJson(snap, false);
-}
-
-bool LoadSessionPreferences(WindowSessionSnapshot& snap) {
+bool LoadSessionPreferences(WindowSessionSnapshot& snap, bool* saves_enabled) {
+    if (saves_enabled) *saves_enabled = false;
     const auto dir = GetPulseDataDir();
     if (dir.empty()) return false;
     std::wstring json;
     const std::wstring preferences = dir + L"\\preferences.json";
-    if (GetFileAttributesW(preferences.c_str()) != INVALID_FILE_ATTRIBUTES)
-        return ReadUtf8File(preferences, json) && ParseWindowSessionJson(json, snap, false);
+    if (GetFileAttributesW(preferences.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        const bool loaded = ReadUtf8File(preferences, json) && ParseWindowPreferencesJson(json, snap);
+        if (saves_enabled) *saves_enabled = loaded;
+        return loaded;
+    }
     const DWORD error = GetLastError();
     if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return false;
-    return ReadUtf8File(dir + L"\\session.json", json) && ParseWindowSessionJson(json, snap, false);
+    const auto legacy = dir + L"\\session.json";
+    const DWORD attrs = GetFileAttributesW(legacy.c_str());
+    const DWORD legacy_error = attrs == INVALID_FILE_ATTRIBUTES ? GetLastError() : ERROR_SUCCESS;
+    const bool missing = attrs == INVALID_FILE_ATTRIBUTES &&
+        (legacy_error == ERROR_FILE_NOT_FOUND || legacy_error == ERROR_PATH_NOT_FOUND);
+    const bool loaded = ReadUtf8File(legacy, json) && ParseWindowPreferencesJson(json, snap);
+    if (saves_enabled) *saves_enabled = loaded || missing;
+    return loaded;
 }
 
 } // namespace pulse::app

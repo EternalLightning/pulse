@@ -22,7 +22,6 @@ void Check(bool ok, const char* name) {
 }
 // The model's default storage and language queries stay inside the fixture.
 namespace pulse::storage { std::wstring ConfigurationRoot() { return fixture_directory; } }
-namespace pulse::app { std::wstring GetPulseDataDir() { return fixture_directory; } }
 namespace pulse::l10n { Language effective_language() noexcept { return Language::EnUS; } }
 
 namespace {

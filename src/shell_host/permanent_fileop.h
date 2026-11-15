@@ -12,11 +12,14 @@ struct PermanentDeleteResult {
 };
 inline PermanentDeleteResult DeletePermanentAuthorized(const std::vector<std::wstring>& paths,
     const std::vector<FileIdentity>& expected, const std::function<bool()>& cancelled,
-    const std::function<void(size_t, size_t, const std::wstring&)>& progress = {}) {
+    const std::function<void(size_t, size_t, const std::wstring&)>& progress = {},
+    bool elevation_authorized = false, HWND owner = nullptr) {
     PermanentDeleteResult result;
     if (paths.empty() || (!expected.empty() && paths.size() != expected.size())) { result.error = E_INVALIDARG; return result; }
     ipc::ShellOperationRequest request;
     request.kind = ipc::ShellOperationKind::DeletePermanent;
+    request.elevation_authorized = elevation_authorized;
+    request.owner_hwnd = reinterpret_cast<uintptr_t>(owner);
     for (size_t i = 0; i < paths.size(); ++i) {
         if (!expected.empty() && !expected[i].Valid()) { result.error = E_INVALIDARG; return result; }
         request.items.push_back({paths[i], {}, expected.empty() ? FileIdentity{} : expected[i]});

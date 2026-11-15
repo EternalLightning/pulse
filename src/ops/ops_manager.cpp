@@ -803,6 +803,12 @@ bool OpsManager::RefreshProducedUndoReferences(OpRequest& request) {
 }
 
 void OpsManager::ExecuteFileOperation(QueueItem& item) {
+    struct RestoreElevation {
+        bool& value;
+        bool previous;
+        ~RestoreElevation() { value = previous; }
+    } restore_elevation{shell_elevation_authorized_, shell_elevation_authorized_};
+    shell_elevation_authorized_ = item.elevated_retry;
     struct UndoCompletion {
         OpsManager& manager;
         const OpRequest& request;
@@ -889,7 +895,8 @@ void OpsManager::ExecuteFileOperation(QueueItem& item) {
         RunFolderAction(item.req, item.seq);
         return;
     }
-    if (item.elevated_retry) {
+    if (item.elevated_retry && item.req.type == OpType::Rename && item.req.sources.size() == 1 &&
+        pulse::path::IsDriveRootPath(item.req.sources.front())) {
         OperationElevationAdapter::RunParent(*this, item);
         return;
     }

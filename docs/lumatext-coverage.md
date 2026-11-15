@@ -16,7 +16,7 @@
 | --- | --- | --- |
 | `fluent::Painter::DrawText` / `DrawTextWithBrush` | 优先 `Compositor::DrawLumaText`，失败后 DirectWrite | 普通按钮、标签、说明等简单文字 |
 | `Compositor::DrawTextLayout` | 优先 LumaText 绘制已有的 DirectWrite layout；保留回退 | 多行、选区命中、范围着色等已经拥有 layout 的文字 |
-| `Compositor::DrawDialogTitle` | DirectWrite layout + LumaText，无额外轮廓增重 | 所有程序自绘弹窗标题；当前也用于操作中心和快速预览标题 |
+| `Compositor::DrawDialogTitle` | DirectWrite layout + LumaText，无额外轮廓增重 | 自绘弹窗、操作中心与快速预览标题；Sharp 使用标题专用自然对称抗锯齿并关闭标题网格拟合，正文仍保留原清晰策略 |
 | `PresentChildEdit` 与 LumaText 编辑呈现 | 原生 EDIT 处理输入，自绘层呈现；真实失败保留原生回退 | 地址、查找、重命名、通用输入等已有宿主 |
 | `MainRenderer::DrawTextRect`、文件名和标签助手 | 多数先尝试 LumaText，再回退 | 主界面大量普通文字已有覆盖 |
 | `Painter::DrawTextNative` | 直接 DirectWrite，不尝试 LumaText | 显式旁路；用于设置页大标题的 Sharp/Smooth 路径，以及共享标题的末级失败路径 |
@@ -88,6 +88,8 @@
 文件名用例记录固定 60 帧的进程 CPU 时间和 wall time，文本比较用例记录单帧首次、重复和滚动 wall time；这些是本机场景采样，不代表冷启动、实际屏幕帧率或整体性能提升。原尺寸图片和本轮结果保存在本地 `bench_data/text-migration-20261115/verification.md`，本地日志/图片不保证随仓库分发。
 
 本轮主程序与相关测试目标构建通过，以上 10 个定向筛选全部通过（最终合计 1564 项断言），并检查了代表性原尺寸截图。采样显示 LumaText 的一致呈现有额外成本：24 个多行文件名约 1.43 ms/帧（Smooth 对照约 0.37 ms/帧）；长行双栏比较滚动约 19.81–21.60 ms/帧（Sharp 对照约 7.35–9.69 ms/帧）。后者超过 16.7 ms 的单帧预算，不能据此承诺稳定 60 FPS。没有运行完整历史回归或更新安装版。
+
+Sharp 标题调整另用 `pulse_operation_center_ui_test --title-rendering` 定向验证，588 项断言通过，覆盖四档 DPI、浅深主题、三种模式、窄标题省略、高对比度切换和正文像素不变；`pulse_settings_value_ui_test --popup-style-only` 225 项断言通过。后者的桌面合成截图被其他窗口遮挡，使用实际 Direct2D 帧验证。另从正式代码捕获两张 100% DPI 新建弹窗，标题与窗口内部像素和确认过的实验版一致，截图保存在本地 `bench_data/sharp-title-integration-2026-11-15/production/`。
 
 使用 `LumaTextStats` 的字形和回退计数辅助判断。编辑是否实际原生回退还要检查宿主状态，不能只凭 `edit_directwrite_draws` 的名字下结论，它也统计共用 DirectWrite layout 的编辑绘制过程。
 

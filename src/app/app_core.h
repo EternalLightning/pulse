@@ -43,6 +43,7 @@ struct AppCore {
     app::SavedSearchStore saved_searches;
     std::shared_ptr<app::NetworkRecentStore> network_recent;
     bool shared_preferences_loaded = false;
+    bool session_preferences_saves_enabled = false;
     bool exiting = false;
     // Global UI services (tray, global hotkey, shell registry watch) follow this
     // HWND as windows are closed, regardless of which window was created first.

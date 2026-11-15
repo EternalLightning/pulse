@@ -504,6 +504,7 @@ void LayoutTagRenameOverlay(AppState& s) {
 }
 
 void ShowTagRenameOverlay(AppState& s, const app::TagId& tag_id) {
+    if (!s.places.CanEditTags()) { MessageBeep(MB_ICONWARNING); return; }
     const app::ColorTag* tag = s.places.FindTag(tag_id);
     if (!tag) return;
     if (s.renameIndex >= 0) HideRenameOverlay(s, false);

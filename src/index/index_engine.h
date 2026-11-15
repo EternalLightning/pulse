@@ -370,6 +370,7 @@ private:
                              const MatchSet& prev, MatchSet& out,
                              const std::atomic<uint32_t>* latest, uint32_t expected) const;
     void SortIdsLocked(std::vector<int32_t>& ids, ResultSort sort, bool desc) const;
+    bool SearchResultLessLocked(int32_t a, int32_t b, ResultSort sort, bool desc) const;
     void PartialSortPage(std::vector<int32_t>& ids, size_t offset, size_t limit,
                          ResultSort sort, bool desc) const;
 

@@ -12,8 +12,8 @@
 using namespace pulse;
 using namespace pulse::app;
 
-namespace pulse::app {
-std::wstring GetPulseDataDir() { return {}; }
+namespace pulse::storage {
+std::wstring ConfigurationRoot() { return {}; }
 }
 
 namespace {

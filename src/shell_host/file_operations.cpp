@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "file_operations.h"
+#include "recycle_item.h"
 #include "../common/path_utils.h"
 #include "../common/shell_id.h"
 #include "../common/progress_percent.h"
@@ -52,10 +53,11 @@ bool Cancelled(HRESULT hr) {
 }
 DWORD OperationFlags(const ShellOperationRequest& request, bool reporting_bytes) {
     DWORD flags = FOF_SILENT | FOF_NOERRORUI | FOF_NOCONFIRMMKDIR |
-        FOF_NO_CONNECTED_ELEMENTS | FOFX_EARLYFAILURE | FOFX_SHOWELEVATIONPROMPT;
+        FOF_NO_CONNECTED_ELEMENTS | FOFX_EARLYFAILURE;
+    if (request.elevation_authorized && request.kind != ShellOperationKind::Recycle)
+        flags |= FOFX_SHOWELEVATIONPROMPT | FOFX_REQUIREELEVATION;
     if (request.kind == ShellOperationKind::Recycle) {
-        // Recycle is the operation contract; never automatically confirm a permanent-delete warning.
-        flags |= FOF_ALLOWUNDO | FOFX_ADDUNDORECORD | FOFX_RECYCLEONDELETE | FOF_WANTNUKEWARNING;
+        flags |= FOF_ALLOWUNDO | FOFX_ADDUNDORECORD | FOFX_RECYCLEONDELETE;
     } else flags |= FOF_NOCONFIRMATION;
     if (request.collision != ShellCollisionPolicy::Replace) {
         flags |= FOF_RENAMEONCOLLISION;
@@ -127,9 +129,6 @@ public:
 #endif
         const auto original = original_names_.find(source);
         const auto source_name = original == original_names_.end() ? Name(source) : original->second;
-        const bool destination_error = hr == COPYENGINE_E_SHARING_VIOLATION_DEST || hr == COPYENGINE_E_ACCESS_DENIED_DEST ||
-            hr == COPYENGINE_E_PATH_NOT_FOUND_DEST || hr == COPYENGINE_E_NET_DISCONNECT_DEST || hr == COPYENGINE_E_PATH_TOO_DEEP_DEST;
-        Error(hr, destination_error ? item_.destination : source_name);
         const auto created_name = Name(created);
         const bool primary = item_.source.empty() || request_.kind == ShellOperationKind::Rename ||
             request_.kind == ShellOperationKind::Recycle ||
@@ -138,6 +137,7 @@ public:
              SameName(Parent(created_name), Parent(item_.destination)));
         if (primary) {
             result.hr = hr; result.skipped = Skipped(hr);
+            result.destination.clear();
             if (SUCCEEDED(hr) && !result.skipped) {
                 result.destination = created_name;
                 if (request_.kind != ShellOperationKind::DeletePermanent && result.destination.empty())
@@ -150,12 +150,30 @@ public:
             ShellOperationItemResult completed;
             completed.source = source_name; completed.hr = hr; completed.skipped = Skipped(hr);
             if (SUCCEEDED(hr) && !completed.skipped) completed.destination = Name(created);
-            if (!completed.source.empty()) nested.push_back(std::move(completed));
+            if (!completed.source.empty()) {
+                const auto [found, inserted] = nested_indices_.try_emplace(completed.source, nested.size());
+                if (inserted) nested.push_back(std::move(completed));
+                else nested[found->second] = std::move(completed);
+            }
         }
         return Check();
     }
     HRESULT STDMETHODCALLTYPE StartOperations() override { return Check(); }
-    HRESULT STDMETHODCALLTYPE FinishOperations(HRESULT hr) override { Error(hr); return S_OK; }
+    HRESULT STDMETHODCALLTYPE FinishOperations(HRESULT hr) override {
+        // Shell can report an error before prompting and retrying the same item.
+        // Only its last Post result is final; caller/validation errors stay sticky.
+        const auto record = [&](const ShellOperationItemResult& item) {
+            if (item.hr == E_PENDING) return;
+            const bool destination_error = item.hr == COPYENGINE_E_SHARING_VIOLATION_DEST ||
+                item.hr == COPYENGINE_E_ACCESS_DENIED_DEST || item.hr == COPYENGINE_E_PATH_NOT_FOUND_DEST ||
+                item.hr == COPYENGINE_E_NET_DISCONNECT_DEST || item.hr == COPYENGINE_E_PATH_TOO_DEEP_DEST;
+            Error(item.hr, destination_error ? item_.destination : item.source);
+        };
+        record(result);
+        for (const auto& item : nested) record(item);
+        Error(hr);
+        return S_OK;
+    }
     HRESULT STDMETHODCALLTYPE PreRenameItem(DWORD flags, IShellItem* source, LPCWSTR name) override {
         IShellItem* raw = nullptr;
         const HRESULT hr = source->GetParent(&raw);
@@ -169,7 +187,7 @@ public:
     HRESULT STDMETHODCALLTYPE PostCopyItem(DWORD, IShellItem* source, IShellItem*, LPCWSTR, HRESULT hr, IShellItem* created) override { return Post(source, hr, created); }
     HRESULT STDMETHODCALLTYPE PreDeleteItem(DWORD flags, IShellItem* source) override {
         // Providers report transfer flags such as 0x202 for valid recycle requests.
-        // FOFX_RECYCLEONDELETE selects the mode; these flags cannot prove a permanent fallback.
+        // The recycle-only Shell path selects the mode; these flags cannot prove a permanent fallback.
         return Pre(flags, source, nullptr, nullptr);
     }
     HRESULT STDMETHODCALLTYPE PostDeleteItem(DWORD, IShellItem* source, HRESULT hr, IShellItem* created) override { return Post(source, hr, created); }
@@ -194,6 +212,7 @@ private:
     const FileOperationCallbacks& callbacks_;
     size_t index_;
     std::map<IShellItem*, std::wstring> original_names_;
+    std::map<std::wstring, size_t> nested_indices_;
 };
 
 // Shell measures transferred bytes; Pulse supplies the visible progress UI.
@@ -307,11 +326,12 @@ ipc::ShellOperationResult ExecuteFileOperation(const ipc::ShellOperationRequest&
                 hr = HRESULT_FROM_WIN32(ERROR_FILE_INVALID);
         }
         IFileOperation* raw = nullptr;
-        if (SUCCEEDED(hr)) hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&raw));
+        const bool recycling = request.kind == ShellOperationKind::Recycle;
+        if (SUCCEEDED(hr) && !recycling) hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&raw));
         ComPtr<IFileOperation> operation(raw);
         DWORD cookie = 0;
         bool advised = false;
-        if (SUCCEEDED(hr)) {
+        if (SUCCEEDED(hr) && operation) {
             const bool reporting_bytes = callbacks.bytes_progress &&
                 (request.kind == ShellOperationKind::Copy || request.kind == ShellOperationKind::Move);
             hr = operation->SetOperationFlags(OperationFlags(request, reporting_bytes));
@@ -330,7 +350,13 @@ ipc::ShellOperationResult ExecuteFileOperation(const ipc::ShellOperationRequest&
         if (SUCCEEDED(hr) && !deleting && request.kind != ShellOperationKind::Rename) {
             IShellItem* parsed = nullptr; hr = MakeItem(Parent(target), &parsed); destination.reset(parsed);
         }
-        if (SUCCEEDED(hr)) {
+        if (SUCCEEDED(hr) && recycling) {
+            IShellItem* recycled = nullptr;
+            hr = RecycleShellItem(source.get(), callbacks, &recycled,
+                [&] { return sink.PreDeleteItem(0, source.get()); });
+            ComPtr<IShellItem> created(recycled);
+            sink.PostDeleteItem(0, source.get(), hr, created.get());
+        } else if (SUCCEEDED(hr)) {
             switch (request.kind) {
             case ShellOperationKind::Copy: hr = operation->CopyItem(source.get(), destination.get(), Leaf(target).c_str(), nullptr); break;
             case ShellOperationKind::Move: hr = operation->MoveItem(source.get(), destination.get(), Leaf(target).c_str(), nullptr); break;
@@ -341,16 +367,18 @@ ipc::ShellOperationResult ExecuteFileOperation(const ipc::ShellOperationRequest&
             case ShellOperationKind::CreateFolder: case ShellOperationKind::CreateFile:
                 hr = operation->NewItem(destination.get(), request.kind == ShellOperationKind::CreateFolder ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL,
                     Leaf(target).c_str(), nullptr, nullptr); break;
-            case ShellOperationKind::DeletePermanent: case ShellOperationKind::Recycle: hr = operation->DeleteItem(source.get(), nullptr); break;
+            case ShellOperationKind::DeletePermanent: hr = operation->DeleteItem(source.get(), nullptr); break;
+            case ShellOperationKind::Recycle: hr = E_UNEXPECTED; break;
             }
         }
         BOOL aborted = FALSE;
-        if (SUCCEEDED(hr)) {
+        if (SUCCEEDED(hr) && operation) {
             hr = operation->PerformOperations();
             const HRESULT queried = operation->GetAnyOperationsAborted(&aborted);
             if (SUCCEEDED(hr) && FAILED(queried)) hr = queried;
         }
         if (advised) operation->Unadvise(cookie);
+        sink.FinishOperations(hr);
         if (FAILED(sink.failure)) hr = sink.failure;
         if (SUCCEEDED(hr) && (aborted || sink.result.skipped || FAILED(sink.result.hr)))
             hr = FAILED(sink.result.hr) && sink.result.hr != E_PENDING ? sink.result.hr : E_ABORT;

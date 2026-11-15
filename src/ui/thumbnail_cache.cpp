@@ -139,6 +139,35 @@ void ThumbnailCache::Evict(Consumer consumer) {
     CancelInterests(consumer, false);
     Trim();
 }
+void ThumbnailCache::InvalidatePath(const std::wstring& path, bool descendants) {
+    if (path.empty()) return;
+    size_t length = path.size();
+    if (descendants)
+        while (length && (path[length - 1] == L'\\' || path[length - 1] == L'/')) --length;
+    if (!length) return;
+    const auto matches = [&](const std::wstring& key) {
+        if (key.size() <= length || CompareStringOrdinal(key.data(), static_cast<int>(length),
+                path.data(), static_cast<int>(length), TRUE) != CSTR_EQUAL) return false;
+        return key[length] == L'\n' ||
+            (descendants && (key[length] == L'\\' || key[length] == L'/'));
+    };
+    std::lock_guard lock(mutex_);
+    bool changed = false;
+    for (auto item = items_.begin(); item != items_.end();) {
+        if (matches(item->first)) {
+            changed = true;
+            SetCacheBytes(cache_bytes_ - item->second.cost);
+            lru_.erase(item->second.lru_position);
+            item = items_.erase(item);
+        } else ++item;
+    }
+    changed |= std::erase_if(pending_, [&](const auto& pending) { return matches(pending.first); }) != 0;
+    changed |= std::erase_if(queue_, [&](const Request& request) { return matches(request.key); }) != 0;
+    if (!changed) return;
+    content_revision_.fetch_add(1, std::memory_order_relaxed);
+    for (const auto& consumer : consumers_)
+        if (consumer.hwnd) InvalidateRect(consumer.hwnd, nullptr, FALSE);
+}
 void ThumbnailCache::SelectDetails(Consumer consumer, const std::wstring& identity,
                                    uint64_t generation) {
     auto& state = consumers_[static_cast<size_t>(consumer)];
@@ -622,25 +651,37 @@ std::deque<ThumbnailCache::Request>::iterator ThumbnailCache::NextRequest(size_t
 }
 
 void ThumbnailCache::Worker(size_t lane) {
-    Connect(lane); // warm only on this lane's background thread
+    if (lane == 0) Connect(lane); // Keep one warm helper; additional lanes start on demand.
+    const auto clock = [this] { return worker_clock_ ? worker_clock_() : GetTickCount64(); };
+    const ULONGLONG idle_timeout = lane == 0 ? 60000 : 10000;
+    ULONGLONG idle_deadline = 0;
+    bool helper_used = true;
     while (running_) {
         Request req;
         {
             std::unique_lock lock(mutex_);
+            if (helper_used) idle_deadline = clock() + idle_timeout;
+            helper_used = false;
             while (running_) {
-                const ULONGLONG now = GetTickCount64();
+                const ULONGLONG now = clock();
                 auto ready = NextRequest(lane, now);
                 if (ready != queue_.end()) {
                     req = std::move(*ready);
                     queue_.erase(ready);
                     break;
                 }
-                if (queue_.empty() || (lane == 0 && std::all_of(queue_.begin(), queue_.end(),
-                    [](const Request& r) { return r.prefetch; }))) cv_.wait(lock);
+                auto& lane_pipe = lane ? hosts_[lane - 1].pipe : pipe_;
+                if (lane_pipe != INVALID_HANDLE_VALUE && now >= idle_deadline) {
+                    lock.unlock();
+                    StopChild(lane);
+                    lock.lock();
+                    continue;
+                }
+                ULONGLONG next_due = lane_pipe != INVALID_HANDLE_VALUE ? idle_deadline : MAXULONGLONG;
+                for (const auto& queued : queue_)
+                    if (lane != 0 || !queued.prefetch) next_due = std::min(next_due, queued.retry_due);
+                if (next_due == MAXULONGLONG) cv_.wait(lock);
                 else {
-                    ULONGLONG next_due = MAXULONGLONG;
-                    for (const auto& queued : queue_)
-                        if (lane != 0 || !queued.prefetch) next_due = std::min(next_due, queued.retry_due);
                     cv_.wait_for(lock, std::chrono::milliseconds(next_due - now));
                 }
             }
@@ -672,7 +713,10 @@ void ThumbnailCache::Worker(size_t lane) {
             result.w = stored.width; result.h = stored.height; result.stride = stored.width * 4;
             result.source_width = stored.source_width; result.source_height = stored.source_height;
             result.kind = ipc::PreviewContentKind::Bitmap; result.cost = result.pixels.capacity();
-        } else ok = Connect(lane) && FetchResponse(req, result, lane);
+        } else {
+            helper_used = true;
+            ok = Connect(lane) && FetchResponse(req, result, lane);
+        }
         if (!running_) break;
         bool stale = false;
         {

@@ -12,6 +12,7 @@
 #include "../ops/archive.h"
 #include "entry_sort.h"
 #include "../common/localization.h"
+#include "../common/file_operation_error.h"
 #include "../ui/file_operation_dialog.h"
 #include <atomic>
 #include <algorithm>
@@ -263,7 +264,15 @@ bool OpenArchiveSelection(AppState& s) {
         // Opening a member uses a private temporary extraction, never the source folder.
         const auto file = tab->archive_file, password = tab->archive_password;
         const auto member = tab->archive_prefix + entry.name;
-        const auto destination = (std::filesystem::temp_directory_path() / L"PulseArchive" /
+        std::error_code error;
+        const auto temporary = std::filesystem::temp_directory_path(error);
+        if (error) {
+            tab->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::ArchiveOpenFailed));
+            tab->banner_message = format::FileOperationErrorText(HRESULT_FROM_WIN32(error.value()));
+            InvalidateRect(s.hwnd, nullptr, FALSE);
+            return true;
+        }
+        const auto destination = (temporary / L"PulseArchive" /
             std::to_wstring(GetCurrentProcessId()) / std::to_wstring(next_request++)).wstring();
         auto open_password = password;
         const auto source_view = tab->current_path;

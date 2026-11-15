@@ -1277,6 +1277,59 @@ int RunBatchReplacementRegressions(const std::wstring& parent = {}) {
     return g_fail ? 1 : 0;
 }
 
+int RunCaseSensitiveTransferRegressions() {
+    const auto root = SandboxRoot() + L"-case-sensitive-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64());
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    if (error) return 2;
+    const HANDLE directory = CreateFileW(root.c_str(), FILE_WRITE_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    FILE_CASE_SENSITIVE_INFO info{FILE_CS_FLAG_CASE_SENSITIVE_DIR};
+    const bool enabled = directory != INVALID_HANDLE_VALUE &&
+        SetFileInformationByHandle(directory, FileCaseSensitiveInfo, &info, sizeof(info));
+    const DWORD enable_error = enabled ? ERROR_SUCCESS : GetLastError();
+    if (directory != INVALID_HANDLE_VALUE) CloseHandle(directory);
+    if (!enabled) {
+        wprintf(L"[SKIP] case-sensitive transfer fixture unavailable; Win32 error=%lu\n", enable_error);
+        std::filesystem::remove_all(root, error);
+        return 77;
+    }
+    g_ops.Start([] {});
+    for (const bool nested_destination : {false, true}) {
+        const auto parent = root + (nested_destination ? L"\\ancestors" : L"\\siblings");
+        const auto source = parent + L"\\A", sibling = parent + L"\\a";
+        const auto destination = sibling + (nested_destination ? L"\\child" : L"");
+        std::filesystem::create_directories(source, error);
+        if (error) { g_ops.Stop(); return 2; }
+        std::filesystem::create_directories(destination, error);
+        if (error) { g_ops.Stop(); return 2; }
+        FileIdentity a, b;
+        Check(ReadPathFileIdentity(source, a) && ReadPathFileIdentity(sibling, b) && a.Valid() && b.Valid() && a != b,
+            L"A and a are distinct directory objects in the isolated case-sensitive fixture");
+        const auto leaf = source + L"\\leaf.txt", output = destination + L"\\A\\leaf.txt";
+        constexpr char payload[] = "case-sensitive transfer bytes";
+        Check(MakeFile(leaf, payload, sizeof(payload) - 1), L"prepare case-sensitive directory payload");
+        const auto hash = FileHash(leaf);
+        const auto status = RunOp(SimpleOp(ops::OpType::Move, {source.c_str()}, destination.c_str()), 30000);
+        if (status.phase != ops::OpPhase::Completed)
+            wprintf(L"[DIAG] case-sensitive transfer hr=0x%08lX error=%s\n", status.failure_hr, status.last_error.c_str());
+        Check(status.phase == ops::OpPhase::Completed && !Exists(source) && Exists(output) && FileHash(output) == hash,
+            nested_destination ? L"A can move beneath a case-distinct sibling without a false ancestry rejection" :
+                L"A can move into case-distinct a without a false same-directory rejection");
+    }
+    const auto source = root + L"\\guard", descendant = source + L"\\child";
+    std::filesystem::create_directories(descendant, error);
+    const auto status = RunOp(SimpleOp(ops::OpType::Move, {source.c_str()}, descendant.c_str()), 30000);
+    Check(status.phase == ops::OpPhase::Failed && status.failure_hr == E_INVALIDARG && Exists(descendant),
+        L"a real source descendant remains forbidden and unchanged");
+    g_ops.Stop();
+    g_ops.UndoFromJson(L"[]");
+    std::filesystem::remove_all(root, error);
+    Check(!error && !Exists(root), L"isolated case-sensitive transfer fixture cleaned");
+    return g_fail ? 1 : 0;
+}
+
 int RunTerminalArgumentTests() {
     Check(ops::TerminalCommandLine(L"C:\\A\\B") == L"-d \"C:\\A\\B\"",
           L"terminal command quotes a directory");
@@ -1406,6 +1459,7 @@ int RunOpsTests(int argc, wchar_t** argv) {
     if (argc == 3 && std::wstring_view(argv[1]) == L"--filter") {
         const std::wstring filter = argv[2];
         if (filter == L"terminal-arguments") return RunTerminalArgumentTests();
+        if (filter == L"case-sensitive-transfer") return RunCaseSensitiveTransferRegressions();
         if (filter == L"batch-replacement") return RunBatchReplacementRegressions();
         if (filter == L"open-workers") return RunMultiwindowOpenWorkers();
         if (filter == L"clipboard-isolated") return ops::RunClipboardIsolationRegressions();

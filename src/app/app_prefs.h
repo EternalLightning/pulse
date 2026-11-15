@@ -91,6 +91,9 @@ struct AppPrefs {
 
     bool StoreBackgroundImage(const std::wstring& source_path);
     void ClearBackgroundImage();
+
+private:
+    bool saves_enabled_ = true;
 };
 
 bool ParseAccentRgb(const std::wstring& text, uint32_t& rgb) noexcept;

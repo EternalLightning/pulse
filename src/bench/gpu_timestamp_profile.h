@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
-#include "../app/frame_profile.h"
+#include "../common/frame_profile.h"
 #include <d2d1_1.h>
 #include <d3d11.h>
 #include <wrl/client.h>
@@ -41,7 +41,7 @@ public:
             "limit=may-include-command-supply-gaps-and-scheduling-not-busy-or-display-timing\n", slots_.size());
         return S_OK;
     }
-    app::FrameDrawProfileHooks Hooks() {
+    profile::FrameDrawProfileHooks Hooks() {
         return {this, [](void* self) noexcept { static_cast<GpuTimestampProfile*>(self)->Begin(); },
             [](void* self, int32_t result) noexcept { static_cast<GpuTimestampProfile*>(self)->End(result); }};
     }

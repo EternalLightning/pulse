@@ -3,19 +3,14 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
-// session.h — Window/session snapshot save/load.
+// session.h — Window preference persistence and legacy migration.
 #pragma once
 #include "app_model.h"
 #include <array>
-#include <functional>
 #include <string>
 #include <windows.h>
 
 namespace pulse::app {
-
-inline constexpr size_t kMaxSessionLayoutTabs = 128;
-inline constexpr size_t kMaxSessionTabGroups = 128;
-inline constexpr size_t kMaxSessionPanes = 4;
 
 inline bool WindowPlacementRestoresMaximized(const WINDOWPLACEMENT& placement) {
     return placement.showCmd == SW_SHOWMAXIMIZED ||
@@ -24,39 +19,10 @@ inline bool WindowPlacementRestoresMaximized(const WINDOWPLACEMENT& placement) {
           placement.showCmd == SW_SHOWMINNOACTIVE));
 }
 
-struct GroupSessionSnapshot {
-    int id = 0;
-    std::wstring name;
-    uint32_t color_rgb = 0;
-    bool collapsed = false;
-};
-
-struct PaneFolderSnapshot {
-    std::wstring path;
-    ui::ViewMode view = ui::ViewMode::Details;
-    std::array<float, 4> columns{};
-    std::array<float, 5> search_columns{};
-    bool column_layout = false;
-    std::vector<float> column_widths; // DIP, see ui::ColumnStripWidthDip
-};
-
-struct LayoutTabSnapshot {
-    std::wstring title;
-    uint32_t marker_rgb = 0;
-    bool pinned = false;
-    int group = 0;
-    int layout = 0;
-    int focused = 0;
-    int target = -1;
-    std::vector<float> split_ratios;
-    std::vector<PaneFolderSnapshot> panes;
-};
-
 struct WindowSessionSnapshot {
     RECT window_rect = {};
     bool maximized = false;
     bool dark = false; // legacy serialization/migration, projected from window appearance
-    std::wstring active_path;
     int sidebar_collapsed = 0; // bitmask indexed by SidebarSectionId
     int sidebar_hidden = 0;    // same ids; hidden sections are not drawn at all
     std::vector<int> sidebar_order; // display order, empty = DefaultSidebarOrder()
@@ -67,42 +33,15 @@ struct WindowSessionSnapshot {
     bool details_preview_only = false;
     bool details_preview = true; // preview pane enabled (session remembers it)
     std::array<float, 3> details_column_dividers{}; // version 3 migration only
-    std::vector<LayoutTabSnapshot> layout_tabs;
-    std::vector<GroupSessionSnapshot> tab_groups;
-    int active_layout_tab = 0;
-};
-
-struct SessionSnapshot : WindowSessionSnapshot {
-    std::vector<WindowSessionSnapshot> windows;
 };
 
 std::wstring GetPulseDataDir();
-bool SaveSession(const SessionSnapshot& snap);
-bool LoadSession(SessionSnapshot& snap);
 // preferences.json retains appearance. Legacy session.json is read only when
 // no preferences file exists; staging tray and undo history stay in memory.
 // Startup never restores navigation, staging tray, or undo history.
 bool SaveSessionPreferences(const WindowSessionSnapshot& snap);
 std::wstring SessionPreferencesToJson(const WindowSessionSnapshot& snap);
-bool LoadSessionPreferences(WindowSessionSnapshot& snap);
-std::wstring SessionToJson(const SessionSnapshot& snap);
-bool ParseSessionJson(const std::wstring& json, SessionSnapshot& snap);
-
-std::wstring LayoutTabsToJson(const std::vector<LayoutTabSnapshot>& tabs);
-bool ParseLayoutTabs(const std::wstring& array_json,
-                     std::vector<LayoutTabSnapshot>& out);
-std::wstring TabGroupsToJson(const std::vector<GroupSessionSnapshot>& groups);
-bool ParseTabGroups(const std::wstring& array_json,
-                    std::vector<GroupSessionSnapshot>& out);
-
-using SessionTabLoader = std::function<void(Tab&, const std::wstring&)>;
-LayoutTabSnapshot CaptureLayoutTab(const LayoutTab& tab);
-void RestoreLayoutTab(LayoutTab& tab, const LayoutTabSnapshot& snapshot,
-                      const SessionTabLoader& load_tab);
-void RestoreWindowTabs(WindowTabs& tabs,
-                       const std::vector<LayoutTabSnapshot>& layout_tabs,
-                       const std::vector<GroupSessionSnapshot>& groups,
-                       int active_index,
-                       const SessionTabLoader& load_tab);
+// Automatic saves must retain this permission separately from recaptured snapshots.
+bool LoadSessionPreferences(WindowSessionSnapshot& snap, bool* saves_enabled = nullptr);
 
 } // namespace pulse::app

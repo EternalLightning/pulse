@@ -13,8 +13,8 @@
 #include <cstdio>
 #include <limits>
 
-namespace pulse::app {
-std::wstring GetPulseDataDir() { return {}; }
+namespace pulse::storage {
+std::wstring ConfigurationRoot() { return {}; }
 }
 
 namespace {

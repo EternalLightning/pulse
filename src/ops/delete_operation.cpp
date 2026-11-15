@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "delete_operation.h"
+#include "operation_elevation_adapter.h"
 #include "produced_undo.h"
 #include "../shell_host/delete_fileop.h"
 #include "../fs/fs_recycle.h"
@@ -533,44 +534,69 @@ void OpsManager::RunDelete(const QueueItem& item,
         if (std::any_of(expected_identities.begin(), expected_identities.end(), [](const auto& value) { return !value.Valid(); }))
             expected_identities.clear();
         if (FAILED(static_cast<HRESULT>(hr))) break;
-        shell_activity_tick_ = GetTickCount64();
-        auto& client = ipc::ShellClient::Instance();
-        uint32_t id = 0;
-        {
-            // Linearize Cancel/Stop against the destructive send handoff. No mutex
-            // is held during confirmation, and no backend retry is allowed.
-            std::unique_lock<std::mutex> lock(delete_wait_mutex_);
-            if (delete_cancel_.load() || stopping_.load()) {
-                lock.unlock();
-                cancelled = true; break;
-            }
-            id = client.DeleteAuthorized(group.second, execution_token, group.first, ui_hwnd_.load(), expected_identities, ShellOwner());
-            current_req_id_.store(id);
-        }
-        if (delete_cancel_.load() || shell_cancel_requested_.load()) client.Cancel(id);
-        if (id == 0) { hr = static_cast<uint32_t>(E_FAIL); break; }
         ShellCompletion completion;
-        if (!WaitShellDone(id, completion)) {
-            // WaitShellDone already bumps the finished-task counter. Preserve an
-            // uncertain active plan: the backend may have mutated before Stop.
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                delete_outcomes_.push_back({item.seq, false, true});
-                if (item.req.undo_revision && item.req.undo_revision == undo_revision_ && !undo_.empty()) {
-                    undo_.back().supported = false; ++undo_revision_;
-                }
-                if (active_item_ && active_item_->seq == item.seq) {
-                    if (item.recovery_sequence != 0) {
-                        std::erase_if(pending_recovery_, [&](const RecoveryEntry& entry) { return entry.sequence == item.recovery_sequence; });
-                        scheduled_recovery_.erase(item.recovery_sequence);
-                    }
-                    pending_recovery_.push_back({item.seq, active_item_->req, true});
-                    active_item_.reset();
-                }
+        if (group.first && shell_elevation_authorized_) {
+            ipc::ShellOperationRequest request;
+            request.kind = ipc::ShellOperationKind::Recycle;
+            for (size_t i = 0; i < group.second.size(); ++i)
+                request.items.push_back({group.second[i], {},
+                    expected_identities.empty() ? FileIdentity{} : expected_identities[i], {}});
+            const auto result = OperationElevationAdapter::Recycle(request, ui_hwnd_.load(),
+                [&] { return stopping_.load() || delete_cancel_.load() || shell_cancel_requested_.load(); },
+                [&](size_t done, size_t total, const std::wstring& path) {
+                    shell_activity_tick_ = GetTickCount64();
+                    SetStatus([&](OpStatus& status) {
+                        status.current_item = path;
+                        status.percent = total ? static_cast<float>(100.0 * done / total) : -1.0f;
+                    });
+                });
+            completion.hr = static_cast<uint32_t>(result.hr);
+            completion.cancelled = result.cancelled; completion.failed_path = result.failed_path;
+            completion.error = format::FileOperationErrorText(result.hr);
+            for (const auto& output : result.items) if (SUCCEEDED(output.hr) && !output.skipped && !output.destination.empty()) {
+                completion.recycled_paths.push_back(output.source);
+                completion.recycle_destinations.push_back(output.destination);
             }
-            PersistJournal();
-            delete_active_.store(false);
-            return;
+        } else {
+            shell_activity_tick_ = GetTickCount64();
+            auto& client = ipc::ShellClient::Instance();
+            uint32_t id = 0;
+            {
+                // Linearize Cancel/Stop against the destructive send handoff. No mutex
+                // is held during confirmation, and no backend retry is allowed.
+                std::unique_lock<std::mutex> lock(delete_wait_mutex_);
+                if (delete_cancel_.load() || stopping_.load()) {
+                    lock.unlock();
+                    cancelled = true; break;
+                }
+                id = client.DeleteAuthorized(group.second, execution_token, group.first, ui_hwnd_.load(), expected_identities,
+                    ShellOwner(), shell_elevation_authorized_);
+                current_req_id_.store(id);
+            }
+            if (delete_cancel_.load() || shell_cancel_requested_.load()) client.Cancel(id);
+            if (id == 0) { hr = static_cast<uint32_t>(E_FAIL); break; }
+            if (!WaitShellDone(id, completion)) {
+                // WaitShellDone already bumps the finished-task counter. Preserve an
+                // uncertain active plan: the backend may have mutated before Stop.
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    delete_outcomes_.push_back({item.seq, false, true});
+                    if (item.req.undo_revision && item.req.undo_revision == undo_revision_ && !undo_.empty()) {
+                        undo_.back().supported = false; ++undo_revision_;
+                    }
+                    if (active_item_ && active_item_->seq == item.seq) {
+                        if (item.recovery_sequence != 0) {
+                            std::erase_if(pending_recovery_, [&](const RecoveryEntry& entry) { return entry.sequence == item.recovery_sequence; });
+                            scheduled_recovery_.erase(item.recovery_sequence);
+                        }
+                        pending_recovery_.push_back({item.seq, active_item_->req, true});
+                        active_item_.reset();
+                    }
+                }
+                PersistJournal();
+                delete_active_.store(false);
+                return;
+            }
         }
         hr = completion.hr;
         cancelled = completion.cancelled;
@@ -634,6 +660,8 @@ void OpsManager::RunDelete(const QueueItem& item,
         if (!retry.req.sources.empty()) {
             if (!item.req.undo_revision) locks = CaptureLockedFailure(retry, static_cast<HRESULT>(hr), failed_path,
             [&] { return stopping_.load() || delete_cancel_.load(); });
+            if (locks.owners.empty() && !IsLockFailure(static_cast<HRESULT>(hr)))
+                CaptureElevationFailure(std::move(retry), static_cast<HRESULT>(hr), failed_path);
         }
     }
     InvalidateRecycleUndo(actual, backend_lost);

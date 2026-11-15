@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
-#include "../app/frame_profile.h"
+#include "../common/frame_profile.h"
 #include <dxgi1_4.h>
 #include <psapi.h>
 
@@ -11,7 +11,7 @@ inline constexpr const char* vm_csv_columns =
     "vm_ms,vm_base_ms,vm_commands_ms,vm_operations_ms,vm_sidebar_ms,vm_tabs_ms,"
     "vm_status_ms,vm_tray_ms,vm_details_ms,vm_panes_ms,vm_other_ms,vm_builds";
 
-inline void PrintVmProfile(const app::FrameProfileSample& sample) {
+inline void PrintVmProfile(const profile::FrameProfileSample& sample) {
     std::printf(",%.6f", sample.vm_ms);
     for (const double value : sample.vm_milliseconds) std::printf(",%.6f", value);
     std::printf(",%u", sample.vm_builds);
@@ -23,7 +23,7 @@ inline constexpr const char* paint_csv_columns =
     "paint_other_ms,paint_list_setup_ms,paint_list_rows_ms,paint_list_layout_ms,paint_list_slots_ms,"
     "paint_list_motion_ms,paint_list_columns_ms";
 
-inline void PrintPaintProfile(const app::FrameProfileSample& sample) {
+inline void PrintPaintProfile(const profile::FrameProfileSample& sample) {
     for (const double value : sample.paint_milliseconds) std::printf(",%.6f", value);
 }
 
