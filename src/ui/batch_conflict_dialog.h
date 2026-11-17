@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #pragma once
+#include "../common/localization.h"
 #include "window_helpers.h"
 #include "../ops/ops_manager.h"
 #include <optional>
@@ -12,12 +13,12 @@
 namespace pulse::ui {
 
 struct BatchConflictLabels {
-    std::wstring title = L"Resolve file conflicts";
-    std::wstring instruction = L"Choose an action for each item. Keep both is selected by default.";
-    std::wstring source = L"Source", destination = L"Existing";
-    std::wstring replace = L"Replace", skip = L"Skip", keep_both = L"Keep both";
-    std::wstring apply_all = L"Apply to every row", confirm = L"Continue", cancel = L"Cancel";
-    std::wstring folder = L"Folder", reparse = L"Link", unknown = L"Unknown";
+    std::wstring title = l10n::Get(l10n::StringId::OpConflictTitle);
+    std::wstring instruction = l10n::Get(l10n::StringId::BatchConflictInstruction);
+    std::wstring source = l10n::Get(l10n::StringId::BatchConflictSource), destination = l10n::Get(l10n::StringId::OpExisting);
+    std::wstring replace = l10n::Get(l10n::StringId::Replace), skip = l10n::Get(l10n::StringId::OpSkipFile), keep_both = l10n::Get(l10n::StringId::OpKeepBoth);
+    std::wstring apply_all = l10n::Get(l10n::StringId::BatchConflictApplyAll), confirm = l10n::Get(l10n::StringId::BatchConflictContinue), cancel = l10n::Get(l10n::StringId::Cancel);
+    std::wstring folder = l10n::Get(l10n::StringId::TypeFolder), reparse = l10n::Get(l10n::StringId::BatchConflictLink), unknown = l10n::Get(l10n::StringId::BatchConflictUnknown);
 };
 
 std::optional<std::vector<ops::ConflictResolution>> ShowBatchFileConflictDialog(

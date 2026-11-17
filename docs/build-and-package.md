@@ -5,12 +5,19 @@
 ## 环境与目录
 
 - Visual Studio 2022 v143 C++ 工具及 Windows SDK；本地与 CI 均通过 `scripts/vcvars.bat` 选择 VS2022 并初始化 x64 环境。
+- Python 3.10+ 用于从运行时语言资源生成 C++ 备用文案，CMake 会检查版本并自动生成。
 - 项目使用 `scripts/build-tools.lock.json` 固定 CMake 3.31.10 和 Ninja 1.13.2。首次构建自动下载至 `.build-tools` 并验证 SHA256，不依赖 PATH 中其他软件附带的版本；后续可复用已验证的本地工具。
 - PowerShell 7.2+（`pwsh`）用于便携包、产物校验及 CI；安装批处理内部还调用系统 Windows PowerShell。
 - Inno Setup 6 用于编译安装包。`build_installer.bat` 先查找 PATH 中的 `ISCC.exe`，再查找 Program Files 和当前用户的标准安装位置。
 - 保留仓库中的第三方二进制及许可证：`third_party/lumatext`、`third_party/pdfium`、`third_party/7zip` 等由构建或打包脚本使用。
 
 `build-release` 是本地生产构建目录，`build-test` 用于独立测试配置，`build-ci` 是 CI 默认目录。`scripts/build.ps1` 为每个目录持有独占构建锁；同目录构建串行执行，不同目录可以并行。工具和临时文件放在 `.build-tools`，避免构建目录清理后工具失效，也不继承全局临时目录和隐藏的 CL/LINK 参数。`dist` 存放交付物和便携包暂存目录，`docs/validation` 存放按日期区分的验证记录。
+
+## 界面文案
+
+固定界面文字集中在 `src/common/strings.rc`；需要在界面初始化前或辅助程序中使用的提示放在 `src/common/runtime_messages.rc`。两者都使用原生 `LANGUAGE` 和 `STRINGTABLE`，中文、英文按相同 ID 成对维护。新增文案时同步 `string_ids.h`、`localization.h` 和 `IDS_LOCALIZATION_LAST`，代码通过 `l10n::Get` 或 `l10n::Format` 取用。
+
+`runtime_messages.generated.h` 由构建自动生成，不手工编辑。安装器使用独立的原生 Inno Setup 文案表 `installer/messages.iss`。
 
 ## 生产构建
 

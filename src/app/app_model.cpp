@@ -1387,7 +1387,7 @@ static std::wstring SelectionText(const Tab& tab) {
     tab.SelectionSizeSummary(&bytes, &files, nullptr);
     // Like Explorer: folder sizes are unknown here, so show the files' total.
     if (files <= 0) return buf;
-    return std::wstring(buf) + L"  \u00B7  " + pulse::format::ByteSize(bytes, true);
+    return std::wstring(buf) + L"  " + pulse::format::ByteSize(bytes, true);
 }
 
 SidebarEntry BuildCloudSidebarEntry(const CloudRoot& root) {
@@ -1729,8 +1729,9 @@ std::wstring LayoutTabTitle(const LayoutTab& tab) {
         ? TabTitle(view->current_path) : view->virtual_title;
     const size_t n = LayoutPresetCount(tab.layout);
     if (n > 1) {
-        name += L" · ";
+        name += L" (";
         name += std::to_wstring(n);
+        name += L")";
     }
     return name;
 }
@@ -1834,7 +1835,7 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
             const unsigned percent = scanned == tab->content_total_files ? 100u :
                 std::min(99u, static_cast<unsigned>(static_cast<double>(scanned) * 100.0 /
                     static_cast<double>(tab->content_total_files)));
-            vm.status.query_text=std::to_wstring(percent)+L"% · "+progress;
+            vm.status.query_text=std::to_wstring(percent)+L"%  "+progress;
         }
     }
 

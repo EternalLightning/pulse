@@ -12,6 +12,7 @@
 #pragma once
 
 #include "system_ctx_registry.h"
+#include "../common/localization.h"
 #include "../ui/sysctx_view.h"
 
 #include <windows.h>
@@ -143,8 +144,7 @@ private:
     };
     // A row of the scene list; extensions and perceived types pick a sub scene.
     struct Nav {
-        const wchar_t* zh;
-        const wchar_t* en;
+        l10n::StringId text;
         const wchar_t* glyph;
         int group;
         std::vector<int> scenes;   // indices into scene_ids_

@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "../common/user_storage.h"
 #include "index_migration.h"
 #include "index_protocol.h"
@@ -41,7 +42,7 @@ bool ApplyUserIndexWithHost(const std::wstring& pipe_name, const std::wstring& m
     CurrentUserSecurityAttributes security;
     HANDLE mutex = CreateMutexW(security ? security.get() : nullptr, FALSE, mutex_name.c_str());
     if (!mutex) {
-        error = L"无法锁定索引目录，原索引已保留。";
+        error = l10n::Get(l10n::StringId::IndexDirectoryLockFailed).c_str();
         RecordError(Kind::Index, error);
         return false;
     }
@@ -69,7 +70,7 @@ bool ApplyUserIndexWithHost(const std::wstring& pipe_name, const std::wstring& m
     }
     if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
         CloseHandle(mutex);
-        error = L"索引进程尚未停止写入，迁移未执行，原索引已保留。请关闭其他 Pulse 窗口后重试。";
+        error = l10n::Get(l10n::StringId::IndexWriterNotStopped).c_str();
         RecordError(Kind::Index, error);
         return false;
     }

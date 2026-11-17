@@ -5,6 +5,7 @@
 
 #include "edit_host.h"
 #include "edit_composition.h"
+#include "dialog_lifecycle.h"
 #include "edit_motion.h"
 #include "edit_ime_transaction.h"
 #include "FluentTokens.h"
@@ -40,7 +41,7 @@ bool CustomEdit(Compositor& compositor, HWND hwnd) {
         if (!GetLayeredWindowAttributes(hwnd, nullptr, nullptr, &flags) || !(flags & LWA_ALPHA))
             SetPropW(hwnd, kRestoreUploaded, reinterpret_cast<HANDLE>(1));
         SetPropW(hwnd, kPolicyNative, reinterpret_cast<HANDLE>(1));
-        SetLayeredWindowAttributes(hwnd, 0, EditSurfaceOpacity(hwnd), LWA_ALPHA);
+        SetLayeredWindowAttributes(hwnd, 0, DialogChildOpacity(hwnd, EditSurfaceOpacity(hwnd)), LWA_ALPHA);
         KillTimer(hwnd, kEditCaretTimer);
         KillTimer(hwnd, kEditMotionTimer);
         RemovePropW(hwnd, L"Pulse.EditMotionPending");
@@ -76,7 +77,7 @@ bool PresentEdit(Compositor& compositor, HWND hwnd, IDWriteTextFormat* format,
     // Keep native EDIT input, selection and IME together if presentation fails.
     SetPropW(hwnd, kNativeEdit, reinterpret_cast<HANDLE>(1));
     compositor.RemoveEditSurface(hwnd);
-    SetLayeredWindowAttributes(hwnd, 0, EditSurfaceOpacity(hwnd), LWA_ALPHA);
+    SetLayeredWindowAttributes(hwnd, 0, DialogChildOpacity(hwnd, EditSurfaceOpacity(hwnd)), LWA_ALPHA);
     KillTimer(hwnd, kEditCaretTimer);
     KillTimer(hwnd, kEditMotionTimer);
     RemovePropW(hwnd, L"Pulse.EditMotionPending");
@@ -109,6 +110,17 @@ bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
     D2D1_COLOR_F foreground, D2D1_COLOR_F background, HBRUSH background_brush,
     HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, LRESULT& result) {
     (void)background_brush;
+    if (msg == DialogEditFadeMessage()) {
+        if (wParam && !CustomEdit(compositor, hwnd)) {
+            if (compositor.PresentNativeEdit(hwnd))
+                SetPropW(hwnd, L"Pulse.DialogNativeEditSnapshot", reinterpret_cast<HANDLE>(1));
+        } else if (!wParam && RemovePropW(hwnd, L"Pulse.DialogNativeEditSnapshot")) {
+            RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE);
+            compositor.RemoveEditSurface(hwnd);
+        }
+        result = 0;
+        return true;
+    }
     if (msg == WM_NCDESTROY) {
         compositor.RemoveEditSurface(hwnd);
         compositor.SynchronizeEditSelection(hwnd, msg, wParam, lParam);
@@ -117,6 +129,7 @@ bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
         RemovePropW(hwnd, kRestoreUploaded);
         RemovePropW(hwnd, kMigrating);
         RemovePropW(hwnd, L"Pulse.EditOpacity");
+        RemovePropW(hwnd, L"Pulse.DialogNativeEditSnapshot");
         return false;
     }
     if (msg == WM_WINDOWPOSCHANGED) compositor.SynchronizeEditSurface(hwnd);
@@ -151,7 +164,13 @@ bool HandleChildEditMessage(Compositor& compositor, IDWriteTextFormat* format,
         return true;
     }
     case WM_PAINT: {
-        if (!CustomEdit(compositor, hwnd)) return false;
+        if (!CustomEdit(compositor, hwnd)) {
+            if (!GetPropW(hwnd, L"Pulse.DialogNativeEditSnapshot")) return false;
+            compositor.PresentNativeEdit(hwnd);
+            ValidateRect(hwnd, nullptr);
+            result = 0;
+            return true;
+        }
         HideCaret(hwnd);
         PresentEdit(compositor, hwnd, format, foreground, background);
         result = 0;
@@ -203,6 +222,7 @@ LRESULT DefPresentedChildEditProc(Compositor& compositor, IDWriteTextFormat* for
     const LRESULT result = DefSubclassProc(hwnd, msg, wParam, lParam);
     edit_ime::AfterDefault(hwnd, msg);
     if (changes_visual) compositor.SynchronizeEditSelection(hwnd, msg, wParam, lParam);
+    if (changes_visual && GetPropW(hwnd, L"Pulse.DialogNativeEditSnapshot")) compositor.PresentNativeEdit(hwnd);
     if (custom_paint) {
         if (suppress_native) SendMessageW(hwnd, WM_SETREDRAW, TRUE, 0);
         HideCaret(hwnd);

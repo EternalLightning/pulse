@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "image_open.h"
 
 #include "../common/path_utils.h"
@@ -317,9 +318,9 @@ public:
         if (out->dwMask & CM_MASK_DEFAULTWIDTH) out->uDefaultWidth = 180;
         if (out->dwMask & CM_MASK_IDEALWIDTH) out->uIdealWidth = 180;
         if (out->dwMask & CM_MASK_NAME) {
-            const wchar_t* label = name ? L"Name" : contents_->context.column == model::SortColumn::Mtime
-                ? L"Date modified" : contents_->context.column == model::SortColumn::Size
-                ? L"Size" : contents_->context.column == model::SortColumn::Type ? L"Type" : L"Path";
+            const wchar_t* label = name ? l10n::Get(l10n::StringId::ColumnName).c_str() : contents_->context.column == model::SortColumn::Mtime
+                ? l10n::Get(l10n::StringId::ColumnModified).c_str() : contents_->context.column == model::SortColumn::Size
+                ? l10n::Get(l10n::StringId::ColumnSize).c_str() : contents_->context.column == model::SortColumn::Type ? l10n::Get(l10n::StringId::ColumnType).c_str() : l10n::Get(l10n::StringId::ColumnPath).c_str();
             wcscpy_s(out->wszName, label);
         }
         return S_OK;

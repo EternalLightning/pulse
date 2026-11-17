@@ -168,7 +168,7 @@ void ClearTextWidthCache() {
         if (ext == L"mp3" || ext == L"wav" || ext == L"flac") return pulse::l10n::Get(StringId::TypeAudio);
         if (ext == L"zip" || ext == L"rar" || ext == L"7z") return pulse::l10n::Get(StringId::TypeArchive);
         if (ext == L"exe" || ext == L"msi") return pulse::l10n::Get(StringId::TypeApplication);
-        if (ext == L"dwg") return L"AutoCAD " + pulse::l10n::Get(StringId::TypeFile);
+        if (ext == L"dwg") return pulse::l10n::Get(StringId::TypeAutocadFile);
         return pulse::l10n::Get(StringId::TypeFile);
     }
 
@@ -227,8 +227,8 @@ void ClearTextWidthCache() {
         if (source.pc_device) {
             using I = pulse::l10n::StringId;
             entry.type_text = pulse::l10n::Get(source.pc_device & 2 ? I::DeviceIPhone : I::DevicePhone);
-            if (source.pc_device & 4) entry.type_text += L" · " + pulse::l10n::Get(I::DeviceLocked);
-            else if (source.pc_device & 2) entry.type_text += L" · " + pulse::l10n::Get(I::DeviceReadOnly);
+            if (source.pc_device & 4) entry.type_text += L"  " + pulse::l10n::Get(I::DeviceLocked);
+            else if (source.pc_device & 2) entry.type_text += L"  " + pulse::l10n::Get(I::DeviceReadOnly);
             entry.size_text.clear();
             entry.date_text.clear();
         }

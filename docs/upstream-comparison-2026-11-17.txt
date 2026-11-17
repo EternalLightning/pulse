@@ -1,0 +1,173 @@
+Pulse 上游、Files 与本地分支核查（2026-11-17）
+
+一、范围与口径
+
+本地：EternalLightning/pulse，version.txt 为 1.5.2.0；以本次工作区当前源码为准，包含已有未提交工作。
+上游：jimmgreen/pulse。2026-11-17 抓取的 GitHub Releases 最新正式主程序版本是 v1.0.60（2026-11-10 UTC）；main README 仍写源码 1.0.59。issue 自报 1.0.61 不作为正式发行证据。两个项目版本号不能直接比较先后。
+Files：正式版 v4.3（2026-10-11），并阅读官方预览版 4.3.1、4.3.2、4.3.3（最新文章 2026-11-08）及 4.2 更新文档。别名等预览功能明确单列，不当作正式版承诺。
+Bug 时间窗：近 72 小时，约 2026-11-14 11:18 至 2026-11-17 11:18（北京时间）。#631–#675 中共有 38 条 issue（号码不连续，排除 PR），均在窗口内，读取正文及现有评论。建议另向前阅读近期列表中的 #626、#614、#605、#600、#599、#598、#588、#584、#583；不借机展开旧 bug 回归。
+排除一切 AI、MCP 功能；没有引入相关入口、模型服务或插件连接。
+“已有”表示源码存在相应工作流，不等于本次完成全部设备/系统现场验收；“未发现”来自 owning 模块与相关符号的定向检索。
+
+主要原始资料：
+https://github.com/jimmgreen/pulse/releases/tag/v1.0.60
+https://github.com/jimmgreen/pulse/blob/main/docs/releases/1.0.59.md
+https://github.com/jimmgreen/pulse/blob/main/README.md
+https://files.community/blog/posts/v4-3-0
+https://files.community/blog/posts/v4-3-1
+https://files.community/blog/posts/v4-3-2
+https://files.community/blog/posts/v4-3-3
+https://files.community/blog/posts/v4-2-0
+本地原始 issue：bench_data/upstream-issues-2026-11-17.json
+发行及评论：bench_data/upstream-review-2026-11-17/*.json
+
+二、更新文档中值得吸收的方向
+
+上游 Pulse 1.0.59/60：重点是目录加载与结果定位、详情预览、工具栏、多窗口/工作区、媒体列、路径补全、标签/别名、批量重命名，以及窗口/菜单/输入问题。上游打开/保存对话框接管与原生扩展 SDK 仍是实验/开发预览，暂不建议搬入本分支。
+Files 4.3：重点是启动、导航、搜索、缩略图、内存与 Git 操作反馈。文档中的性能改善属于 Files 自述，本次没有做三款程序同机性能横测，不据此宣称谁更快。
+Files 4.3.1/2：后台准备云盘、库、WSL，拖动固定位置排序、多窗口共享后台状态。关注异步准备与跨窗口一致性，不为对齐架构另造后台服务。
+Files 4.3.3：文件夹别名、Windows 11 扩展菜单、缩小下载量。本地已有 Win11/经典 Shell 菜单融合，不能把“右键支持 Windows Terminal/OneDrive”列为新增缺口。
+
+三、两边都有而本地缺少或明显不足的功能（按建议优先级）
+
+1. 通用快捷键与工具栏自定义：优先。
+   上游：工具命令固定/排序/分隔、自定义快捷键。Files：Actions 快捷键、Toolbar 自定义。
+   本地：只有全局搜索热键可改；普通快捷键与工具栏项目主要固定。建议先让现有命令目录可绑定/重置快捷键，再做常用按钮显隐和顺序；不先造插件框架。
+   证据：src/app/app_prefs.h:46、src/app/tab_shortcuts.h:13、src/ui/toolbar_layout.h:12。
+   来源：https://files.community/docs/customize-settings/actions
+         https://files.community/docs/features/toolbar
+
+2. 丰富属性列及每目录列配置：优先。
+   上游：图片/音乐/视频信息列与分组；Files：媒体信息及 Git 等列。
+   本地列类型为 Name/Path/Date/Type/Size/Cloud；未发现可任选 Shell 属性列的完整编辑器。建议先加分辨率、时长、拍摄时间，再提供显隐/顺序及每目录记忆；后台读取，不能在绘制路径同步开文件。
+   证据：src/ui/ui_renderer.h 的 ColumnKind、src/ui/ui_pane_list.cpp:484。
+   媒体属性编辑本地可以调用 Windows 属性页；缺的是主界面列和本地编辑工作流，不是完全不能编辑文件属性。
+   来源：https://files.community/blog/posts/v4-2-0
+         https://files.community/docs/features/git
+
+3. 文件夹路径别名：小规模高收益。
+   上游已有文件/文件夹别名；Files 4.3.3 预览版提供 @work 形式的文件夹别名。
+   本地 settings_transfer 能搬运 aliases.json，但未发现实际别名加载、编辑、显示和地址栏解析。建议先做文件夹别名跳转，避免改真实文件名；不需要内容推断。
+   来源：https://files.community/blog/posts/v4-3-3
+
+4. Git 状态集成：适合工程目录，建议从只读开始。
+   上游/Files 都有分支、文件状态、远端差距及拉取/推送入口。
+   本地只定位 .git 和显示项目徽标，没有完整状态/分支工作流。先后台显示 branch、modified/untracked/conflict 并打开终端或外部 Git 工具；提交/推送可后续再评估。
+   证据：src/app/app_model.cpp:868、:1924、src/app/app_navigation.cpp:219。
+   来源：https://files.community/docs/features/git
+
+5. 面向本发行版的更新入口：中期。
+   上游已有下载校验、等待文件操作完成、保存现场后升级；Files 有运行中周期检查。
+   本地未发现相应应用内链路。必须使用本发行版自己的发布源与校验，不能把上游安装包装进本分支；先明确本地发布流程，再决定自动安装程度。
+   来源：https://github.com/jimmgreen/pulse/releases/tag/v1.0.60
+         https://files.community/blog/posts/v4-3-0
+
+四、相对 Windows Explorer 的主要差距
+
+1. 通用侧栏目录树：本地只有分区、固定位置/收藏展开及分栏浏览，未发现按目录逐层展开的通用树。Files 已有 Tree View；这是日常导航最直接的差距之一。
+   证据：src/app/app_model.h:503、src/app/app_input.cpp:2731。
+   来源：https://files.community/docs/features/sidebar
+
+2. Windows 库和通用 Shell 虚拟目录：本地 home_catalog 的 libraries 是桌面/图片/视频等已知文件夹，不是 .library-ms 聚合库；未发现通用 namespace 浏览器。回收站与手机是已有的专门实现，不能因此说它们不支持。
+   证据：src/app/home_catalog.cpp:75、src/app/app_navigation.cpp:1069。
+   来源：https://learn.microsoft.com/en-us/windows/client-management/client-tools/windows-libraries
+
+3. 可访问性：未发现自绘主列表、侧栏、工具栏的 UIA/MSAA provider。原生输入框和系统属性页可能有系统提供的支持，但不能代替主界面完整的读屏、焦点和选择状态。建议逐步补主列表 Selection/Invoke 与名称、焦点信息。
+   来源：https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-providersoverview
+
+4. 属性列/元数据呈现：见前述；系统属性页已经复用，不需要为对齐重写 ACL、安全和共享属性页。
+
+5. WSL、映射网络驱动器的发现与管理入口：本地已支持 UNC/SMB、鉴权及现有映射盘，未发现 WSL 发行版分区与专门创建/断开盘符映射的内建流程。可先做 WSL 发现和固定入口，继续复用 UNC；不将其扩成虚拟机管理器。
+   证据：src/app/server_address.h、src/app/app_network_access.cpp:69。
+   来源：https://learn.microsoft.com/en-us/windows/dev-environment/wsl-interop
+         https://files.community/docs/features/sidebar
+
+本地已经比 Explorer 更完整的工作流：多窗格、拼音/内容搜索、丰富空格预览、暂存盘、文本差异、文件夹对比、彩色标签。这里比较功能，不宣称其性能和兼容性都优于 Explorer。
+
+五、已有功能，不建议重复新增
+
+- 具名工作区：保存布局、窗格路径/视图和焦点；src/model/places.h:30、src/app/app_navigation.cpp:96/224。
+- 重复文件查找：取消、分组与候选删除；src/app/duplicate_scan_ui.cpp、src/index/content_search.cpp。
+- 模板批量重命名、编号与结果预览：src/model/batch_rename.cpp:93、src/ui/batch_rename_dialog.cpp:341。正则、拍摄日期、步骤预设等高级规则仍可扩展。
+- 内建回收站列表、还原和清空：src/fs/fs_recycle.cpp、src/ops/recycle_undo_validation.cpp。
+- MTP/PTP 手机浏览和 Shell 文件操作：src/fs/device_shell.cpp、src/shell_host/device_operations.cpp，范围受设备可写能力限制。
+- OneDrive 等兼容云目录状态、下载以预览、保留/释放：src/app/cloud_commands.cpp、src/app/cloud_download.cpp。
+- 压缩包主界面浏览、打开/嵌套浏览、选择解压：src/app/archive_navigation.cpp。包内添加/删除/重命名与原位保存未发现。
+- 设置分类导入导出：src/app/settings_transfer.h、src/app/settings_transfer_ui.cpp。
+- 复制后 SHA-256 校验：src/ops/shell_transfer.cpp；不等于独立的哈希展示/校验文件工具。
+- Undo 已有；没有发现对等 Redo 工作流。
+- ADS 携带标签已有；不等于跨设备自动同步/协作共享。
+
+README 存在需要另行校正的口径：列标题任意选择属性列未在 owning 代码对应；启动代码 src/app/app_main.cpp 明确 Navigation starts fresh，仅恢复窗口偏好，不自动恢复导航标签页。具名工作区与会话恢复是两种能力，比较时没有混用。没有在本次任务中擅自改变启动行为。
+
+六、38 条近期 issue 的本地适用性
+
+链接形式均为 https://github.com/jimmgreen/pulse/issues/<编号>。
+以下“未确认/未现场复现”不算修复通过。
+
+#675 关闭到后台仍播放：本地隐藏通知缺少预览卸载。修复与定向验证见末尾。
+#674 JPEG 垂直翻转：本地主图/内嵌图走 WIC；正/负高度 DIB 与大 JPEG 像素方向定向核查，没有复现。没有套用额外 FlipVertical。
+#673 新建按钮显隐：功能建议，纳入工具栏自定义方向，不直接复制帖子补丁。
+#671 Logo 按钮打开设置目录：低优先级。若添加，宜作为“关于/诊断”明确命令，不把品牌标记变成隐藏入口。
+#670 自动文件夹大小：本地已存在自动扫描、索引估计、手动统计和状态缓存；不是从零缺失。
+#669 WinRAR 子命令错位：本地保留 native command ID，并在 FindItemId 同时核对 ID、verb、text、enabled；未用显示行索引调用。未取得 WinRAR 5.50 原环境，不冒称现场已修。
+#668 Win+E 交替打开：需要复现者当前注册状态/Windows现场；本轮不改用户系统关联，未确认。
+#667 Bandizip 标题区域拖放/路径选择接管：内容区可拖、标题区不兼容是报告者评论的区分。缺实际 IDataObject，不能笼统判所有拖放失败；接管对话框模块不适用于本地。
+#666 19MB 移动耗时数分钟：无源/目标卷、扩展、占用和诊断信息，未复现，不以文件大小推断根因。
+#665 扩展商店 resources 校验：本地没有该扩展商店/清单链路，不适用。
+#664 操作移动盘闪退：无正文、步骤、异常码，未确认；不对用户移动盘做破坏性复现。
+#663 收藏弹出菜单同手势误执行：本地已有菜单打开时松键抑制及限高滚动，未在相同现场重新复现。
+#662 压缩/解压后不想选中新产物：行为偏好建议，不直接删除结果定位。
+#661 文件夹字距异常：本地使用当前 LumaText 路径并维护字体/布局缓存失效；缺原样本与现场，未确认同一根因。
+#660 暂存盘显隐：可纳入界面自定义，未新增偏好项。
+#659 动态 AVIF：本地没有专用 AVIF 动画解码链路，是格式能力缺口；没有声称已修。
+#658 保密 U 盘删除报语法错：特殊驱动/分区现场缺失，未确认，不绕过 Shell 删除边界。
+#657 Portable.zip：本地已有 scripts/package_portable.ps1；本次没有重新打包。
+#656 修改距今天数/颜色：已有智能日期可用；额外整列和彩色规则优先级低于真正的媒体属性列。
+#655 大小统计重复链接：本地不遍历目录 reparse；硬链接按目录项累计是逻辑大小口径，未改成每文件开句柄的物理去重。夹具验证限制见末尾。
+#654 重复回收站标签：本地已有按规范化路径复用标签的通用路径；未验证桌面 Shell 回收站入口是否都归一化，保留为未确认。
+#652 文件对话框输入法/尺寸/导航排序：本地没有上游对话框接管，不把上游问题当成本地主窗口 bug。
+#651 SVG 缩略图缺失：本地 Direct2D 失败后直接源码回退，确有相同根因。本轮修复该失败分支的 Shell 回退，验证见末尾。另有边界：本地尚未检测 Direct2D 不支持的所有 SVG 元素，含 text/style 的图可能静默漏内容而仍返回成功，这时不会触发失败回退；不能把本轮修复描述成所有 SVG 完整渲染。
+#650 子菜单 16 项截断：本地确有 kMaxSubmenuChildren=16 的功能限制。它同时参与 static verb 的命令编码，不能只改数值而忽略父/子项容量。保留未改，建议后续分别处理 COM 枚举限额、静态命令映射与滚动可达性。
+#649 原生选择器底部浮窗：本地未采用上游这一接管/浮窗模块，不适用。
+#648 打开/保存接管和跳转：同上。
+#646 大 PSD 解码预算：报告指向的 preview_decoders.cpp/RequireUnknownImageMemory/PULSE_GRID_DECODE_BUDGET_MIB 不在本地链路；本地更多依赖系统 provider，未取得大 PSD 与相同 codec，不能宣称大 PSD 均可用。
+#645 操作后拖动窗口卡顿：本地没有上游每次 WM_MOVING 重建目标 BuildVm 的调用链；窗口标题合并在退出移动循环时判定。未复现整机卡顿。
+#644 暂存盘单项移除：本地已有 StagingTray::RemoveItem/RemoveBatch，不算整体缺失。
+#643 滚轮切标签：本地有键盘切标签；滚轮切换/滚动属于交互偏好，不为对齐改变默认操作。
+#641 关闭最近使用记录：值得优先补的独立隐私选项。应控制记录写入，不能仅隐藏侧栏；已有记录需明确清除入口。本次未实现。
+#639 保存后缩略图消失：当前未提交工作已有 InvalidatePath 和结果替换回归改动，保留原工作，不重复覆盖；本轮不把原改动记为新修复或已重新验收。
+#638 外部唤醒/工作区当前标记：本地复用位置后有 ShowWindow/SetForegroundWindow；工作区模型不同，未复现报告现场，不套用上游补丁。
+#637 分栏默认开启：可作为默认布局偏好；不因某位报告者偏好把所有用户默认改为分栏。
+#636 筛选框黑块：本地正在使用不同的编辑/合成链路且有相关未提交改动；本轮没有在原 Windows/输入后端现场复现，不把换控件当作根因修复。
+#634 压缩包内浏览：本地已实现；可继续评估包内写操作，而非再做一个只读入口。
+#633 应用系统菜单更改没有管理员提示：上游评论定位其对话框接管重绑定；本地系统菜单设置链路已有独立改动，未改真实关联，未把上游关闭状态当作本地验证。
+#631 WSL 入口：推荐作为中小型改进；复用 UNC 与现有侧栏，不扩为虚拟机管理。
+
+另外阅读的较早建议：#626 顶部工具栏精简、#614 手势扩展、#605 先稳定现有功能、#600 前后端分离、#599 操作完成弹窗与音量记忆、#598 全文关键词命中数、#588 分栏空白激活、#584 快搜操作/手机传输、#583 正则批量重命名。建议排序倾向 #605 的稳定性、#626 自定义、#583 高级重命名与 #598 命中数；不建议此时引入二维码传输服务、手势插件或整套进程重构。
+
+七、本次改动与验证
+
+1. SVG 失败回退（#651）：src/preview_host/main.cpp 复用现有 MakeShellThumbnail；成功时返回位图，失败时仅主动内容预览读取文本，网格不再读取/传输源码。svg_fallback.h 的小型生产决策函数用于检查调用顺序。
+   定向命令：pulse_preview_test.exe --svg-fallback-only。
+   旧行为：7 PASS / 5 FAIL；修复后：12 PASS / 0 FAIL。
+   包括 mock Shell 成功/失败与真实 host 的简单 SVG、损坏 SVG 内容/网格及清理。
+   pulse_preview、pulse_preview_test 定向构建通过。真实第三方 SVG provider 成功回退未现场验证；静默丢文字问题仍按前文保留。
+   日志：bench_data/upstream-review-2026-11-17/svg-baseline/。
+
+2. JPEG 方向（#674）：新增 3911×5866 大图、无 EXIF/Orientation=1、8 种 EXIF 朝向、正负高度 DIB、缓存 CopyImage 路径检查，45 PASS / 0 FAIL；pulse_jpeg_orientation_test 定向构建通过。未取得报告者原始异常 JPEG，不认定上游现场已经修复。
+   日志：bench_data/upstream-review-2026-11-17/jpeg-rows-results.txt。
+
+3. 文件夹大小（#655）：pulse_folder_sizes_scan_test 定向构建通过，25 PASS / 0 FAIL；实际 junction 验证不跟随目标，链接根目录返回不可用。file symlink 创建返回错误 1314，明确 SKIP；真实 UNC、拒绝访问后代及 index/watch 不在本轮扫描夹具范围。没有改变 hardlink 的逻辑大小口径，没有修改生产统计逻辑。
+   日志：bench_data/upstream-review-2026-11-17/folder-size-scan-results.txt。
+
+4. 隐藏预览（#675）：WM_SHOWWINDOW(false) 显式通知 renderer 调用 PreviewHandlerHost::Hide，异步卸载详情 provider；切换应用的失活消息保持原行为。
+   旧行为夹具 3 PASS / 3 FAIL，准确复现隐藏后没有 Unload、状态未归 Idle、恢复同一选择未重新打开；修复后 6 PASS / 0 FAIL。
+   夹具使用隔离窗口、生产 WndProc、真实预览 STA 与计数 fake IPreviewHandler，检查实际 Unload、Idle、恢复同选择重新 open、失活不卸载与 STA 清理。
+   scripts/test_preview_visibility.ps1 可重复运行；最终 pulse 目标构建通过，PULSE_WITH_SELFTEST=OFF。没有实测第三方媒体 provider 的声音停止现场。
+   日志：bench_data/upstream-review-2026-11-17/preview-baseline/regression-{red,green}.log、build-green.log。
+
+新增/改动的生产路径仅是上述 SVG 失败回退与主窗口隐藏预览通知；其余是定向测试、夹具与本报告。已对照各路径修改前基线保留原有未提交修改；本轮相关 git diff --check 通过。
+
+构建/测试过程中沙箱内工具曾出现 DLL 初始化失败（0xC0000142）；在正常权限环境用同一固定工具链完成的检查按上述结果记录，不将环境失败推断为产品 bug。
+仅运行本轮相关目标/夹具；没有运行全量历史自测、打包、安装替换、提交或发布。

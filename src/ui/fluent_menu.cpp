@@ -812,7 +812,7 @@ void FluentMenu::Present(BYTE alpha, int y_offset_px) {
         PositionSubmenu(true, depth);
         PresentSub(alpha, depth);
     }
-    if (filter_fn_ && edit_ && open_ && !animating_out_)
+    if (filter_fn_ && edit_ && open_)
         PlaceFilterEdit(y_offset_px);
 }
 
@@ -1178,7 +1178,7 @@ bool FluentMenu::EnsureFilterEdit() {
         SetLayeredWindowAttributes(edit_, 0, 255, LWA_ALPHA);
     SendMessageW(edit_, WM_SETFONT, (WPARAM)edit_font_, TRUE);
     SendMessageW(edit_, EM_SETCUEBANNER, TRUE,
-        reinterpret_cast<LPARAM>(L"\u641C\u7D22\u547D\u4EE4\u3001\u6587\u4EF6\u5939\u2026"));
+        reinterpret_cast<LPARAM>(l10n::Get(l10n::StringId::TabMenuSearch).c_str()));
     SetWindowSubclass(edit_, FilterEditProc, 1, reinterpret_cast<DWORD_PTR>(this));
     return true;
 }
@@ -1222,6 +1222,7 @@ void FluentMenu::PlaceFilterEdit(int y_offset_px) {
     y += std::max(0, (cell_h - line_h) / 2);
     POINT client{x, y};
     ScreenToClient(hwnd_, &client);
+    if (compositor_) compositor_->SetEditOpacity(edit_, present_alpha_ / 255.0f);
     SetWindowPos(edit_, HWND_TOP, client.x, client.y, w, line_h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
@@ -1230,6 +1231,7 @@ void FluentMenu::HideFilterEdit() {
 }
 
 void FluentMenu::SyncFilterFromEdit() {
+    if (animating_out_) return;
     const HWND edit = external_edit_ ? external_edit_ : edit_;
     if (!edit || !filter_fn_) return;
     const int length = GetWindowTextLengthW(edit);
@@ -1445,7 +1447,6 @@ void FluentMenu::BeginDismiss() {
     if (!open_ || animating_out_) return;
     StopScroll();
     UpdateTooltip(-1);
-    HideFilterEdit();
     sub_pending_row_ = -1;
     if (!AnimationsEnabled()) { Dismiss(); return; }
     dismiss_alpha_ = present_alpha_;

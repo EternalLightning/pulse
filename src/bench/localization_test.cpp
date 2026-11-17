@@ -46,7 +46,40 @@ int main(int argc, char** argv) {
         }
         return passed ? 0 : 1;
     }
+    if (argc == 2 && std::string_view(argv[1]) == "--migrated") {
+        constexpr UINT ranges[][2] = {
+            {IDS_SYSCTX_PENDING_COUNT_FORMAT, IDS_SYSCTX_OVERVIEW_SIDE_NOTE},
+            {IDS_ARCHIVE_EXTRACT_CANCELLED, IDS_TYPE_AUTOCAD_FILE},
+        };
+        for (const auto language : {L"zh-CN", L"en-US"}) {
+            const bool chinese = std::wstring_view(language) == L"zh-CN";
+            Initialize(GetModuleHandleW(nullptr), language);
+            bool complete = true;
+            for (const auto& range : ranges)
+                for (UINT id = range[0]; id <= range[1]; ++id)
+                    complete &= !Get(static_cast<StringId>(id)).empty();
+            passed &= Report("migrated UI and helper resources are present in both languages", complete);
+            passed &= Report("localized menu counts preserve numeric format arguments",
+                Format(StringId::SysCtxOverviewCountFormat, 3, size_t{2}) ==
+                    (chinese ? L"共 3 个条目，2 个场景" : L"3 entries, 2 scenes"));
+            passed &= Report("localized menu titles preserve user text containing percent signs",
+                Format(StringId::SysCtxPreviewHeadFormat, L"100% 项目") ==
+                    (chinese ? L"右键单击「100% 项目」时" : L"Right-click on 100% 项目"));
+            Initialize(nullptr, language);
+            passed &= Report("shared labels and preview properties remain readable without resources",
+                Get(StringId::ColumnName) == (chinese ? L"名称" : L"Name") &&
+                Get(StringId::PreviewPropertyDimensions) == (chinese ? L"尺寸" : L"Dimensions") &&
+                !Get(StringId::ArchiveExtractCancelled).empty());
+        }
+        return passed ? 0 : 1;
+    }
     if (argc == 2 && std::string_view(argv[1]) == "--runtime-messages") {
+        Initialize(nullptr, L"zh-CN");
+        const auto& held_runtime_chinese = Get(StringId::OperationUndoResultChangedFormat);
+        SetLanguage(L"en-US");
+        passed &= Report("generated fallback preserves held strings across language switches",
+            held_runtime_chinese.starts_with(L"原项目已更改") &&
+            Get(StringId::OperationUndoResultChangedFormat).starts_with(L"The original item changed"));
         Initialize(nullptr, L"en-US");
         bool fallback_complete = true;
         for (UINT id = IDS_CACHE_JUST_NOW; id <= IDS_OPERATION_STOPPED; ++id)
@@ -128,11 +161,11 @@ int main(int argc, char** argv) {
             passed &= Report("archive exit playback and link text follow display language",
                 Get(StringId::ArchiveExtractAll) == (chinese ? L"解压全部项目" : L"Extract all") &&
                 Get(StringId::ArchivePasswordOrDataError) == (chinese
-                    ? L"密码不正确，或压缩包数据已损坏"
-                    : L"The password is incorrect or the archive data is damaged") &&
+                    ? L"密码错误或压缩包已损坏"
+                    : L"Incorrect password or damaged archive") &&
                 Get(StringId::ArchivePasswordRetryHint) == (chinese
-                    ? L"密码错误，或者压缩包数据已损坏，请尝试重新输入密码。"
-                    : L"The password is incorrect, or the archive data is damaged. Please try entering the password again.") &&
+                    ? L"密码错误或压缩包已损坏。请重新输入密码。"
+                    : L"Incorrect password or damaged archive. Reenter the password.") &&
                 Get(StringId::ExitStopTasks) == (chinese ? L"停止任务并退出" : L"Stop tasks and exit") &&
                 Get(StringId::PlaybackNextFrame) == (chinese ? L"下一帧" : L"Next frame") &&
                 Get(StringId::LinkContinue) == (chinese ? L"继续" : L"Continue"));
@@ -252,13 +285,13 @@ int main(int argc, char** argv) {
                      Get(StringId::SettingsDuplicates) == L"\u91cd\u590d\u6587\u4ef6" &&
                      Get(StringId::DupScan) == L"\u626b\u63cf" &&
                      Get(StringId::DupMinSize) == L"\u6700\u5c0f\u5927\u5c0f" &&
-                     Get(StringId::PinWorkspace) == L"\u9489\u4e3a\u5de5\u4f5c\u533a" &&
+                     Get(StringId::PinWorkspace) == L"固定到工作区" &&
                      Get(StringId::UnpinWorkspace) == L"\u53d6\u6d88\u5de5\u4f5c\u533a" &&
                      Get(StringId::AdvancedSearch) == L"\u9ad8\u7ea7\u641c\u7d22" &&
                      Get(StringId::KindCustom) == L"\u6307\u5b9a\u6269\u5c55\u540d" &&
                      Get(StringId::OpEmptying) == L"\u6b63\u5728\u6e05\u7a7a\u56de\u6536\u7ad9" &&
                      Get(StringId::StatusHintIdle) ==
-                         L"\u7a7a\u683c \u9884\u89c8  \u00b7  Ctrl+F \u7b5b\u9009  \u00b7  Ctrl+K \u641c\u7d22" &&
+                         L"空格 预览    Ctrl+F 筛选    Ctrl+K 搜索" &&
                      Get(StringId::SettingsShowPerformance) ==
                          L"\u5728\u72b6\u6001\u680f\u663e\u793a\u6027\u80fd");
     SetLanguage(L"en-US");
@@ -294,7 +327,7 @@ int main(int argc, char** argv) {
                      Get(StringId::OpEmptying) == L"Emptying Recycle Bin" &&
                      Get(StringId::OpPause) == L"Pause" &&
                      Get(StringId::StatusHintIdle) ==
-                         L"Space preview  \u00b7  Ctrl+F filter  \u00b7  Ctrl+K search" &&
+                         L"Space Preview    Ctrl+F Filter    Ctrl+K Search" &&
                      Get(StringId::SettingsShowPerformance) ==
                          L"Show performance in the status bar");
     passed &= Report("stable language identifiers",

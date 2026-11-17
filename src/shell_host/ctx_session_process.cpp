@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "ctx_session_process.h"
 #include "process_retirement.h"
 #include <atomic>
@@ -26,7 +27,7 @@ std::vector<uint8_t> EmptyMenu(uint32_t session) {
 std::vector<uint8_t> Failure(HRESULT error) {
     ipc::PayloadWriter writer;
     writer.PutU32(static_cast<uint32_t>(error)); writer.PutU32(0);
-    writer.PutString(L"Context menu worker stopped or unavailable");
+    writer.PutString(l10n::Get(l10n::StringId::ShellContextWorkerUnavailable).c_str());
     return writer.data();
 }
 }

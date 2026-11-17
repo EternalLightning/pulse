@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "network_agent_protocol.h"
 #include "network_agent_host.h"
 #include "network_index.h"
@@ -20,6 +21,7 @@
 #include <sddl.h>
 
 using namespace pulse::index;
+namespace l10n = pulse::l10n;
 using pulse::ipc::MsgHeader;
 using pulse::ipc::PayloadReader;
 using pulse::ipc::PayloadWriter;
@@ -237,7 +239,7 @@ void ClientLoop(HANDLE pipe) {
             uint64_t count = 0;
             for (const auto& root : roots) count += root.indexed_items;
             writer.PutU32(static_cast<uint32_t>((std::min)(count, static_cast<uint64_t>(UINT32_MAX))));
-            writer.PutString(roots.empty() ? L"网络索引未配置" : L"网络索引代理运行中");
+            writer.PutString(roots.empty() ? l10n::Get(l10n::StringId::NetworkIndexNotConfigured).c_str() : l10n::Get(l10n::StringId::NetworkIndexAgentRunning).c_str());
             WriteFrame(pipe, agent::RSP_STATUS, header.request_id, writer.data());
         } else if (header.type == agent::REQ_SEARCH) {
             Query query;

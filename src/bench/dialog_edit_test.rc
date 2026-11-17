@@ -6,4 +6,4 @@
 #pragma code_page(65001)
 #include <windows.h>
 1 RT_MANIFEST "pulse_app.manifest"
-#include "../common/strings.rcinc"
+#include "../common/strings.rc"

@@ -45,7 +45,7 @@ inline std::vector<ui::FluentMenuItem> BuildSidebarPinMenu(SidebarPinnedKind kin
     unpin.command = static_cast<int>(SidebarPinCommand::Unpin);
     unpin.text = kind == SidebarPinnedKind::QuickAccess
         ? l10n::Get(l10n::StringId::UnpinQuickAccess)
-        : l10n::Pick(L"从工作区取消固定", L"Unpin from workspace");
+        : l10n::Get(l10n::StringId::UnpinFromWorkspace).c_str();
     unpin.glyph = L"\xE77A";
     std::vector<ui::FluentMenuItem> items;
     items.push_back(std::move(open));

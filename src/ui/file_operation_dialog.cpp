@@ -514,9 +514,9 @@ private:
 
         if (details_) {
             const float top = 326.0f;
-            const std::wstring source_meta = pulse::format::ByteSize(conflict_.source_size) + L"  ·  "
+            const std::wstring source_meta = pulse::format::ByteSize(conflict_.source_size) + L"  "
                                            + pulse::format::LocalFileTime(conflict_.source_modified, l10n::Get(l10n::StringId::OpUnknown).c_str());
-            const std::wstring target_meta = pulse::format::ByteSize(conflict_.destination_size) + L"  ·  "
+            const std::wstring target_meta = pulse::format::ByteSize(conflict_.destination_size) + L"  "
                                            + pulse::format::LocalFileTime(conflict_.destination_modified, l10n::Get(l10n::StringId::OpUnknown).c_str());
             const auto source_label = l10n::Get(l10n::StringId::OpSource);
             const auto existing_label = l10n::Get(l10n::StringId::OpExisting);

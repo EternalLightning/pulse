@@ -309,7 +309,7 @@ std::wstring QuickPreviewWindow::PlaybackInfo(const VideoPreview::State& state) 
     if (video) {
         info = Clock(state.position) + L" / " + Clock(state.duration);
         if (state.width && state.height)
-            info += L" · " + std::to_wstring(state.width) + L"×" + std::to_wstring(state.height);
+            info += L"  " + std::to_wstring(state.width) + L"×" + std::to_wstring(state.height);
         if (state.stepped_frames)
             info += l10n::Get(l10n::StringId::PlaybackSteppedPrefix) + std::to_wstring(state.stepped_frames);
         if (FAILED(state.error)) info += l10n::Get(l10n::StringId::PlaybackError);
@@ -320,7 +320,7 @@ std::wstring QuickPreviewWindow::PlaybackInfo(const VideoPreview::State& state) 
         else if (state.ended) info += l10n::Get(l10n::StringId::PlaybackEnded);
     } else {
         info = l10n::Get(l10n::StringId::PlaybackFramePrefix) + std::to_wstring(frame_index_ + 1) + L" / " +
-            std::to_wstring(frame_count_) + L" · " + std::to_wstring(frame_delay_ms_) + L" ms";
+            std::to_wstring(frame_count_) + L"  " + std::to_wstring(frame_delay_ms_) + L" ms";
         // Waiting is normal between every pair of GIF frames. Never insert a
         // transient "Seeking" label here: it shifts/flashes the entire suffix.
         if (playback_drag_) info += l10n::Get(l10n::StringId::PlaybackScrubbing);

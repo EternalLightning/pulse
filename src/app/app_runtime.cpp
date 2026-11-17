@@ -181,7 +181,7 @@ void RefreshDuplicateGroupViews(AppState& s) {
             FILETIME time{};
             time.dwLowDateTime = static_cast<DWORD>(group.files[f].modified);
             time.dwHighDateTime = static_cast<DWORD>(group.files[f].modified >> 32);
-            file.detail = group.files[f].path + L" · " + format::LocalFileTime(time);
+            file.detail = group.files[f].path + L"  " + format::LocalFileTime(time);
             file.keep = f == group.keep_index;
             view.files.push_back(std::move(file));
         }
@@ -590,14 +590,14 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                     row.title += L" (" + volume.mount_point.substr(0, 2) + L")";
                 }
                 row.detail = volume.file_system.empty() ? L"NTFS" : volume.file_system;
-                row.detail += L" · " + l10n::Get(volume.kind == index::VolumeKind::Removable
+                row.detail += L"  " + l10n::Get(volume.kind == index::VolumeKind::Removable
                     ? l10n::StringId::RemovableDisk : l10n::StringId::FixedDisk);
                 const bool policy_excluded = volume.kind != index::VolumeKind::Fixed;
                 if (volume.indexed_items && volume.enabled && !policy_excluded) {
                     wchar_t count[64]{};
                     swprintf_s(count, l10n::Get(l10n::StringId::ItemsCountFormat).c_str(),
                                static_cast<int>(volume.indexed_items));
-                    row.detail += L" · ";
+                    row.detail += L"  ";
                     row.detail += count;
                 }
                 row.state = volume.kind == index::VolumeKind::Removable
@@ -624,7 +624,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             if (s.shot.active && vm.settings_page == 1 && vm.settings_network_roots.empty()) {
                 ui::NetworkRootRowView row;
                 row.path = L"\\\\fileserver\\projects\\设计资料";
-                row.state = L"已同步 · 128,420 项";
+                row.state = L"已同步 128,420 项";
                 row.online = true;
                 vm.settings_network_roots.push_back(std::move(row));
             }
@@ -772,8 +772,8 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.dup_show_delete_all = extras > 0 && !s.duplicateScan.scanning;
             if (vm.dup_show_delete_all) {
                 vm.dup_delete_all = l10n::Get(l10n::StringId::DupDeleteAllExtras);
-                vm.dup_delete_all += L" · ";
-                vm.dup_delete_all += format::GroupedInt(extras);
+                vm.dup_delete_all += L" (";
+                vm.dup_delete_all += format::GroupedInt(extras) + L")";
             }
             }
         }
@@ -1527,7 +1527,7 @@ static void FillStatusVm(AppState& s, ui::WindowViewModel& vm) {
         wchar_t count[64]{};
         swprintf_s(count, l10n::Get(l10n::StringId::SelectedCountFormat).c_str(), sel_tab->SelectedCount());
         const std::optional<uint64_t> bytes = ContentSelectionSize(*sel_tab);
-        vm.status.selection_text = std::wstring(count) + L"  \u00B7  " +
+        vm.status.selection_text = std::wstring(count) + L"  " +
             (bytes ? pulse::format::ByteSize(*bytes, true) : l10n::Get(l10n::StringId::LoadingEllipsis));
     }
     ops::OpStatus st = s.ops.Status();
@@ -1546,7 +1546,7 @@ static void FillStatusVm(AppState& s, ui::WindowViewModel& vm) {
             app::ParsePulsePath(active->current_path, &virtual_kind, &virtual_rest) &&
             virtual_kind == L"search";
         if (!idx.empty() && !vm.status.query_active && (s.paletteSearching || search_visible)) {
-            if (!vm.status.status_text.empty()) vm.status.status_text += L"  ·  ";
+            if (!vm.status.status_text.empty()) vm.status.status_text += L"  ";
             vm.status.status_text += idx;
         }
     }
@@ -1556,7 +1556,7 @@ static void FillStatusVm(AppState& s, ui::WindowViewModel& vm) {
             s.lastFrameMs, s.lastFps, s.timing.enum_ms, s.timing.sort_ms,
             s.processCpuPercent, s.workingSetMb);
         wchar_t breakdown[96];
-        swprintf_s(breakdown, L"  \u00B7  D %.1f ms  \u00B7  P %.1f ms",
+        swprintf_s(breakdown, L"  D %.1f ms  P %.1f ms",
             s.timing.draw_ms, s.timing.present_ms);
         vm.status.performance_text = std::wstring(perf) + breakdown;
         wchar_t lumaStatsEnabled[8]{};
@@ -1566,14 +1566,14 @@ static void FillStatusVm(AppState& s, ui::WindowViewModel& vm) {
         const auto* lumaStats = showLumaStats ? s.compositor.GetLumaTextStats() : nullptr;
         if (lumaStats && s.compositor.LumaTextEnabled()) {
             swprintf_s(compactPerf,
-                L"DEV %.1f ms \u00B7 D %.1f \u00B7 P %.1f \u00B7 %.0f FPS \u00B7 LT %llu/%llu E%llu \u00B7 %.0f MB",
+                L"DEV %.1f ms  D %.1f  P %.1f  %.0f FPS  LT %llu/%llu E%llu  %.0f MB",
                 s.lastFrameMs, s.timing.draw_ms, s.timing.present_ms, s.lastFps,
                 static_cast<unsigned long long>(lumaStats->surface_cache_hits),
                 static_cast<unsigned long long>(lumaStats->surface_cache_misses),
                 static_cast<unsigned long long>(lumaStats->surface_cache_evictions),
                 s.workingSetMb);
         } else {
-            swprintf_s(compactPerf, L"DEV  %.1f ms  \u00B7  D %.1f  \u00B7  P %.1f  \u00B7  %.0f FPS  \u00B7  %.0f MB",
+            swprintf_s(compactPerf, L"DEV  %.1f ms  D %.1f  P %.1f  %.0f FPS  %.0f MB",
                 s.lastFrameMs, s.timing.draw_ms, s.timing.present_ms,
                 s.lastFps, s.workingSetMb);
         }
@@ -1997,11 +1997,10 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
             dv.type_text = s.detailsTypeName;
             if (!dv.is_dir) {
                 dv.subtitle_text = s.detailsTypeName;
-                if (!dv.subtitle_text.empty()) dv.subtitle_text += L" · ";
+                if (!dv.subtitle_text.empty()) dv.subtitle_text += L"  ";
                 dv.subtitle_text += pulse::format::ByteSize(dv.size_value, true);
-                dv.size_text = pulse::format::ByteSize(dv.size_value, true) + L" (" +
-                               pulse::format::GroupedInt(dv.size_value) +
-                               L" \u5B57\u8282)";
+                dv.size_text = l10n::Format(l10n::StringId::DetailsExactSizeFormat, pulse::format::ByteSize(dv.size_value, true).c_str(),
+                               pulse::format::GroupedInt(dv.size_value).c_str());
             }
             if (s.detailsMetaPath == dv.path) {
                 dv.owner_text = s.detailsOwner;
@@ -2166,7 +2165,7 @@ std::wstring TooltipForHover(AppState& s) {
     case R::ThemeToggle: return text(I::TooltipToggleTheme);
     case R::SettingsButton: return text(I::Settings);
     case R::HomeButton: return text(I::Home);
-    case R::HomeCard: return s.hoverLabel + L" · " + s.hoverPath;
+    case R::HomeCard: return s.hoverLabel + L"  " + s.hoverPath;
     case R::SettingsFind: return text(I::SettingsFind);
     case R::SettingsNav: {
         const I names[]={I::SettingsGeneral,I::SettingsSearchIndex,I::SettingsContextMenu,I::SettingsAboutDiagnostics,I::SettingsDuplicates};
@@ -2287,7 +2286,7 @@ std::wstring TooltipForHover(AppState& s) {
             const auto& entry = tab->EntryAt(s.hoverControlIndex);
             std::wstring tooltip = pulse::format::DriveDisplayName(entry);
             if (!entry.change_type_text.empty()) {
-                tooltip += L" · " + entry.change_type_text + L" · " + entry.full_path;
+                tooltip += L"  " + entry.change_type_text + L"  " + entry.full_path;
                 if (!entry.change_old_path.empty() && entry.change_old_path != entry.full_path)
                     tooltip += L" (" + entry.change_old_path + L" → " + entry.full_path + L")";
                 return tooltip;
@@ -2303,7 +2302,7 @@ std::wstring TooltipForHover(AppState& s) {
             const std::wstring name_only = tooltip;
             if (app::IsUnderCloudFilesRoot(full)) {
                 const uint64_t modified = (static_cast<uint64_t>(entry.mtime.dwHighDateTime) << 32) | entry.mtime.dwLowDateTime;
-                tooltip += L" · " + l10n::Get(ui::CloudStatusLabel(entry.attrs,
+                tooltip += L"  " + l10n::Get(ui::CloudStatusLabel(entry.attrs,
                     fs::CloudSyncProbe::Instance().Lookup(full, modified)));
             }
             // Narrow panes drop columns; keep their facts reachable on hover.
@@ -2317,13 +2316,13 @@ std::wstring TooltipForHover(AppState& s) {
                 if (search && hidden(K::Path) && !full.empty()) {
                     const size_t slash = full.find_last_of(L'\\');
                     if (slash != std::wstring::npos && slash > 0)
-                        tooltip += L" · " + full.substr(0, slash);
+                        tooltip += L"  " + full.substr(0, slash);
                 }
                 if (hidden(K::Date) && (entry.mtime.dwHighDateTime || entry.mtime.dwLowDateTime))
-                    tooltip += L" · " + pulse::l10n::Get(pulse::l10n::StringId::ColumnModified) + L" " +
+                    tooltip += L"  " + pulse::l10n::Get(pulse::l10n::StringId::ColumnModified) + L" " +
                                pulse::format::LocalFileTime(entry.mtime);
                 if (entry.drive_type != DRIVE_UNKNOWN)
-                    tooltip += L" · " + pulse::format::DriveTypeText(entry.drive_type);
+                    tooltip += L"  " + pulse::format::DriveTypeText(entry.drive_type);
             }
             if (const auto* indices = s.places.TagIndicesForPath(full); indices && !indices->empty()) {
                 tooltip += pulse::l10n::Get(pulse::l10n::StringId::TooltipTags).c_str();

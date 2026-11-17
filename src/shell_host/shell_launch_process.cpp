@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "shell_launch_process.h"
 #include "ctx_session_process.h"
 #include "process_retirement.h"
@@ -199,8 +200,8 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
             const bool cancelled = session->user_cancel.load();
             Send(id, Result(dispatched ? ipc::kShellLaunchOutcomeUnknown :
                 HRESULT_FROM_WIN32(cancelled ? ERROR_CANCELLED : ERROR_NOT_READY), cancelled,
-                dispatched ? L"Shell launch worker stopped; launch outcome is unknown. The request was not replayed." :
-                    L"Shell launch worker unavailable before dispatch; no launch occurred."));
+                dispatched ? l10n::Get(l10n::StringId::ShellLaunchWorkerStopped).c_str() :
+                    l10n::Get(l10n::StringId::ShellLaunchWorkerUnavailableBeforeDispatch).c_str()));
         }
     }
 
@@ -231,8 +232,8 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
                         const bool cancelled = work.session->user_cancel.load();
                         Send(work.id, Result(dispatched ? ipc::kShellLaunchOutcomeUnknown :
                             HRESULT_FROM_WIN32(cancelled ? ERROR_CANCELLED : ERROR_NOT_READY), cancelled,
-                            dispatched ? L"Shell launch worker failed; launch outcome is unknown. The request was not replayed." :
-                                L"Shell launch worker failed before dispatch; no launch occurred."));
+                            dispatched ? l10n::Get(l10n::StringId::ShellLaunchWorkerFailed).c_str() :
+                                l10n::Get(l10n::StringId::ShellLaunchWorkerFailedBeforeDispatch).c_str()));
                     }
                 } catch (...) {}
             }
@@ -269,21 +270,21 @@ void ShellLaunchProcesses::Submit(uint32_t id, std::vector<uint8_t> payload) {
     ipc::ShellLaunchRequest request;
     if (!id || payload.size() > ipc::kMaxPayload - 12 ||
         !ipc::ReadShellLaunch(payload.data(), payload.size(), request)) {
-        core_->Send(id, Result(E_INVALIDARG, false, L"Malformed Shell launch request; no launch occurred."));
+        core_->Send(id, Result(E_INVALIDARG, false, l10n::Get(l10n::StringId::ShellLaunchRequestMalformed).c_str()));
         return;
     }
     auto session = std::make_shared<Core::Session>();
     bool admitted = false;
     HRESULT failure = HRESULT_FROM_WIN32(ERROR_NOT_READY);
-    const wchar_t* detail = L"Shell launch workers unavailable; no launch occurred.";
+    const wchar_t* detail = l10n::Get(l10n::StringId::ShellLaunchWorkersUnavailable).c_str();
     {
         std::lock_guard lock(core_->mutex);
         if (core_->sessions.contains(id)) {
             failure = E_INVALIDARG;
-            detail = L"Duplicate Shell launch request ID; no launch occurred.";
+            detail = l10n::Get(l10n::StringId::ShellLaunchRequestDuplicate).c_str();
         } else if (core_->waiting.size() >= kQueueLimit) {
             failure = HRESULT_FROM_WIN32(ERROR_BUSY);
-            detail = L"Shell launch waiting queue limit reached; no launch occurred.";
+            detail = l10n::Get(l10n::StringId::ShellLaunchQueueFull).c_str();
         } else if (!core_->stopping && core_->job.value && session->stop.value && !core_->runners.empty()) {
             try {
                 core_->sessions.emplace(id, session);
@@ -292,7 +293,7 @@ void ShellLaunchProcesses::Submit(uint32_t id, std::vector<uint8_t> payload) {
             } catch (...) {
                 core_->sessions.erase(id);
                 failure = E_OUTOFMEMORY;
-                detail = L"Cannot queue Shell launch request; no launch occurred.";
+                detail = l10n::Get(l10n::StringId::ShellLaunchQueueFailed).c_str();
             }
         }
     }
@@ -320,7 +321,7 @@ bool ShellLaunchProcesses::Cancel(uint32_t request) {
         }
     }
     if (queued) core_->Send(request, Result(HRESULT_FROM_WIN32(ERROR_CANCELLED), true,
-        L"Shell launch cancelled while queued; no launch occurred."));
+        l10n::Get(l10n::StringId::ShellLaunchQueuedCancelled).c_str()));
     return true;
 }
 

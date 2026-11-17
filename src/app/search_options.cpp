@@ -46,12 +46,12 @@ std::wstring ContentIndexStatusText(AppState& s) {
         static_cast<unsigned long long>(status.skipped_files),
         static_cast<unsigned long long>(status.errors));
     if (status.indexing && !status.paused)
-        return l10n::Get(I::ContentIndexBuilding) + L" · " + counts;
+        return l10n::Get(I::ContentIndexBuilding) + L"  " + counts;
     if (status.error == ERROR_SHARING_VIOLATION || status.error == ERROR_LOCK_VIOLATION)
-        return l10n::Get(I::ContentFilesBusy) + L" · " + counts;
-    if (status.error) return l10n::Get(I::SearchIncomplete) + L" (" + std::to_wstring(status.error) + L") · " + counts;
+        return l10n::Get(I::ContentFilesBusy) + L"  " + counts;
+    if (status.error) return l10n::Get(I::SearchIncomplete) + L" (" + std::to_wstring(status.error) + L")  " + counts;
     return l10n::Get(status.paused ? I::ContentIndexPaused : status.indexing ? I::ContentIndexBuilding : I::ContentIndexReady)
-        + L" · " + counts;
+        + L"  " + counts;
 }
 
 void ConfigureContentSort(const app::Tab& tab,index::ContentSearchRequest& request) {

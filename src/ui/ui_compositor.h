@@ -125,6 +125,7 @@ public:
                        const D2D1_COLOR_F& foreground, const D2D1_COLOR_F& background);
     bool PresentLumaEdit(HWND hwnd, IDWriteTextFormat* format,
                          const D2D1_COLOR_F& foreground, const D2D1_COLOR_F& background);
+    bool PresentNativeEdit(HWND edit);
     LRESULT CallLumaEditMouse(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                               IDWriteTextFormat* format);
     bool LumaTextEnabled() const noexcept;

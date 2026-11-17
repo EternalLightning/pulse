@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "../common/localization.h"
 #include "archive.h"
 #include "destination_guard.h"
 #include "../common/json_utils.h"
@@ -39,7 +40,7 @@ public:
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
         if (!directory || directory.get() == INVALID_HANDLE_VALUE) {
             if (directory.get() == INVALID_HANDLE_VALUE) directory.release();
-            return IoFail(error, L"读取解压目标目录", target, GetLastError());
+            return IoFail(error, l10n::StringId::ArchiveRecoveryReadDirectoryFailedFormat, target, GetLastError());
         }
         target_id_ = Identity(directory.get());
         if (target_id_.empty()) return Fail(error);
@@ -50,7 +51,7 @@ public:
             file_ = CreateFileW((target / kName).c_str(), GENERIC_READ | GENERIC_WRITE | DELETE,
                 FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
         if (file_ == INVALID_HANDLE_VALUE)
-            return IoFail(error, L"打开解压恢复记录", target / kName, GetLastError());
+            return IoFail(error, l10n::StringId::ArchiveRecoveryOpenRecordFailedFormat, target / kName, GetLastError());
         BY_HANDLE_FILE_INFORMATION info{};
         if (!GetFileInformationByHandle(file_, &info) || info.nNumberOfLinks != 1 ||
             (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) return Fail(error);
@@ -114,7 +115,7 @@ public:
             }
             DestinationGuard::Handle handle(raw);
             if (found->second.proof.empty() || Proof(raw) != found->second.proof) {
-                error = L"上次解压文件已变化或归属无法确认，未覆盖：" + output.wstring();
+                error = l10n::Format(l10n::StringId::ArchivePreviousOutputChangedFormat, output.c_str());
                 return false;
             }
             handles.push_back(std::move(handle));
@@ -221,23 +222,23 @@ private:
         if (!EncodeUtf8Bytes(text, bytes) || bytes.size() > 16 * 1024 * 1024) return Fail(error);
         DWORD written = 0;
         if (!WriteFile(file_, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr))
-            return IoFail(error, L"写入解压恢复记录", target_ / kName, GetLastError());
-        if (written != bytes.size()) return IoFail(error, L"写入解压恢复记录", target_ / kName, ERROR_WRITE_FAULT);
-        if (!FlushFileBuffers(file_)) return IoFail(error, L"保存解压恢复记录", target_ / kName, GetLastError());
+            return IoFail(error, l10n::StringId::ArchiveRecoveryWriteRecordFailedFormat, target_ / kName, GetLastError());
+        if (written != bytes.size()) return IoFail(error, l10n::StringId::ArchiveRecoveryWriteRecordFailedFormat, target_ / kName, ERROR_WRITE_FAULT);
+        if (!FlushFileBuffers(file_)) return IoFail(error, l10n::StringId::ArchiveRecoverySaveRecordFailedFormat, target_ / kName, GetLastError());
         return true;
     }
-    static bool IoFail(std::wstring& error, const wchar_t* operation,
+    static bool IoFail(std::wstring& error, l10n::StringId operation,
         const std::filesystem::path& path, DWORD code) {
-        error = std::wstring(L"无法") + operation + L"：" + path.wstring() + L"\n" +
-            format::FileOperationErrorText(HRESULT_FROM_WIN32(code));
+        error = l10n::Format(operation, path.c_str(),
+            format::FileOperationErrorText(HRESULT_FROM_WIN32(code)).c_str());
         if (code == ERROR_ACCESS_DENIED || code == ERROR_PRIVILEGE_NOT_HELD || code == ERROR_ELEVATION_REQUIRED)
-            error += L"\n请检查目标目录及恢复记录的写入权限。受保护目录请以管理员身份运行 Pulse 后重试，或选择可写目录。";
+            error += l10n::Get(l10n::StringId::ArchiveRecoveryPermissionHint).c_str();
         else if (code == ERROR_SHARING_VIOLATION || code == ERROR_LOCK_VIOLATION)
-            error += L"\n解压恢复记录正被其他任务或程序占用，请等待其结束后重试。";
+            error += l10n::Get(l10n::StringId::ArchiveRecoveryBusyHint).c_str();
         return false;
     }
     static bool Fail(std::wstring& error) {
-        error = L"无法安全读取或保存未完成解压记录，操作已停止。";
+        error = l10n::Get(l10n::StringId::ArchiveRecoveryUnsafe).c_str();
         return false;
     }
     HANDLE file_ = INVALID_HANDLE_VALUE;

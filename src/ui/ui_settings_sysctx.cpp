@@ -268,8 +268,8 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
             }
             const float mid = (r.top + r.bottom) * 0.5f;
             DrawIconText(r.left + 10 * s, mid - 8 * s, 16 * s, 16 * s, scene.glyph, L"", highlighted ? theme.text_selected : theme.text_secondary, 0.75f);
-            // "31 · 3": the switched-off count in amber, like the prototype.
-            const std::wstring off = scene.disabled > 0 ? L" · " + std::to_wstring(scene.disabled) : std::wstring();
+            // Show the switched-off count in amber, in parentheses.
+            const std::wstring off = scene.disabled > 0 ? L" (" + std::to_wstring(scene.disabled) + L")" : std::wstring();
             const std::wstring count = std::to_wstring(scene.count);
             float cr = r.right - 10 * s;
             if (scene.pending) {
@@ -460,7 +460,7 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                 const SysCtxChangeRow& row = ov.recent[i];
                 if (i > 0) divider(r.left, r.right, r.top);
                 const float mid = (r.top + r.bottom) * 0.5f;
-                const std::wstring title = row.undone ? sysctx_text::UndonePrefix() + row.title : row.title;
+                const std::wstring title = row.undone ? sysctx_text::Undone(row.title) : row.title;
                 DrawSysCtxLine(painter_, compositor_, title, D2D1::RectF(r.left, r.top + 3 * s, r.right, mid + 1 * s), compositor_->TextFormat(),
                                   row.undone ? theme.text_secondary : theme.text);
                 DrawSysCtxLine(painter_, compositor_, row.caption, D2D1::RectF(r.left, mid, r.right, r.bottom - 3 * s), compositor_->SmallFormat(),

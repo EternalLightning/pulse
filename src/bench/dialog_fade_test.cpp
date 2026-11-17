@@ -111,6 +111,11 @@ bool CloseGlyph(HWND dialog) {
     });
 }
 LRESULT CALLBACK FixtureProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if (GetPropW(window, L"Pulse.Test.FadeSync") && message == WM_CTLCOLOREDIT) {
+        SetTextColor(reinterpret_cast<HDC>(wp), RGB(255, 255, 255));
+        SetBkColor(reinterpret_cast<HDC>(wp), RGB(0, 0, 0));
+        return reinterpret_cast<LRESULT>(GetStockObject(BLACK_BRUSH));
+    }
     if (message == kResponsivenessProbe) {
         if (GetPropW(window, L"Pulse.DialogFadeState")) ++messages_during_fade;
         return 0;
@@ -120,12 +125,13 @@ LRESULT CALLBACK FixtureProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         HDC dc = BeginPaint(window, &paint);
         RECT client{};
         GetClientRect(window, &client);
-        HBRUSH background = CreateSolidBrush(RGB(48, 120, 184));
+        const bool sync = GetPropW(window, L"Pulse.Test.FadeSync") != nullptr;
+        HBRUSH background = CreateSolidBrush(sync ? RGB(0, 0, 0) : RGB(48, 120, 184));
         FillRect(dc, &client, background);
         DeleteObject(background);
         RECT marker{40, 40, 180, 100};
         HBRUSH foreground = CreateSolidBrush(RGB(240, 184, 48));
-        FillRect(dc, &marker, foreground);
+        if (!sync) FillRect(dc, &marker, foreground);
         DeleteObject(foreground);
         EndPaint(window, &paint);
         paints.fetch_add(1);
@@ -915,7 +921,10 @@ void RunEscapeCases(HWND owner) {
 }
 } // namespace
 
+#include "dialog_fade_sync_cases.h"
+
 int main(int argc, char** argv) {
+    const bool surface_sync_only = argc == 2 && std::strcmp(argv[1], "--surface-sync-only") == 0;
     const bool style_only = argc == 2 && std::strcmp(argv[1], "--popup-style-only") == 0;
     const bool input_only = argc == 2 && std::strcmp(argv[1], "--new-item-input") == 0;
     const bool lifecycle_only = argc == 2 && std::strcmp(argv[1], "--lifecycle") == 0;
@@ -934,7 +943,9 @@ int main(int argc, char** argv) {
     if (!owner) return 1;
     Check(SetWindowSubclass(owner, UiTestProc, 9, 0) != FALSE, "install UI-thread readback dispatch");
     const bool animations = AnimationsEnabled();
-    if (style_only) {
+    if (surface_sync_only) {
+        RunSurfaceSync(animations);
+    } else if (style_only) {
         prompt_accent = RGB(0, 120, 212);
         theme_refresh_required = true;
         SetTimer(owner, kThemeRefreshTimer, 1, RefreshThemeFixture);

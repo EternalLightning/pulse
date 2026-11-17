@@ -4,12 +4,15 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../preview_host/image_decoder.h"
+#include "../preview_host/shell_thumbnail_bitmap.h"
 #include <objbase.h>
 #include <array>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <cstring>
+#include <cwchar>
 
 namespace {
 int failures = 0;
@@ -35,10 +38,57 @@ void SavePpm(const std::filesystem::path& path, const std::vector<uint8_t>& pixe
         file.write(rgb, 3);
     }
 }
+void BitmapRows() {
+    for (const LONG signed_height : {-2L, 2L}) {
+        BITMAPINFO info{};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = 2;
+        info.bmiHeader.biHeight = signed_height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        void* memory = nullptr;
+        HBITMAP bitmap = CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, &memory, nullptr, 0);
+        Check(bitmap && memory, "#674 create real signed-height DIB");
+        if (!bitmap || !memory) { if (bitmap) DeleteObject(bitmap); continue; }
+        const uint8_t top[] = {16,16,240,255, 16,240,16,255};
+        const uint8_t bottom[] = {240,16,16,255, 16,240,240,255};
+        auto* bytes = static_cast<uint8_t*>(memory);
+        std::memcpy(bytes, signed_height < 0 ? top : bottom, 8);
+        std::memcpy(bytes + 8, signed_height < 0 ? bottom : top, 8);
+        HBITMAP cached = static_cast<HBITMAP>(CopyImage(bitmap, IMAGE_BITMAP, 0, 0, 0));
+        std::vector<uint8_t> pixels;
+        UINT w = 0, h = 0, stride = 0;
+        const bool cache_decoded = cached && pulse::preview::HbitmapToBgra(cached, true,
+            pixels, w, h, stride, WTSAT_RGB);
+        Check(cache_decoded && w == 2 && h == 2 && pixels.size() == 16 &&
+            std::memcmp(pixels.data(), top, 8) == 0 && std::memcmp(pixels.data() + 8, bottom, 8) == 0,
+            "#674 Shell cache CopyImage bitmap preserves row order");
+        const bool decoded = pulse::preview::HbitmapToBgra(bitmap, true, pixels, w, h, stride, WTSAT_RGB);
+        Check(decoded && w == 2 && h == 2 && stride == 8 && pixels.size() == 16 &&
+            std::memcmp(pixels.data(), top, 8) == 0 && std::memcmp(pixels.data() + 8, bottom, 8) == 0,
+            signed_height < 0 ? "#674 top-down Shell bitmap preserves row order" :
+                "#674 bottom-up Shell bitmap preserves row order");
+    }
+}
 }
 int wmain(int argc, wchar_t** argv) {
     if (argc != 2 || FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return 2;
+    BitmapRows();
+    if (std::wcscmp(argv[1], L"--bitmap-only") == 0) {
+        CoUninitialize();
+        return failures ? 1 : 0;
+    }
     const std::filesystem::path dir = argv[1];
+    for (const auto* name : {L"large-no-exif.jpg", L"large-orientation-1.jpg"}) {
+        std::vector<uint8_t> pixels;
+        UINT w = 0, h = 0, stride = 0, sw = 0, sh = 0;
+        const bool decoded = pulse::preview::DecodeImage((dir / name).wstring(),
+            FILE_ATTRIBUTE_NORMAL, 128, pixels, w, h, stride, sw, sh);
+        Check(decoded && w == 85 && h == 128 && sw == 3911 && sh == 5866 &&
+            Colour(pixels,w,w/4,h/4) == 0 && Colour(pixels,w,3*w/4,h/4) == 1 &&
+            Colour(pixels,w,w/4,3*h/4) == 2 && Colour(pixels,w,3*w/4,3*h/4) == 3,
+            "#674 large JPEG full-frame decoding keeps upright quadrant rows");
+    }
     const int corners[8][4] = {{0,1,2,3}, {1,0,3,2}, {3,2,1,0}, {2,3,0,1},
         {0,2,1,3}, {2,0,3,1}, {3,1,2,0}, {1,3,0,2}};
     const auto base = dir / L"no-exif.jpg";

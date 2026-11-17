@@ -10,6 +10,7 @@
 //   GaussianBlur -> Blend(LUMINOSITY, flood x luminosityOpacity)
 //                -> Blend(COLOR, flood x tintOpacity)
 // Tint recipes match WinUI MicaController / DesktopAcrylicController.
+#include "../common/localization.h"
 #include "window_material.h"
 
 #include <d2d1_1.h>
@@ -368,10 +369,10 @@ const wchar_t* WindowEffectId(WindowEffect effect) noexcept {
 
 const wchar_t* WindowEffectLabel(WindowEffect effect) noexcept {
     switch (effect) {
-    case WindowEffect::Acrylic: return L"\u4e9a\u514b\u529b";
-    case WindowEffect::Mica:    return L"Mica";
-    case WindowEffect::MicaAlt: return L"Mica Alt";
-    default:                    return L"\u65e0";
+    case WindowEffect::Acrylic: return l10n::Get(l10n::StringId::EffectAcrylic).c_str();
+    case WindowEffect::Mica:    return l10n::Get(l10n::StringId::EffectMica).c_str();
+    case WindowEffect::MicaAlt: return l10n::Get(l10n::StringId::EffectMicaAlt).c_str();
+    default:                    return l10n::Get(l10n::StringId::EffectNone).c_str();
     }
 }
 

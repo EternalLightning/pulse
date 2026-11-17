@@ -6,6 +6,7 @@
 #include "../common/preview_extensions.h"
 #include "../ipc/preview_protocol.h"
 #include "../preview_host/video_codec.h"
+#include "../preview_host/svg_fallback.h"
 #include "../ipc/preview_response.h"
 #include <windows.h>
 #include <winioctl.h>
@@ -263,7 +264,70 @@ bool RunThumbnailCacheTests();
 bool RunThumbnailFailureTests();
 bool RunThumbnailTransportTests();
 
+#include "thumbnail_replacement_cases.h"
+
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && wcscmp(argv[1], L"--svg-fallback-only") == 0) {
+        for (bool thumbnail : {false, true}) {
+            std::string calls;
+            const bool made = preview::MakeSvgFallback(thumbnail,
+                [&] { calls += 'S'; return true; },
+                [&] { calls += 'T'; return true; });
+            Check(made && calls == "S", L"SVG Shell bitmap wins over source text for content and thumbnails");
+        }
+        std::string calls;
+        Check(preview::MakeSvgFallback(false,
+                  [&] { calls += 'S'; return false; },
+                  [&] { calls += 'T'; return true; }) && calls == "ST",
+              L"SVG content reads source text only after Shell fails");
+        calls.clear();
+        Check(!preview::MakeSvgFallback(true,
+                  [&] { calls += 'S'; return false; },
+                  [&] { calls += 'T'; return true; }) && calls == "S",
+              L"SVG grid never reads source text after Shell fails");
+        Check(!preview::MakeSvgFallback(false, [] { return false; }, [] { return false; }),
+              L"SVG failed Shell and source reads remain unavailable");
+
+        wchar_t base[MAX_PATH]{};
+        if (!GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", base, ARRAYSIZE(base)))
+            GetTempPathW(ARRAYSIZE(base), base);
+        std::wstring root = base;
+        if (!root.empty() && root.back() != L'\\' && root.back() != L'/') root.push_back(L'\\');
+        root += L"PulseSvgFallback-" + std::to_wstring(GetCurrentProcessId());
+        if (!CreateDirectoryW(root.c_str(), nullptr)) return 2;
+        const std::wstring broken = root + L"\\broken.svg";
+        const std::wstring shapes = root + L"\\shapes.svg";
+        const std::string svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"80\" height=\"40\">"
+            "<rect width=\"80\" height=\"40\" fill=\"#3366cc\"/></svg>";
+        Check(WriteBytes(broken, {'n', 'o', 't', ' ', 's', 'v', 'g'}), L"create isolated unrenderable SVG");
+        Check(WriteBytes(shapes, std::vector<unsigned char>(svg.begin(), svg.end())),
+              L"create supported SVG fixture");
+        Host host;
+        const bool started = host.Start();
+        Check(started, L"start SVG fallback host");
+        if (started) {
+            Result content, grid;
+            Result native;
+            Check(host.Request(shapes, native, MAXDWORD, 256, ipc::PreviewRequestKind::Thumbnail) &&
+                  native.response.kind == ipc::PreviewContentKind::Bitmap && HasInk(native) &&
+                  native.response.source_width == 80 && native.response.source_height == 40,
+                  L"supported SVG still renders bounded native artwork");
+            Check(host.Request(broken, content) && content.response.kind == ipc::PreviewContentKind::Text &&
+                  content.text == L"not svg", L"real SVG content keeps source fallback without a usable provider");
+            Check(host.Request(broken, grid, MAXDWORD, 256, ipc::PreviewRequestKind::Thumbnail) &&
+                  grid.response.kind == ipc::PreviewContentKind::Unsupported && grid.text.empty() &&
+                  grid.response.bytes_read == 0 && grid.response.text_chars == 0,
+                  L"real SVG grid does not read or transmit source text");
+        }
+        host.Stop();
+        DeleteFileW(broken.c_str());
+        DeleteFileW(shapes.c_str());
+        Check(RemoveDirectoryW(root.c_str()) != FALSE, L"clean isolated SVG fallback fixtures");
+        std::wprintf(L"== SVG fallback: %d passed, %d failed ==\n", passed, failed);
+        return failed ? 1 : 0;
+    }
+    if (argc == 2 && wcscmp(argv[1], L"--thumbnail-replacement-only") == 0)
+        return RunThumbnailReplacementTests();
     if (argc == 2 && wcscmp(argv[1], L"--image-thumbnail-only") == 0) {
         wchar_t base[MAX_PATH]{};
         if (!GetEnvironmentVariableW(L"PULSE_TEST_FIXTURE_ROOT", base, ARRAYSIZE(base)))

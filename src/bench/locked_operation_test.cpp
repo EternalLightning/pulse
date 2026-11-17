@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../ops/ops_manager.h"
+#include "../common/localization.h"
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
@@ -171,6 +172,7 @@ private:
 }
 
 int wmain(int argc, wchar_t** argv) {
+    pulse::l10n::Initialize(nullptr, L"zh-CN");
     using namespace pulse::ops;
     if (argc > 1 && std::wstring(argv[1]) == L"--hold") return Hold(argc, argv);
     if (argc != 1) return 2;

@@ -104,6 +104,7 @@ private:
         bool failed = false;
         bool retryable = false;
         uint32_t failure_attempts = 0;
+        ULONGLONG retry_after = 0;
         size_t cost = 0;
         std::list<std::wstring>::iterator lru_position;
     };

@@ -74,7 +74,7 @@ bool Compositor::Init(HWND hwnd) {
         if (!editComposition_->Available()) editComposition_.reset();
     }
     ResizeSwapChain();
-    BindDialogComposition(hwnd_, compositionDevice_.get(), compositionVisual_.get());
+    BindDialogComposition(hwnd_, compositionDevice_.get(), compositionVisual_.get(), opacityEffect_.get());
     return targetBitmap_.get() != nullptr;
 }
 
@@ -344,6 +344,37 @@ bool Compositor::PresentLumaEdit(HWND hwnd, IDWriteTextFormat* format,
 bool Compositor::UsesComposedEdits(HWND edit) const {
     return editComposition_ && GetParent(edit) == hwnd_;
 }
+bool Compositor::PresentNativeEdit(HWND edit) {
+    // Native HWND pixels join the shared visual while the complete dialog fades.
+    if (!UsesComposedEdits(edit)) return false;
+    RECT rect{}; GetClientRect(edit, &rect);
+    if (rect.right <= 0 || rect.bottom <= 0) return false;
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = rect.right; info.bmiHeader.biHeight = -rect.bottom;
+    info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
+    HDC memory = CreateCompatibleDC(nullptr);
+    void* pixels = nullptr;
+    HBITMAP bitmap = CreateDIBSection(memory, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
+    bool presented = false;
+    if (memory && bitmap) {
+        const auto old = SelectObject(memory, bitmap);
+        SendMessageW(edit, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(memory), PRF_CLIENT | PRF_ERASEBKGND);
+        GdiFlush();
+        auto* bytes = static_cast<BYTE*>(pixels);
+        for (size_t offset = 3; offset < static_cast<size_t>(rect.right) * rect.bottom * 4; offset += 4)
+            bytes[offset] = 255;
+        ComPtr<ID2D1Bitmap1> image;
+        const auto props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        if (SUCCEEDED(dc_->CreateBitmap(D2D1::SizeU(rect.right, rect.bottom), pixels, rect.right * 4, props, &image)))
+            presented = editComposition_->Present(edit, image.get(), true);
+        SelectObject(memory, old);
+    }
+    if (bitmap) DeleteObject(bitmap);
+    if (memory) DeleteDC(memory);
+    return presented;
+}
 void Compositor::SynchronizeEditSurface(HWND edit) {
     if (editComposition_) editComposition_->Synchronize(edit);
 }
@@ -352,7 +383,7 @@ void Compositor::SetEditOpacity(HWND edit, float opacity) {
     const BYTE alpha = static_cast<BYTE>(std::lround(std::clamp(opacity, 0.0f, 1.0f) * 255.0f));
     if (alpha == 255) RemovePropW(edit, L"Pulse.EditOpacity");
     else SetPropW(edit, L"Pulse.EditOpacity", reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(alpha) + 1));
-    SetLayeredWindowAttributes(edit, 0, alpha, LWA_ALPHA);
+    SetLayeredWindowAttributes(edit, 0, DialogChildOpacity(edit, alpha), LWA_ALPHA);
     SynchronizeEditSurface(edit);
 }
 void Compositor::RemoveEditSurface(HWND edit) {

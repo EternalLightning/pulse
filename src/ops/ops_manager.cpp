@@ -207,12 +207,12 @@ std::wstring UniqueCopyPath(const std::wstring& destination, bool directory) {
         }
     }
     for (unsigned index = 1; index < 10000; ++index) {
-        std::wstring name = stem + L" - 副本";
+        std::wstring name = l10n::Format(l10n::StringId::OperationCopyNameFormat, stem.c_str());
         if (index > 1) name += L" (" + std::to_wstring(index) + L")";
         std::wstring candidate = JoinPath(parent, name + extension);
         if (!PathExists(candidate)) return candidate;
     }
-    return JoinPath(parent, stem + L" - 副本 " + std::to_wstring(GetTickCount64()) + extension);
+    return JoinPath(parent, l10n::Format(l10n::StringId::OperationCopyUniqueNameFormat, stem.c_str(), static_cast<unsigned long long>(GetTickCount64())) + extension);
 }
 
 bool StartsWithPath(const std::wstring& path, const std::wstring& prefix) {
@@ -1970,7 +1970,7 @@ void OpsManager::RunShellOp(const OpRequest& req, uint64_t task_id, const FileId
     if (IsDeleteOperation(req.type)) {
         QueueItem rejected;
         rejected.req = req; rejected.seq = task_id;
-        FinishDelete(rejected, L"Deletion was not admitted by the deletion service.");
+        FinishDelete(rejected, l10n::Get(l10n::StringId::DeleteNotAdmitted).c_str());
         return;
     }
     {

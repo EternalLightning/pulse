@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "index_migration.h"
 #include <windows.h>
 #include <algorithm>
@@ -244,7 +245,7 @@ bool PrepareServiceIndexMigration(const std::wstring& source, const std::wstring
         preparation.failure = 0;
         return true;
     } catch (...) {
-        error = L"索引迁移准备失败：请使用独立的本地索引目录，检查目标内容、路径及权限。";
+        error = l10n::Get(l10n::StringId::IndexMigrationPrepareFailed).c_str();
         return false;
     }
 }
@@ -314,7 +315,7 @@ bool CopyIndexForMigration(const std::wstring& source, const std::wstring& targe
         // Keep originals; only remove copies whose contents still match this attempt.
         DiscardIndexMigrationCopies(migration);
         migration.files.clear();
-        error = L"索引迁移失败：请使用不含旧索引的独立目录，检查路径、权限及剩余空间。原索引已保留。";
+        error = l10n::Get(l10n::StringId::IndexMigrationFailed).c_str();
         return false;
     }
 }
@@ -330,7 +331,7 @@ void DiscardIndexMigrationCopies(const IndexMigration& migration) {
 bool RemoveMigratedIndexSource(const IndexMigration& migration, std::wstring& error) {
     if (migration.source == migration.target) return true;
     if (!ValidPlan(migration)) {
-        error = L"旧索引清理记录无效，文件已保留。";
+        error = l10n::Get(l10n::StringId::IndexCleanupRecordInvalid).c_str();
         return false;
     }
     bool ok = true;
@@ -347,7 +348,7 @@ bool RemoveMigratedIndexSource(const IndexMigration& migration, std::wstring& er
             if (!removed) Sleep(200);
         }
         if (!removed) {
-            error = L"新索引已迁移，但部分旧索引文件无法清理。";
+            error = l10n::Get(l10n::StringId::IndexCleanupFilesFailed).c_str();
             ok = false;
         }
     }
@@ -381,7 +382,7 @@ bool RemoveMigratedIndexSource(const IndexMigration& migration, std::wstring& er
     } catch (...) {
         ok = false;
     }
-    if (!ok) error = L"新索引已迁移，但部分旧索引文件或空目录无法清理。";
+    if (!ok) error = l10n::Get(l10n::StringId::IndexCleanupDirectoriesFailed).c_str();
     return ok;
 }
 }

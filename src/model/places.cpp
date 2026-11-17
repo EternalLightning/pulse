@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 // places.cpp — Persist workspaces / tags / network pins + NTFS ADS.
+#include "../common/localization.h"
 #include "places.h"
 #include "tag_id.h"
 #include "../common/user_storage.h"
@@ -189,20 +190,20 @@ void PlacesCatalog::StopTagWriter() {
 
 void PlacesCatalog::EnsureDefaults() {
     if (!tags.empty()) return;
-    struct Def { const wchar_t* id; const wchar_t* name; uint32_t rgb; };
+    struct Def { const wchar_t* id; l10n::StringId name; uint32_t rgb; };
     static const Def kDefs[] = {
-        { L"finder-red", L"紧急修补", 0xEF4444 },
-        { L"finder-orange", L"设计审阅", 0xF59E0B },
-        { L"finder-green", L"进行中", 0x22C55E },
-        { L"finder-yellow", L"待确认", 0xEAB308 },
-        { L"finder-purple", L"灵感参考", 0xA855F7 },
-        { L"finder-blue", L"参考资料", 0x3B82F6 },
-        { L"finder-gray", L"归档", 0x94A3B8 },
+        { L"finder-red", l10n::StringId::TagDefaultUrgent, 0xEF4444 },
+        { L"finder-orange", l10n::StringId::TagDefaultDesignReview, 0xF59E0B },
+        { L"finder-green", l10n::StringId::TagDefaultInProgress, 0x22C55E },
+        { L"finder-yellow", l10n::StringId::TagDefaultPending, 0xEAB308 },
+        { L"finder-purple", l10n::StringId::TagDefaultInspiration, 0xA855F7 },
+        { L"finder-blue", l10n::StringId::TagDefaultReference, 0x3B82F6 },
+        { L"finder-gray", l10n::StringId::TagDefaultArchive, 0x94A3B8 },
     };
     for (const auto& d : kDefs) {
         ColorTag t;
         t.id = d.id;
-        t.name = d.name;
+        t.name = l10n::Get(d.name);
         t.rgb = d.rgb;
         tags.push_back(std::move(t));
     }
@@ -1520,7 +1521,7 @@ void PlacesCatalog::MergeAdsRecords(const std::wstring& path,
                     ColorTag tag;
                     tag.id = record.id.empty() ? NewTagId() : record.id;
                     if (tag.id.empty()) continue;
-                    tag.name = imported_name.empty() ? L"导入的标签" : imported_name;
+                    tag.name = imported_name.empty() ? l10n::Get(l10n::StringId::TagImportedDefault).c_str() : imported_name;
                     tag.rgb = record.rgb;
                     tags.push_back(std::move(tag));
                     index = static_cast<int>(tags.size()) - 1;

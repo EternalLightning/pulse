@@ -45,7 +45,7 @@ void FillDetailsFolderSize(ui::DetailsPanelView& details, const app::FolderSizeV
     details.size_pending = value.state == S::Calculating || value.state == S::Updating;
     details.size_text = value.has_value ? format::ByteSize(value.bytes, true) : L"";
     if (value.state == S::Partial || value.state == S::Cached || value.state == S::Unavailable) {
-        if (!details.size_text.empty()) details.size_text += L" · ";
+        if (!details.size_text.empty()) details.size_text += L"  ";
         details.size_text += l10n::Get(value.state == S::Partial ? I::FolderSizePartial :
             value.state == S::Cached ? I::FolderSizeCached : I::FolderSizeUnavailable);
     }
@@ -55,7 +55,7 @@ void FillDetailsFolderSize(ui::DetailsPanelView& details, const app::FolderSizeV
         swprintf_s(contains, l10n::Get(I::ContainsFormat).c_str(), value.files, value.dirs);
         details.contains_text = contains;
         if (value.incomplete || value.state == S::Partial || value.state == S::Cached || value.state == S::Updating) {
-            details.contains_text += L" · ";
+            details.contains_text += L"  ";
             details.contains_text += l10n::Get(value.incomplete || value.state == S::Partial ?
                 I::FolderSizePartial : value.state == S::Updating ? I::FolderSizeUpdating : I::FolderSizeCached);
         }
@@ -215,7 +215,7 @@ void FillFolderSizesImpl(AppState& s, ui::WindowViewModel& vm, bool prepare_requ
         const auto value = s.folderSizes.Get(row.path);
         std::wstring text = value.has_value ? format::ByteSize(value.bytes) : L"";
         auto suffix = [&](I id) {
-            if (!text.empty()) text += L" · ";
+            if (!text.empty()) text += L"  ";
             text += l10n::Get(id);
         };
         switch (value.state) {

@@ -6,7 +6,7 @@
 #pragma code_page(65001)
 // Common Controls v6, Windows 11 activation context, and the app icon.
 #include "resource.h"
-#include "../common/strings.rcinc"
+#include "../common/strings.rc"
 1 24 "pulse_app.manifest"
 IDI_PULSE ICON "pulse.ico"
 // Files Community app icon for the global-search window, including high DPI.

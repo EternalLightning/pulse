@@ -178,14 +178,14 @@ bool OpsManager::RetryRecovery() {
             }
             if (recovery.was_active && IsDeleteOperation(recovery.request.type)) {
                 all_retryable = false;
-                status_.last_error = L"A deletion may have partially executed. Inspect the affected paths before discarding this recovery record; it will not be replayed.";
+                status_.last_error = l10n::Get(l10n::StringId::DeleteRecoveryPartial).c_str();
                 status_.summary = status_.last_error; status_.phase = OpPhase::Failed;
                 continue;
             }
             if (recovery.was_active && (recovery.request.type == OpType::Rename ||
                 recovery.request.type == OpType::BatchRename)) {
                 all_retryable = false;
-                status_.last_error = L"Recovery stopped: a rename may have partially executed and its original identity cannot be proven; it will not be replayed.";
+                status_.last_error = l10n::Get(l10n::StringId::RenameRecoveryUnverified).c_str();
                 status_.summary = status_.last_error; status_.phase = OpPhase::Failed;
                 continue;
             }
@@ -199,7 +199,7 @@ bool OpsManager::RetryRecovery() {
             // Recovery that first requires destructive reconciliation stops.
             if (recovery.was_active && !recovery.request.dest_dir.empty()) {
                 all_retryable = false;
-                status_.last_error = L"Recovery stopped: temporary-file ownership cannot be proven; nothing was deleted.";
+                status_.last_error = l10n::Get(l10n::StringId::TemporaryRecoveryUnverified).c_str();
                 status_.summary = status_.last_error;
                 status_.phase = OpPhase::Failed;
                 continue;

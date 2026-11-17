@@ -467,7 +467,7 @@ static std::wstring DisplayPath(const std::wstring& path) {
 }
 
 static std::wstring FolderTitle(const std::wstring& path) {
-    if (path.empty()) return L"This PC";
+    if (path.empty()) return l10n::Get(l10n::StringId::ThisPc).c_str();
     std::wstring shown = DisplayPath(path);
     std::wstring_view v = shown;
     if (v.size() > 1 && v.back() == L'\\') v.remove_suffix(1);

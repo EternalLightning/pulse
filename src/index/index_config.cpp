@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "index_config.h"
 #include "persistent_index_policy.h"
 #include "index_config_parse.h"
@@ -224,7 +225,7 @@ bool LoadMachineConfig(IndexConfig& config, std::wstring* error) {
     config.index_path = root.empty() ? L"" : root + L"\\Index";
     std::wstring path = MachineConfigPath();
     if (path.empty()) {
-        SetError(error, L"无法定位 ProgramData 索引目录");
+        SetError(error, l10n::Get(l10n::StringId::IndexProgramDataUnavailable).c_str());
         return false;
     }
     // Older releases kept machine configuration inside the default data directory.
@@ -236,11 +237,11 @@ bool LoadMachineConfig(IndexConfig& config, std::wstring* error) {
             const DWORD code = GetLastError();
             if (code == ERROR_FILE_NOT_FOUND || code == ERROR_PATH_NOT_FOUND) return true;
         }
-        SetError(error, L"无法读取索引配置");
+        SetError(error, l10n::Get(l10n::StringId::IndexConfigReadFailed).c_str());
         return false;
     }
     if (!ParseMachineConfig(json, root + L"\\Index", config)) {
-        SetError(error, L"索引配置为空、损坏或包含无效值");
+        SetError(error, l10n::Get(l10n::StringId::IndexConfigInvalid).c_str());
         return false;
     }
     return true;
@@ -249,11 +250,11 @@ bool LoadMachineConfig(IndexConfig& config, std::wstring* error) {
 bool SaveMachineConfig(const IndexConfig& config, std::wstring* error) {
     const std::wstring path = MachineConfigPath();
     if (path.empty()) {
-        SetError(error, L"无法定位 ProgramData 索引目录");
+        SetError(error, l10n::Get(l10n::StringId::IndexProgramDataUnavailable).c_str());
         return false;
     }
     if (!pulse::WriteUtf8FileAtomic(path, ConfigJson(config))) {
-        SetError(error, Win32Error(L"保存索引配置失败"));
+        SetError(error, Win32Error(l10n::Get(l10n::StringId::IndexConfigSaveFailed).c_str()));
         return false;
     }
     const std::wstring legacy_root = MachineDataRoot() + L"\\Index";
@@ -270,7 +271,7 @@ bool SaveMachineConfig(const IndexConfig& config, std::wstring* error) {
 bool ConfigureVolume(const std::wstring& id, bool enabled, std::wstring* error) {
     const std::wstring normalized = NormalizeVolumeId(id);
     if (normalized.empty() || normalized.rfind(L"\\\\?\\VOLUME{", 0) != 0) {
-        SetError(error, L"无效的卷标识");
+        SetError(error, l10n::Get(l10n::StringId::IndexVolumeIdInvalid).c_str());
         return false;
     }
     IndexConfig config;
@@ -281,14 +282,14 @@ bool ConfigureVolume(const std::wstring& id, bool enabled, std::wstring* error) 
             return NormalizeVolumeId(volume.id) == normalized;
         });
         if (found == volumes.end() || found->kind != VolumeKind::Fixed || !found->supported) {
-            SetError(error, L"该设备不支持持久索引");
+            SetError(error, l10n::Get(l10n::StringId::IndexDeviceUnsupported).c_str());
             return false;
         }
     }
     if (enabled) config.excluded_volume_ids.erase(normalized);
     else config.excluded_volume_ids.insert(normalized);
     if (!AdvanceMachineConfigGeneration(config)) {
-        SetError(error, L"索引配置版本计数已耗尽");
+        SetError(error, l10n::Get(l10n::StringId::IndexConfigGenerationExhausted).c_str());
         return false;
     }
     return SaveMachineConfig(config, error);
@@ -296,18 +297,18 @@ bool ConfigureVolume(const std::wstring& id, bool enabled, std::wstring* error) 
 
 bool ConfigureIndexPath(const std::wstring& path, std::wstring* error) {
     if (path.empty()) {
-        SetError(error, L"索引路径不能为空");
+        SetError(error, l10n::Get(l10n::StringId::IndexPathEmpty).c_str());
         return false;
     }
     if (!EnsureDirectory(path) || !ProtectIndexRawTree(path)) {
-        SetError(error, Win32Error(L"无法保护索引目录"));
+        SetError(error, Win32Error(l10n::Get(l10n::StringId::IndexDirectoryProtectFailed).c_str()));
         return false;
     }
     IndexConfig config;
     if (!LoadMachineConfig(config, error)) return false;
     config.index_path = path;
     if (!AdvanceMachineConfigGeneration(config)) {
-        SetError(error, L"索引配置版本计数已耗尽");
+        SetError(error, l10n::Get(l10n::StringId::IndexConfigGenerationExhausted).c_str());
         return false;
     }
     return SaveMachineConfig(config, error);
@@ -318,7 +319,7 @@ bool ConfigureExcludePath(const std::wstring& path, bool enabled, std::wstring* 
     std::replace(normalized.begin(), normalized.end(), L'/', L'\\');
     while (normalized.size() > 3 && normalized.back() == L'\\') normalized.pop_back();
     if (normalized.size() <= 3 || normalized[1] != L':') {
-        SetError(error, L"排除项必须是本地文件夹路径");
+        SetError(error, l10n::Get(l10n::StringId::IndexExclusionLocalFolder).c_str());
         return false;
     }
     IndexConfig config;
@@ -334,7 +335,7 @@ bool ConfigureExcludePath(const std::wstring& path, bool enabled, std::wstring* 
         config.excluded_paths.erase(it);
     }
     if (!AdvanceMachineConfigGeneration(config)) {
-        SetError(error, L"索引配置版本计数已耗尽");
+        SetError(error, l10n::Get(l10n::StringId::IndexConfigGenerationExhausted).c_str());
         return false;
     }
     return SaveMachineConfig(config, error);
@@ -407,8 +408,8 @@ std::vector<VolumeInfo> EnumerateLocalVolumes(const IndexConfig& config) {
         info.supported = info.online && IsNtfs(info.file_system) && AllowsPersistentIndex(device);
         const bool auto_include = info.kind == VolumeKind::Fixed && config.include_fixed_ntfs;
         info.enabled = info.supported && auto_include && !config.IsExcluded(info.id);
-        info.state = !info.online ? L"离线" : !info.supported ? L"非 NTFS" :
-                     info.enabled ? L"等待索引" : L"已排除";
+        info.state = !info.online ? l10n::Get(l10n::StringId::Offline).c_str() : !info.supported ? l10n::Get(l10n::StringId::IndexVolumeNotNtfs).c_str() :
+                     info.enabled ? l10n::Get(l10n::StringId::IndexVolumeWaiting).c_str() : l10n::Get(l10n::StringId::IndexVolumeExcluded).c_str();
         out.push_back(std::move(info));
     }
     std::sort(out.begin(), out.end(), [](const VolumeInfo& a, const VolumeInfo& b) {

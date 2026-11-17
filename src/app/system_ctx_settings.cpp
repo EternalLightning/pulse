@@ -57,19 +57,19 @@ void ShowSystemContextRowMenu(AppState& s, int row) {
         item.enabled = enabled;
         items.push_back(std::move(item));
     };
-    add(1, l10n::Pick(L"复制注册表路径", L"Copy registry path"), !key.empty());
-    add(2, l10n::Pick(L"复制程序路径", L"Copy program path"), !file.empty());
-    add(3, l10n::Pick(L"在新标签页打开所在文件夹", L"Open its folder in a new tab"), !folder.empty());
+    add(1, l10n::Get(l10n::StringId::SysCtxCopyRegistryPath).c_str(), !key.empty());
+    add(2, l10n::Get(l10n::StringId::SysCtxCopyProgramPath).c_str(), !file.empty());
+    add(3, l10n::Get(l10n::StringId::SysCtxOpenProgramFolderNewTab).c_str(), !folder.empty());
     if (!pulse_key.empty()) {
         items.back().separator_after = true;
-        add(4, l10n::Pick(L"只在 Pulse 右键菜单中隐藏", L"Hide in Pulse's menu only"), ready);
+        add(4, l10n::Get(l10n::StringId::SysCtxHideOnlyInPulse).c_str(), ready);
         items.back().checked = model.RowPulseHidden(row);
     }
     if (model.RowDeletable(row)) {
         items.back().separator_after = true;
         add(5, model.RowDeleting(row)
-            ? l10n::Pick(L"取消删除", L"Keep it")
-            : l10n::Pick(L"删除残留项（点“应用更改”后生效）", L"Delete leftover (on Apply changes)"), ready);
+            ? l10n::Get(l10n::StringId::SysCtxKeepIt).c_str()
+            : l10n::Get(l10n::StringId::SysCtxDeleteLeftoverOnApplyChanges).c_str(), ready);
     }
     const int command = PopupSystemContextMenu(s, std::move(items));
     if (command == 1) app::CopyTextToClipboard(s.hwnd, key);
@@ -86,11 +86,10 @@ void RestoreSystemContextChanges(AppState& s) {
     std::vector<ui::FluentMenuItem> items;
     ui::FluentMenuItem restore;
     restore.command = 1;
-    restore.text = l10n::Pick(L"撤销本次会话的全部注册表改动",
-                              L"Undo every registry change made during this session");
+    restore.text = l10n::Get(l10n::StringId::SysCtxRestoreSessionChanges).c_str();
     items.push_back(std::move(restore));
     ui::FluentMenuItem cancel;
-    cancel.text = l10n::Pick(L"取消", L"Cancel");
+    cancel.text = l10n::Get(l10n::StringId::Cancel).c_str();
     items.push_back(std::move(cancel));
     if (PopupSystemContextMenu(s, std::move(items)) == 1) s.settings.SystemCtx().RestoreAll();
 }

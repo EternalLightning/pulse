@@ -468,7 +468,7 @@ void TestBreadcrumb() {
         const auto& sub = workspaces->items[2];
         Check(local.badge.empty() && local.icon_glyph == L"\xE8B7",
               L"sidebar: local workspace keeps default glyph, no badge");
-        Check(nas.badge == L"当前 · 服务器" && nas.icon_glyph == L"\xE968" &&
+        Check(nas.badge == L"当前服务器" && nas.icon_glyph == L"\xE968" &&
               colorIs(nas.icon_color, 0x38BDF8),
               L"sidebar: active UNC workspace shows server badge + network glyph");
         Check(sub.badge.empty() && sub.icon_glyph == L"\xE968" &&
@@ -5813,9 +5813,8 @@ void TestLayoutOwnedTabs() {
     first.root = MakePresetTree(LayoutPreset::TwoVertical, used);
     first.layout = LayoutPreset::TwoVertical;
     first.focused_index = 0;
-    Check(LayoutTabTitle(first).find(L"3") == std::wstring::npos &&
-          LayoutTabTitle(first).find(L"·") != std::wstring::npos,
-          L"layouttabs: multi-pane title uses a light suffix");
+    Check(LayoutTabTitle(first).ends_with(L" (2)"),
+          L"layouttabs: multi-pane title shows the pane count in parentheses");
 
     tabs.NewTab(L"D:\\raw");
     Check(tabs.items.size() == 2, L"layouttabs: two window tabs");

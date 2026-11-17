@@ -74,8 +74,8 @@ void ShowAddressSearchHistory(AppState& s) {
                 app::ParsePulsePath(entries[i].path, nullptr, &raw);
                 const auto& mode = l10n::Get(app::SplitSearchQueryText(raw).content.present()
                     ? l10n::StringId::SearchModeContent : l10n::StringId::SearchModeName);
-                item.shortcut += L" · " + mode;
-                item.tooltip = entries[i].query + L"\n" + scope + L" · " + mode;
+                item.shortcut += L"  " + mode;
+                item.tooltip = entries[i].query + L"\n" + scope + L"  " + mode;
                 items.push_back(std::move(item));
             }
             if (items.empty()) {

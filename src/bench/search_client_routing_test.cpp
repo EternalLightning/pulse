@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../index/index_client.h"
+#include "../common/localization.h"
 #include "../index/network_agent_client.h"
 #include "../index/index_search_response.h"
 #include "../index/live_filename_search.h"
@@ -406,6 +407,7 @@ void Exercise(const char* name, HWND main, HWND popup) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    pulse::l10n::Initialize(nullptr, L"zh-CN");
     if (argc == 2 && std::wstring_view(argv[1]) == L"--transport-liveness-only")
         return pulse::index::RunIndexClientIoRegressions();
     if (argc == 2 && std::wstring_view(argv[1]) == L"--writer-idle-only") {

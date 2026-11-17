@@ -17,6 +17,11 @@ for y in range(48):
         image.putpixel((x, y), colours[(y >= 24) * 2 + (x >= 40)])
 image.save(args.directory / "no-exif.jpg", quality=100, subsampling=0)
 image.save(args.directory / "fixture.png")
+large = image.resize((3911, 5866), Image.Resampling.NEAREST)
+large.save(args.directory / "large-no-exif.jpg", quality=95, subsampling=0)
+upright = Image.Exif()
+upright[274] = 1
+large.save(args.directory / "large-orientation-1.jpg", quality=95, subsampling=0, exif=upright)
 for orientation in (*range(1, 9), 0, 9, 65535):
     exif = Image.Exif()
     exif[274] = orientation

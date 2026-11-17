@@ -64,13 +64,13 @@ bool IsNetworkDeletionPath(std::wstring_view path) {
 bool AddExistingRecyclePair(DeleteTarget& target, std::wstring& error) {
     if (target.physical_paths.empty()) return false;
     const auto index = fs::RecycleIndexPath(target.physical_paths.front());
-    if (index.empty()) { error = L"Invalid Recycle Bin content path"; return false; }
+    if (index.empty()) { error = l10n::Get(l10n::StringId::DeleteRecyclePathInvalid).c_str(); return false; }
     const DWORD attributes = GetFileAttributesW(index.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES) target.physical_paths.push_back(index);
     else {
         const DWORD code = GetLastError();
         if (code != ERROR_FILE_NOT_FOUND && code != ERROR_PATH_NOT_FOUND) {
-            error = L"Unable to read Recycle Bin metadata; deletion stopped.";
+            error = l10n::Get(l10n::StringId::DeleteRecycleMetadataUnreadable).c_str();
             return false;
         }
     }
@@ -82,17 +82,17 @@ DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstr
     DeletePlan plan;
     plan.task_id = task_id;
     plan.origin = request.is_undo ? DeleteOrigin::Undo : request.delete_origin;
-    if (!IsDeleteOperation(request.type)) { error = L"Not a deletion request"; return plan; }
+    if (!IsDeleteOperation(request.type)) { error = l10n::Get(l10n::StringId::DeleteRequestInvalid).c_str(); return plan; }
     for (const auto& source : request.sources) {
         if (pulse::path::IsDriveRootPath(source)) {
-            error = L"Drive roots cannot be deleted; nothing was deleted.";
+            error = l10n::Get(l10n::StringId::DeleteDriveRootBlocked).c_str();
             return {};
         }
     }
     for (const auto& target : request.delete_targets) {
         if (pulse::path::IsDriveRootPath(target.path) ||
             std::any_of(target.physical_paths.begin(), target.physical_paths.end(), pulse::path::IsDriveRootPath)) {
-            error = L"Drive roots cannot be deleted; nothing was deleted.";
+            error = l10n::Get(l10n::StringId::DeleteDriveRootBlocked).c_str();
             return {};
         }
     }
@@ -110,7 +110,7 @@ DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstr
             if (fs::IsRemoteLikeDrive(root)) continue;
             if (!fs::EnumerateRecycleBinAtRoot(std::wstring(root) + L"$Recycle.Bin", entries)) complete = false;
         }
-        if (!complete) { error = L"Unable to enumerate the entire current-user Recycle Bin; nothing was deleted."; return plan; }
+        if (!complete) { error = l10n::Get(l10n::StringId::DeleteRecycleEnumerationIncomplete).c_str(); return plan; }
         requested.clear();
         for (const auto& entry : entries) requested.push_back({entry.full_path, {entry.recycle_path}, true});
     } else if (requested.empty()) {
@@ -141,7 +141,7 @@ DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstr
     for (const auto& target : plan.targets)
         for (const auto& path : target.physical_paths)
             if (!ipc::IsLosslessDeleteShellPath(path)) {
-                error = L"This path cannot be represented losslessly by the Shell deletion backend; nothing was deleted.";
+                error = l10n::Get(l10n::StringId::DeleteShellPathLossy).c_str();
                 return {};
             }
     return plan;
@@ -408,7 +408,7 @@ void OpsManager::RunDelete(const QueueItem& item,
                 (!network_copy_undo || !std::all_of(target.physical_paths.begin(),
                     target.physical_paths.end(), IsNetworkDeletionPath));
         })) {
-        finish(L"此位置不支持安全的原生回收撤销；不会将撤销改为永久删除。", {}, false,
+        finish(l10n::Get(l10n::StringId::DeleteNativeUndoUnavailable).c_str(), {}, false,
             false, {}, {}, false, {}, E_ACCESSDENIED);
         return;
     }
@@ -631,7 +631,7 @@ void OpsManager::RunDelete(const QueueItem& item,
     const bool physical_complete = IsDeleteSnapshotComplete(*accepted, actual);
     if (cancelled) error = l10n::Get(l10n::StringId::Cancel);
     else if (FAILED(static_cast<HRESULT>(hr)) && error.empty()) error = l10n::Get(l10n::StringId::OperationFailedMessage);
-    else if (!physical_complete && error.empty()) error = L"Deletion was not confirmed for every authorized physical root.";
+    else if (!physical_complete && error.empty()) error = l10n::Get(l10n::StringId::DeleteRootsUnconfirmed).c_str();
     const bool backend_lost = IsDeleteBackendLost(static_cast<HRESULT>(hr));
     const bool uncertain = backend_lost || !physical_complete;
     if (!item.req.is_undo && !cancelled && !delete_cancel_.load() && !stopping_.load() &&

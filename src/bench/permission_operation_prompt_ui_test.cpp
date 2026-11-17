@@ -260,7 +260,7 @@ int wmain(int argc, wchar_t** argv) {
             Check(l10n::effective_language() == l10n::Language::EnUS &&
                 english.title == L"Administrator permission required" &&
                 english.message == L"Permission denied. Retry unfinished items as administrator." &&
-                english.note == L"Windows will request administrator permission after you continue." &&
+                english.note == L"Windows will ask for administrator permission." &&
                 english.confirm_text == L"Continue as administrator" &&
                 english.cancel_text == L"Cancel" && english.rows[0].text == L"Source path:" &&
                 std::none_of(ui_text.begin(), ui_text.end(),

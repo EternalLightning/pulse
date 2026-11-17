@@ -540,19 +540,19 @@ void QuickPreviewWindow::DrawHud(ID2D1DeviceContext* dc, const D2D1_RECT_F& cont
         wchar_t preview[64];
         swprintf_s(preview, pulse::l10n::Get(pulse::l10n::StringId::PreviewDecodedFormat).c_str(),
                    (std::max)(decoded_w_, decoded_h_));
-        line += L" \x00B7 ";
+        line += L"  ";
         line += preview;
     }
     const std::wstring size = pulse::format::ByteSize(item_.size, true);
     if (!size.empty()) {
-        line += L" \x00B7 ";
+        line += L"  ";
         line += size;
     }
     if (const std::wstring ext = ExtensionLabel(item_.path); !ext.empty()) {
-        line += L" \x00B7 ";
+        line += L"  ";
         line += ext;
     }
-    line += L" \x00B7 ";
+    line += L"  ";
     if (image_fit_) {
         line += pulse::l10n::Get(pulse::l10n::StringId::PreviewFit);
     } else {

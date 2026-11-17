@@ -6,6 +6,7 @@
 // index_client.h — UI-side connection to Pulse.Index.exe (never blocks the UI
 // thread on a search: SearchAsync + WM callback).
 #pragma once
+#include "../common/localization.h"
 #include "index_config.h"
 #include "index_protocol.h"
 #include <atomic>
@@ -102,7 +103,7 @@ private:
     std::atomic<uint64_t> revision_{0};
     std::atomic<uint32_t> latest_search_id_{0};
     mutable std::mutex mu_;
-    std::wstring status_ = L"索引未连接";
+    std::wstring status_ = l10n::Get(l10n::StringId::IndexDisconnected).c_str();
     std::wstring query_status_;
     bool helper_missing_ = false;
     std::wstring index_path_;

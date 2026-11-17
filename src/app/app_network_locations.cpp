@@ -102,7 +102,7 @@ void FillNetworkLocationsView(AppState& s, app::Tab& tab) {
         add(item.name, item.path, item.shell_link ? l10n::Get(l10n::StringId::OpensInWindows) :
             app::NetworkLocationKey(item.path), !item.shell_link);
     for (const auto& device : load->lan.devices)
-        add(device.name, app::LanDeviceUnc(device), l10n::Get(l10n::StringId::NetworkLanDevices) + L" · " +
+        add(device.name, app::LanDeviceUnc(device), l10n::Get(l10n::StringId::NetworkLanDevices) + L"  " +
             (device.model.empty() ? device.host : device.model));
     const auto recent_list = s.core.network_recent->Snapshot();
     for (const auto& recent : recent_list.Items())

@@ -93,7 +93,7 @@ std::vector<AboutRow> BuildAboutRows(bool index_service, bool index_installed, f
     using I = l10n::StringId;
     std::vector<AboutRow> rows;
     rows.emplace_back(l10n::Get(I::AboutVersion),
-                      std::wstring(PULSE_VERSION_STRING) + L" \u00B7 " + kArchitecture);
+                      std::wstring(PULSE_VERSION_STRING) + L" (" + kArchitecture + L")");
     const std::wstring built = BuildTimeText();
     if (!built.empty()) rows.emplace_back(l10n::Get(I::AboutBuilt), built);
     rows.emplace_back(l10n::Get(I::AboutBuildId), PULSE_BUILD_ID);

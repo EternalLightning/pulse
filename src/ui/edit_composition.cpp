@@ -79,8 +79,8 @@ EditComposition::EditComposition(HWND host, IDCompositionDevice* device, ID2D1De
 EditComposition::~EditComposition() = default;
 bool EditComposition::Available() const { return impl_->root && impl_->dc; }
 
-bool EditComposition::Present(HWND edit, ID2D1Bitmap1* bitmap) {
-    if (!Available() || !bitmap || !IsWindowVisible(edit)) return false;
+bool EditComposition::Present(HWND edit, ID2D1Bitmap1* bitmap, bool allow_hidden) {
+    if (!Available() || !bitmap || (!allow_hidden && !IsWindowVisible(edit))) return false;
     auto& state = *impl_;
     const auto size = bitmap->GetPixelSize();
     if (!size.width || !size.height) return false;

@@ -182,14 +182,24 @@ add_executable(pulse_user_index_storage_test
     src/index/index_migration.cpp)
 target_link_libraries(pulse_user_index_storage_test PRIVATE pulse_user_storage shell32 advapi32)
 
-add_library(pulse_localization STATIC src/common/localization.cpp)
+find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+set(PULSE_RUNTIME_STRINGS_HEADER "${CMAKE_BINARY_DIR}/generated/runtime_messages.generated.h")
+add_custom_command(OUTPUT "${PULSE_RUNTIME_STRINGS_HEADER}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_runtime_strings.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime_messages.rc" "${PULSE_RUNTIME_STRINGS_HEADER}"
+    DEPENDS tools/generate_runtime_strings.py src/common/runtime_messages.rc
+    VERBATIM)
+set_property(SOURCE src/common/localization.cpp APPEND PROPERTY OBJECT_DEPENDS
+    "${PULSE_RUNTIME_STRINGS_HEADER}")
+add_library(pulse_localization STATIC src/common/localization.cpp "${PULSE_RUNTIME_STRINGS_HEADER}")
+target_include_directories(pulse_localization PRIVATE "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(pulse_localization PUBLIC user32)
 
 add_executable(pulse_localization_test
     src/bench/localization_test.cpp
     src/bench/localization_test.rc)
 set_property(SOURCE src/bench/localization_test.rc APPEND PROPERTY OBJECT_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rc")
 target_link_libraries(pulse_localization_test PRIVATE pulse_localization)
 
 add_executable(pulse_known_folder_labels_test
@@ -282,7 +292,7 @@ add_executable(pulse_content_search_test
     src/bench/content_search_test.cpp
     src/index/content_search.cpp
     src/index/content_search_client.cpp)
-target_link_libraries(pulse_content_search_test PRIVATE pulse_text bcrypt ole32)
+target_link_libraries(pulse_content_search_test PRIVATE pulse_text bcrypt ole32 pulse_localization)
 add_dependencies(pulse_content_search_test pulse_index)
 
 add_executable(pulse_duplicate_scan_test
@@ -303,7 +313,7 @@ add_executable(pulse_search_query_test
 
 # ---- Stage 0 visual/perf sample: D2D virtual list (GUI) ----
 add_executable(pulse_d2d_list WIN32 src/bench/d2d_list.cpp)
-target_link_libraries(pulse_d2d_list PRIVATE d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore)
+target_link_libraries(pulse_d2d_list PRIVATE d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore pulse_localization)
 
 # Fluent component visual contract: dark/light/high-contrast regression PNGs.
 add_executable(pulse_fluent_gallery WIN32
@@ -327,7 +337,7 @@ add_executable(pulse_date_group_layout_test src/bench/date_group_layout_test.cpp
 add_library(pulse_shell_query_client STATIC src/ipc/shell_query_client.cpp)
 add_library(pulse_shell_interaction_client STATIC
     src/ipc/shell_interaction_client.cpp src/ipc/shell_client.cpp)
-target_link_libraries(pulse_shell_interaction_client PUBLIC user32 advapi32)
+target_link_libraries(pulse_shell_interaction_client PUBLIC user32 advapi32 pulse_localization)
 target_link_libraries(pulse_shell_query_client PUBLIC advapi32 user32)
 add_executable(pulse_home_layout_test src/bench/home_layout_test.cpp
     src/app/home_catalog.cpp src/bench/localization_test.rc)
@@ -336,8 +346,7 @@ add_executable(pulse_network_access_test src/bench/network_access_test.cpp
     src/app/network_connect.cpp src/app/network_locations.cpp src/bench/localization_test.rc)
 target_link_libraries(pulse_network_access_test PRIVATE pulse_localization ole32 oleaut32 uuid user32)
 
-# Check the UI include boundary on pulse builds when Python is available.
-find_package(Python3 COMPONENTS Interpreter QUIET)
+# Check the UI include boundary on pulse builds.
 if(Python3_Interpreter_FOUND)
     add_custom_target(pulse_ui_dependency_check
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/check_ui_dependencies.py"
@@ -409,7 +418,7 @@ if(PULSE_APP_SOURCES)
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/invalid-filter-state.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/global-search-logo.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/app/pulse.ico"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rc"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/copy_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/star_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/history_24_color.svg"
@@ -534,14 +543,14 @@ add_executable(pulse_audit_ops_followup_test src/bench/audit_ops_followup_test.c
     src/ops/drop_staging.cpp src/bench/localization_test.rc)
 target_link_libraries(pulse_audit_ops_followup_test PRIVATE ole32 shell32 uuid bcrypt)
 set_property(SOURCE src/app/pulse.rc src/bench/localization_test.rc
-    src/shell_host/operation_worker.rc APPEND PROPERTY OBJECT_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc;${CMAKE_CURRENT_SOURCE_DIR}/src/common/string_ids.h;${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime_messages.inc")
+    src/bench/audit_ui_remaining_test.rc src/shell_host/operation_worker.rc APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rc;${CMAKE_CURRENT_SOURCE_DIR}/src/common/string_ids.h;${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime_messages.rc")
 set_property(SOURCE src/app/pulse.rc APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_BINARY_DIR}/generated/pulse_app.manifest")
 set_property(SOURCE src/bench/dialog_edit_test.rc APPEND PROPERTY OBJECT_DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rcinc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/strings.rc"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/common/string_ids.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime_messages.inc")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/common/runtime_messages.rc")
 target_link_libraries(pulse_recycle_backend_test PRIVATE ole32 shell32 uuid bcrypt)
 # Standalone OpsManager tests need the deletion service's direct dependencies.
 foreach(ops_test_target pulse_ops_test pulse_rename_ops_test pulse_recycle_backend_test pulse_audit_ops_followup_test)
@@ -553,6 +562,7 @@ foreach(ops_test_target pulse_ops_test pulse_rename_ops_test pulse_recycle_backe
 endforeach()
 add_executable(pulse_delete_service_test src/bench/delete_service_test.cpp
     src/ops/delete_service.cpp)
+target_link_libraries(pulse_delete_service_test PRIVATE pulse_localization)
 add_executable(pulse_metafile_input_test src/bench/metafile_input_test.cpp src/preview_host/metafile_raster.cpp)
 target_link_libraries(pulse_metafile_input_test PRIVATE ole32 gdi32 gdiplus)
 
@@ -998,7 +1008,7 @@ target_link_libraries(pulse_ops_feedback_test PRIVATE
     pulse_localization ole32 shell32 uuid bcrypt advapi32 shlwapi netapi32 mpr rstrtmgr)
 
 add_executable(pulse_menu_text_test
-    src/bench/menu_text_test.cpp src/bench/localization_test.rc
+    src/bench/menu_text_test.cpp src/bench/localization_test.rc src/bench/child_edit_test.rc
     src/ui/window_material.cpp
     src/ui/fluent_menu.cpp src/ui/fluent_components.cpp src/ui/ui_compositor.cpp src/ui/dialog_lifecycle.cpp
     src/ui/tab_shape.cpp src/ui/typography.cpp src/ui/edit_host.cpp)
@@ -1435,6 +1445,7 @@ add_executable(pulse_transfer_rate_test src/bench/transfer_rate_test.cpp)
 target_include_directories(pulse_transfer_rate_test PRIVATE src)
 
 add_executable(pulse_archive_test src/bench/archive_test.cpp src/ops/archive.cpp)
+target_link_libraries(pulse_archive_test PRIVATE pulse_localization)
 target_include_directories(pulse_archive_test PRIVATE src)
 target_compile_definitions(pulse_archive_test PRIVATE PULSE_ARCHIVE_PROCESS_TEST)
 add_executable(pulse_archive_process_fixture src/bench/archive_process_fixture.cpp)

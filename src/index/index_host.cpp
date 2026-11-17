@@ -12,6 +12,7 @@
 //   Pulse.Index.exe --service    SCM (SYSTEM → MFT+USN full disk)
 //   Pulse.Index.exe --install    UAC once; creates AUTO_START service
 //   Pulse.Index.exe --uninstall  removes the service
+#include "../common/localization.h"
 #include "index_protocol.h"
 #include "index_search_response.h"
 #include "index_engine.h"
@@ -276,7 +277,7 @@ std::vector<uint8_t> StatusPayload() {
     PayloadWriter w;
     w.PutU32(g.engine.Ready() ? 1u : 0u);
     w.PutU32(g.as_service ? 0u : static_cast<uint32_t>((std::min)(g.engine.Count(), static_cast<size_t>(0xffffffffu))));
-    w.PutString(g.as_service ? L"服务端索引：仅显示当前调用令牌可见的本地元数据；超时、离线、重解析点和历史删除项可能不完整" : g.engine.Status());
+    w.PutString(g.as_service ? pulse::l10n::Get(pulse::l10n::StringId::IndexServiceVisibilityNotice).c_str() : g.engine.Status());
     w.PutU32(g.engine.PinyinReady() ? 1u : 0u);
     w.PutU64(g.engine.Revision()); w.PutU32(1);
     return w.data();
@@ -1052,8 +1053,8 @@ int InstallService() {
             last_err = GetLastError();
         } else {
             SERVICE_DESCRIPTIONW desc{};
-            wchar_t text[] = L"Pulse file-name index (MFT + USN). UI talks to this over a named pipe.";
-            desc.lpDescription = text;
+            std::wstring text = pulse::l10n::Get(pulse::l10n::StringId::IndexServiceDescription);
+            desc.lpDescription = text.data();
             ChangeServiceConfig2W(svc, SERVICE_CONFIG_DESCRIPTION, &desc);
             last_err = EnsureServiceRunning(
                 [&](SERVICE_STATUS_PROCESS& status) -> DWORD {

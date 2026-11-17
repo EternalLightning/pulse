@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "../common/localization.h"
 #include "fluent_components.h"
 #include "menu_backdrop.h"
 #include "edit_frame_scheduler.h"
@@ -19,20 +20,20 @@ namespace pulse::ui {
 // Labels are supplied by the application's localization layer; array indices
 // follow OpType and OpPhase. All methods and callbacks run on the UI thread.
 struct OperationCenterLabels {
-    std::wstring title = L"Operations", empty = L"No operations";
-    std::wstring current = L"Current", queued = L"Queued", recent = L"Recent";
-    std::wstring clear_finished = L"Clear finished", details = L"Details";
-    std::wstring cancel = L"Cancel", pause = L"Pause", resume = L"Resume";
-    std::wstring open_destination = L"Open destination";
-    std::wstring resume_incomplete = L"Continue unfinished items";
-    std::wstring remaining_time = L"Time remaining", remaining_items = L"Items remaining";
-    std::wstring remaining_size = L"Size remaining", current_speed = L"Speed", estimating = L"Calculating";
+    std::wstring title = l10n::Get(l10n::StringId::OperationCenter), empty = l10n::Get(l10n::StringId::OperationCenterEmpty);
+    std::wstring current = l10n::Get(l10n::StringId::OperationCenterCurrent), queued = l10n::Get(l10n::StringId::OperationCenterQueued), recent = l10n::Get(l10n::StringId::OperationCenterRecent);
+    std::wstring clear_finished = l10n::Get(l10n::StringId::OperationCenterClear), details = l10n::Get(l10n::StringId::ViewDetails);
+    std::wstring cancel = l10n::Get(l10n::StringId::Cancel), pause = l10n::Get(l10n::StringId::OpPause), resume = l10n::Get(l10n::StringId::OpResume);
+    std::wstring open_destination = l10n::Get(l10n::StringId::OperationCenterDestination);
+    std::wstring resume_incomplete = l10n::Get(l10n::StringId::ResumeIncompleteTransfer);
+    std::wstring remaining_time = l10n::Get(l10n::StringId::OpRemainingTime), remaining_items = l10n::Get(l10n::StringId::OpRemainingItems);
+    std::wstring remaining_size = l10n::Get(l10n::StringId::OpRemainingSize), current_speed = l10n::Get(l10n::StringId::OpCurrentSpeed), estimating = l10n::Get(l10n::StringId::OpCalculating);
     std::array<std::wstring, 10> type_names{
-        L"Copy", L"Move", L"Recycle", L"Delete", L"Rename", L"New folder",
-        L"New text file", L"Restore", L"Empty Recycle Bin", L"Batch rename"};
+        l10n::Get(l10n::StringId::Copy), l10n::Get(l10n::StringId::OperationMove), l10n::Get(l10n::StringId::OperationCenterRecycle), l10n::Get(l10n::StringId::Delete), l10n::Get(l10n::StringId::Rename), l10n::Get(l10n::StringId::NewFolder),
+        l10n::Get(l10n::StringId::NewTextDocument), l10n::Get(l10n::StringId::Restore), l10n::Get(l10n::StringId::EmptyRecycleConfirmTitle), l10n::Get(l10n::StringId::BatchRename)};
     std::array<std::wstring, 11> phase_names{
-        L"Queued", L"Scanning", L"Waiting for conflict", L"Running", L"Paused",
-        L"Verifying", L"Cancelling", L"Completed", L"Failed", L"Waiting for confirmation", L"Cancelled"};
+        l10n::Get(l10n::StringId::OperationCenterQueued), l10n::Get(l10n::StringId::OpScanning), l10n::Get(l10n::StringId::OpWaitingConflict), l10n::Get(l10n::StringId::OperationCenterRunning), l10n::Get(l10n::StringId::OpPaused),
+        l10n::Get(l10n::StringId::OperationCenterVerifying), l10n::Get(l10n::StringId::OperationCenterCancelling), l10n::Get(l10n::StringId::OpCompleted), l10n::Get(l10n::StringId::OpFailedBadge), l10n::Get(l10n::StringId::OperationCenterWaiting), l10n::Get(l10n::StringId::OperationCenterCancelled)};
 };
 
 struct OperationCenterCallbacks {

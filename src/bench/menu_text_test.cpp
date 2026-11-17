@@ -9,6 +9,7 @@
 #include "../ui/lumatext_renderer.h"
 #include "../ui/popup_origin.h"
 #include "../ui/edit_host.h"
+#include "../ui/typography.h"
 #include "snapshot_output.h"
 #include "../common/localization.h"
 #include "../app/sidebar_pin_menu.h"
@@ -40,6 +41,15 @@ struct FluentMenuTestPeer {
     static void Open(FluentMenu& menu) { menu.OpenSubmenu(0); }
     static void Hover(FluentMenu& menu) { menu.UpdateHover(0); }
     static void Progress(FluentMenu& menu) { menu.Present(160, -3); }
+    static bool BeginFilter(FluentMenu& menu, std::vector<FluentMenuItem> items) {
+        menu.filter_fn_ = [](const auto&) { return std::vector<FluentMenuItem>{}; };
+        menu.filter_query_ = L"Filter animation";
+        if (!menu.EnsureFilterEdit()) return false;
+        SetWindowTextW(menu.edit_, menu.filter_query_.c_str());
+        return Begin(menu, std::move(items));
+    }
+    static HWND FilterEdit(const FluentMenu& menu) { return menu.edit_; }
+    static const std::wstring& FilterQuery(const FluentMenu& menu) { return menu.filter_query_; }
     static void Scroll(FluentMenu& menu, float offset) {
         menu.scroll_y_ = offset;
         menu.PositionSubmenu();
@@ -467,6 +477,61 @@ int wmain(int argc, wchar_t** argv) {
     {
         Compositor compositor;
         Check(owner && compositor.Init(owner), "create menu rendering host");
+        if (argc == 2 && wcscmp(argv[1], L"--filter-edit-animation") == 0) {
+            using Peer = FluentMenuTestPeer;
+            const auto previous_mode = typography::CurrentTextRenderMode();
+            for (const auto mode : {typography::TextRenderMode::Auto, typography::TextRenderMode::Sharp}) {
+                typography::SetTextRenderMode(mode);
+                for (const bool dark : {false, true}) {
+                    FluentMenu menu;
+                    Check(menu.Create(owner, &compositor, 1), "create filter animation fixture");
+                    menu.SetTheme(dark, HexColor(0xD83B01));
+                    Check(Peer::BeginFilter(menu, {Item(1, L"Filtered command")}), "begin filter editor entry animation");
+                    const HWND edit = Peer::FilterEdit(menu);
+                    const auto same_opacity = [&] {
+                        BYTE alpha = 0; DWORD flags = 0;
+                        return GetLayeredWindowAttributes(edit, nullptr, &alpha, &flags) &&
+                            (flags & LWA_ALPHA) && alpha == Peer::Alpha(menu);
+                    };
+                    Check(IsWindowVisible(edit) && same_opacity(), "filter editor shares the first partial-opacity entry frame");
+                    SynchronizeChildEditBackend(compositor, edit);
+                    InvalidateRect(edit, nullptr, TRUE);
+                    UpdateWindow(edit);
+                    Check(same_opacity(), "editor backend synchronization and repaint retain the entry opacity");
+                    Peer::Progress(menu);
+                    Check(same_opacity(), "filter editor follows subsequent entry frames");
+                    Peer::FullyVisible(menu);
+                    Check(IsWindowVisible(edit) && same_opacity(), "filter editor reaches full opacity with the menu");
+                    Peer::Close(menu);
+                    Check(Peer::Closing(menu) && IsWindowVisible(edit), "filter editor remains visible when menu exit begins");
+                    const auto closing_query = Peer::FilterQuery(menu);
+                    const auto closing_animation = Peer::AnimationStart(menu);
+                    const auto closing_presents = Peer::PresentCount(menu);
+                    const auto closing_alpha = Peer::Alpha(menu);
+                    const auto closing_bounds = Peer::Bounds(menu);
+                    const int closing_command = Peer::CommandAt(menu, 0);
+                    SendMessageW(edit, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L"Late synchronized text"));
+                    SendMessageW(edit, WM_IME_STARTCOMPOSITION, 0, 0);
+                    SendMessageW(edit, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L"Late IME commit"));
+                    SendMessageW(edit, WM_IME_ENDCOMPOSITION, 0, 0);
+                    const auto after_commit_bounds = Peer::Bounds(menu);
+                    Check(Peer::FilterQuery(menu) == closing_query && Peer::Count(menu) == 1 &&
+                        Peer::CommandAt(menu, 0) == closing_command && EqualRect(&closing_bounds, &after_commit_bounds),
+                        "late text synchronization and IME commit leave the closing menu model and bounds unchanged");
+                    Check(Peer::Closing(menu) && Peer::AnimationStart(menu) == closing_animation &&
+                        Peer::PresentCount(menu) == closing_presents && Peer::Alpha(menu) == closing_alpha && same_opacity(),
+                        "late edit notifications preserve the active exit animation without another menu present");
+                    Peer::Step(menu, 70);
+                    Check(IsWindowVisible(edit) && Peer::Alpha(menu) > 0 && Peer::Alpha(menu) < 255 && same_opacity(),
+                        "filter editor fades with the menu throughout the exit");
+                    Peer::Step(menu, 150);
+                    Check(Peer::Hidden(menu) && !IsWindowVisible(edit), "filter editor hides only after the menu exit completes");
+                }
+            }
+            typography::SetTextRenderMode(previous_mode);
+            DestroyWindow(owner); CoUninitialize();
+            return failures ? 1 : 0;
+        }
         if (argc == 2 && wcscmp(argv[1], L"--filter-edit-colors") == 0) {
             using Peer = FluentMenuTestPeer;
             FluentMenu menu;

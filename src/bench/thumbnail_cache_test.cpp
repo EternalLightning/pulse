@@ -504,6 +504,84 @@ struct ThumbnailCacheTestAccess {
         cache.Evict(ThumbnailCache::Consumer::QuickPreview);
         check(cache.queue_.empty() && cache.pending_.empty(),
               "last consumer cancellation removes delayed retry");
+        cache.Reset();
+        ComPtr<ID3D11Device> d3d;
+        ComPtr<IDXGIDevice> dxgi;
+        ComPtr<ID2D1Factory1> factory;
+        ComPtr<ID2D1Device> device;
+        ComPtr<ID2D1DeviceContext> context;
+        const bool graphics = SUCCEEDED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP,
+            nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0, D3D11_SDK_VERSION,
+            &d3d, nullptr, nullptr)) &&
+            SUCCEEDED(d3d->QueryInterface(IID_PPV_ARGS(&dxgi))) &&
+            SUCCEEDED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(&factory))) &&
+            SUCCEEDED(factory->CreateDevice(dxgi.get(), &device)) &&
+            SUCCEEDED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &context));
+        check(graphics, "create software device for same-size thumbnail failure recovery");
+        if (graphics) {
+            ComPtr<ID2D1Bitmap1> target, readback;
+            auto props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            bool ready = SUCCEEDED(context->CreateBitmap(D2D1::SizeU(1, 1), nullptr, 0, &props, &target));
+            props.bitmapOptions = D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
+            ready &= SUCCEEDED(context->CreateBitmap(D2D1::SizeU(1, 1), nullptr, 0, &props, &readback));
+            check(ready, "create thumbnail recovery render and readback targets");
+            if (!ready) return false;
+            context->SetTarget(target.get());
+            const std::wstring path = LR"(C:\fixtures\a.png)";
+            const auto key = cache.Key(path, 256, 7, 42) + L":thumbnail";
+            const auto other_key = cache.Key(path, 128, 7, 42) + L":thumbnail";
+            req = request();
+            cache.pending_.erase(req.key);
+            req.path = path; req.key = key; req.identity = cache.Key(path, 0, 7, 42);
+            req.kind = ipc::PreviewRequestKind::Thumbnail; req.pixels = 256;
+            req.modified = 7; req.size = 42; req.failure_attempts = 2;
+            ThumbnailCache::Pending pending;
+            pending.id = req.id; pending.identity = req.identity;
+            pending.interests[0] = {true, false, 0, cache.consumers_[0].epoch};
+            cache.pending_[key] = pending;
+            cache.StoreResult(req, failure());
+            HRESULT draw_result = E_FAIL;
+            const auto draw = [&] {
+                context->BeginDraw();
+                context->Clear(D2D1::ColorF(0, 0.0f));
+                const auto result = cache.Draw(context.get(), D2D1::RectF(0, 0, 1, 1), path, 0, 256, 1, 7, 42);
+                draw_result = context->EndDraw();
+                return result;
+            };
+            check(draw() == PreviewDrawResult::Failed && cache.queue_.empty(),
+                "exhausted transient failure keeps a cooldown instead of retrying every paint");
+            cache.items_.at(key).retry_after = 0;
+            ThumbnailCache::Item alternate;
+            alternate.failed = true;
+            cache.lru_.push_back(other_key);
+            alternate.lru_position = std::prev(cache.lru_.end());
+            cache.items_.emplace(other_key, std::move(alternate));
+            check(draw() == PreviewDrawResult::Pending && cache.queue_.size() == 1 &&
+                cache.queue_.front().key == key && cache.queue_.front().failure_attempts == 0 &&
+                !cache.items_.contains(key) && cache.items_.contains(other_key),
+                "expired transient failure requests the original icon size without changing views or restarting");
+            if (cache.queue_.empty()) return false;
+            check(draw() == PreviewDrawResult::Pending && cache.queue_.size() == 1,
+                "repeated redraws deduplicate the recovery request");
+            req = cache.queue_.front(); cache.queue_.clear();
+            ThumbnailCache::Item recovered;
+            recovered.kind = ipc::PreviewContentKind::Bitmap;
+            recovered.w = recovered.h = 1; recovered.stride = 4;
+            recovered.pixels = {255, 0, 0, 255}; recovered.cost = 4;
+            check(cache.StoreResult(req, std::move(recovered)) && draw() == PreviewDrawResult::Bitmap &&
+                SUCCEEDED(draw_result) && cache.pending_.empty(),
+                "original icon size draws the recovered replacement thumbnail");
+            D2D1_MAPPED_RECT mapped{};
+            bool blue = SUCCEEDED(readback->CopyFromBitmap(nullptr, target.get(), nullptr)) &&
+                SUCCEEDED(readback->Map(D2D1_MAP_OPTIONS_READ, &mapped));
+            if (blue) {
+                blue = mapped.bits[0] == 255 && mapped.bits[1] == 0 && mapped.bits[2] == 0 && mapped.bits[3] == 255;
+                readback->Unmap();
+            }
+            check(blue, "recovered thumbnail renders replacement pixels instead of a fallback icon");
+            cache.Reset();
+        }
         return ok;
     }
     static bool Run() {

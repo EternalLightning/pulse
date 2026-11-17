@@ -9,6 +9,7 @@
 // the wire) and by the Pulse.exe self-test (the HMENU walk itself is host-only,
 // but the filtering rules are pure and asserted here). Header-only on purpose.
 #pragma once
+#include "../common/localization.h"
 #include <cwctype>
 #include <string>
 #include <string_view>
@@ -271,8 +272,8 @@ inline bool IsOpenWithMruText(std::wstring_view text) {
 }
 
 inline const wchar_t* CompressCatalogKey() { return L"v:compress-to"; }
-inline const wchar_t* CompressCatalogText() { return L"压缩为…"; }
-inline const wchar_t* CompressFlyoutText() { return L"压缩"; }
+inline const wchar_t* CompressCatalogText() { return l10n::Get(l10n::StringId::CompressCatalog).c_str(); }
+inline const wchar_t* CompressFlyoutText() { return l10n::Get(l10n::StringId::CompressFlyout).c_str(); }
 
 inline std::wstring HandlerCatalogKey(std::wstring_view clsid) {
     return L"h:" + ToLowerVerb(clsid);

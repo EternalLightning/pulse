@@ -14,6 +14,22 @@
 #include <mutex>
 #include <thread>
 
+namespace {
+bool MakeJunction(const std::wstring& link, const std::wstring& target) {
+    std::wstring command = L"cmd.exe /d /c mklink /J \"" + link + L"\" \"" + target + L"\"";
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION created{};
+    if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
+            CREATE_NO_WINDOW, nullptr, nullptr, &startup, &created)) return false;
+    WaitForSingleObject(created.hProcess, 8000);
+    DWORD code = 1;
+    GetExitCodeProcess(created.hProcess, &code);
+    CloseHandle(created.hThread);
+    CloseHandle(created.hProcess);
+    return code == 0;
+}
+}
+
 int main() {
     using namespace pulse::app;
     namespace fs = std::filesystem;
@@ -69,12 +85,22 @@ int main() {
         sizes.Stop(); SetFileAttributesW(offline.c_str(), FILE_ATTRIBUTE_DIRECTORY);
     } else std::cout << "[SKIP] offline attribute unavailable, error=" << GetLastError() << '\n';
     const auto link = root / L"nested" / L"linked";
-    if (CreateSymbolicLinkW(link.c_str(), offline.c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+    if (CreateSymbolicLinkW(link.c_str(), offline.c_str(), SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) ||
+        MakeJunction(link.wstring(), offline.wstring())) {
         FolderSizes sizes; sizes.SetIndexEnabled(false); sizes.Sync({{nested}, {link.wstring()}}, {});
         check(wait([&] { return sizes.Get(nested).state == FolderSizeState::Partial; }) && sizes.Get(nested).bytes == 11234, "reparse child remains a leaf and marks parent partial");
         check(wait([&] { return sizes.Get(link.wstring()).state == FolderSizeState::Unavailable; }), "reparse root remains unavailable");
         sizes.Stop(); RemoveDirectoryW(link.c_str());
-    } else std::cout << "[SKIP] symbolic-link creation unavailable, error=" << GetLastError() << '\n';
+    } else std::cout << "[SKIP] directory reparse fixture unavailable, error=" << GetLastError() << '\n';
+    const auto file_link = root / L"nested" / L"linked-file.bin";
+    if (CreateSymbolicLinkW(file_link.c_str(), (offline / L"skipped.bin").c_str(),
+            SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+        FolderSizes sizes; sizes.SetIndexEnabled(false); sizes.Sync({{nested}}, {});
+        check(wait([&] { return sizes.Get(nested).state == FolderSizeState::Ready; }) &&
+            sizes.Get(nested).bytes == 11234 && sizes.Get(nested).files == 4,
+            "#655 file symlink does not add target bytes a second time");
+        sizes.Stop(); DeleteFileW(file_link.c_str());
+    } else std::cout << "[SKIP] file symbolic-link creation unavailable, error=" << GetLastError() << '\n';
     const auto deep_root = root / L"deep";
     fs::create_directory(deep_root);
     fs::path deep = deep_root;

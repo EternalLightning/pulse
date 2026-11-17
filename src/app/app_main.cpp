@@ -443,8 +443,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->backdropActive = ui::ApplyWindowEffect(hwnd, ui::WindowEffect::MicaAlt, s->darkMode);
 
         if (!s->compositor.Init(hwnd)) {
-            const std::wstring message = L"Failed to initialize D3D/D2D/DWrite\n\n" +
-                s->compositor.InitializationError() + L"\n\nLog: %LOCALAPPDATA%\\Pulse\\pulse_graphics.log";
+            const std::wstring message = l10n::Format(l10n::StringId::GraphicsInitializationFailedFormat, s->compositor.InitializationError().c_str());
             MessageBoxW(hwnd, message.c_str(), L"Pulse", MB_OK | MB_ICONERROR);
             return -1;
         }
@@ -483,12 +482,16 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->places.persist = false;
             s->appPrefs.persist = false;
         }
+        if (!s->core.shared_preferences_loaded) s->appPrefs.Load();
+        if (s->shot.active && l10n::IsLanguageId(s->shot.language) &&
+            s->shot.language != L"system")
+            s->appPrefs.language = s->shot.language;
+        l10n::Initialize(cs->hInstance, s->appPrefs.language);
         if (!s->core.shared_preferences_loaded) {
             s->savedSearches.Load();
             s->places.Load();
             ProbePinnedNetworks(*s);
             s->ctxMenuPrefs.Load();
-            s->appPrefs.Load();
             s->searchHistory.persist = !s->shot.active && !s->menushot && !s->isolatedTest;
             if (s->searchHistory.persist) s->searchHistory.Load();
             s->core.shared_preferences_loaded = true;
@@ -504,10 +507,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             app::DuplicateScanSession::NormalizeDriveRoot(s->appPrefs.duplicate_scan_drive);
         s->duplicateScan.minimum_file_bytes =
             app::DuplicateScanSession::DefaultMinimumBytes(s->duplicateScan.scope);
-        if (s->shot.active && l10n::IsLanguageId(s->shot.language) &&
-            s->shot.language != L"system")
-            s->appPrefs.language = s->shot.language;
-        l10n::Initialize(cs->hInstance, s->appPrefs.language);
         ui::typography::SetTextRenderMode(static_cast<ui::typography::TextRenderMode>(s->appPrefs.text_render));
         s->compositor.UpdateTextRenderingParams(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST));
         if (s->core.global_ui_owner == hwnd) app::DeviceRegistry::Instance().Start(hwnd);
@@ -585,8 +584,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (!ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor))
                 return false;
             spec.message = l10n::Get(l10n::StringId::DiagnosticsIncludeService);
-            spec.confirm_text = l10n::Pick(L"否", L"No");
-            spec.alternate_text = l10n::Pick(L"是", L"Yes");
+            spec.confirm_text = l10n::Get(l10n::StringId::No).c_str();
+            spec.alternate_text = l10n::Get(l10n::StringId::Yes).c_str();
             spec.alternate_selected = &include_service;
             spec.cancel_is_default = false;
             if (!ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor)) return false;
@@ -634,7 +633,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         ApplyGlobalSearchSettings(*s);
 
         if (!s->worker.Start([s](app::WorkResult res) { PostWorkerResult(*s, std::move(res)); })) {
-            MessageBoxW(hwnd, L"Pulse could not start its directory worker pool.", L"Pulse",
+            MessageBoxW(hwnd, l10n::Get(l10n::StringId::DirectoryWorkerStartFailed).c_str(), L"Pulse",
                        MB_OK | MB_ICONERROR);
             return -1;
         }
@@ -1107,6 +1106,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_SHOWWINDOW:
+        // Hidden owners stop painting, so unload the provider here.
+        if (s && !wParam) s->renderer.NotifyPreviewOwnerHidden();
         // Sent before the window becomes visible; restore full rate right away.
         if (s && wParam && !IsIconic(hwnd)) SyncUiScheduling(*s);
         break;
@@ -1245,8 +1246,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                     ui::ConfirmDialogSpec spec;
                     spec.title = l10n::Get(l10n::StringId::RecoveryTitle);
                     spec.message = std::move(prompt);
-                    spec.confirm_text = l10n::Pick(L"是", L"Yes");
-                    spec.cancel_text = l10n::Pick(L"否", L"No");
+                    spec.confirm_text = l10n::Get(l10n::StringId::Yes).c_str();
+                    spec.cancel_text = l10n::Get(l10n::StringId::No).c_str();
                     spec.cancel_is_default = true;
                     if (ui::ShowConfirmDialog(hwnd, spec, s->darkMode, s->accentColor))
                         s->ops.RetryRecovery();
@@ -2504,10 +2505,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
             state.single_instance.ForwardOpenPath(state.open_path);
         if (!forwarded) {
             l10n::Initialize(hInstance, L"system");
-            MessageBoxW(nullptr, l10n::Pick(
-                L"Pulse 已在运行，但未能接收本次请求。\n\n请检查现有 Pulse 窗口后重试。",
-                L"Pulse is already running but could not accept this request.\n\n"
-                L"Please check the existing Pulse window and try again."),
+            MessageBoxW(nullptr, l10n::Get(l10n::StringId::InstanceRequestFailed).c_str(),
                 L"Pulse", MB_OK | MB_ICONERROR);
         }
         OleUninitialize();

@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "content_sort_sql.h"
 #include "content_config_storage.h"
 #include "content_task_search.h"
@@ -952,7 +953,7 @@ struct ContentIndex::Impl {
             cv.wait_for(lock,std::chrono::milliseconds(250),[&]{return stopping || config_changed || feed_ready;});
             if(!feed_ready) {
                 dirty=true;status.indexing=false;status.pending_files=1;status.error=0;
-                status.coverage=L"Waiting for the shared file index";return;
+                status.coverage=l10n::Get(l10n::StringId::ContentWaitingSharedIndex).c_str();return;
             }
             source_epoch=feed_epoch;status.indexing=true;status.pending_files=1;status.root_status.clear();
             for(const auto& root:c.roots) {ContentIndexRootStatus state;state.path=root.path;state.state=ContentIndexRootStatus::State::Scanning;state.indexing=true;status.root_status.push_back(std::move(state));}
@@ -1054,7 +1055,7 @@ struct ContentIndex::Impl {
                 : completed[i] ? ContentIndexRootStatus::State::Ready : ContentIndexRootStatus::State::Waiting;
         }
         UpdateCounts(db);
-        {std::lock_guard lock(mu);status.indexing=false;status.pending_files=changes.size()+retries.size();status.current_root.clear();status.coverage=L"Shared file index";}
+        {std::lock_guard lock(mu);status.indexing=false;status.pending_files=changes.size()+retries.size();status.current_root.clear();status.coverage=l10n::Get(l10n::StringId::ContentSharedIndex).c_str();}
         cv.notify_all();
     }
     void Watch(const ContentIndexConfig& c) {

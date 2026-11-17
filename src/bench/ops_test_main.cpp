@@ -10,6 +10,7 @@
 // bench_data/opstest (created/cleaned by this test). Prints one PASS/FAIL
 // line per check; exit code 0 iff all checks pass.
 #include "../ops/ops_manager.h"
+#include "../common/localization.h"
 #include "../ops/delete_operation.h"
 #include "../ops/clipboard.h"
 #include "../ops/drive_label_backend.h"
@@ -1978,6 +1979,7 @@ int RunOpsTests(int argc, wchar_t** argv) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    pulse::l10n::Initialize(nullptr, L"zh-CN");
     try { return RunOpsTests(argc, argv); }
     catch (const OperationFixtureAborted&) {
         g_ops.CancelCurrent();

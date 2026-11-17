@@ -4,7 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #pragma code_page(65001)
-#include "../common/strings.rcinc"
+#include "../common/strings.rc"
 
 #include "../common/resource_ids.h"
 IDR_FILES_RENAME_SVG RCDATA "../../assets/files_toolbar/rename.svg"

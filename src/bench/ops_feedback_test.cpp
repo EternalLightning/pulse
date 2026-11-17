@@ -441,6 +441,7 @@ int NoNativeShell(bool expect_refusal = false) {
 }
 }
 int wmain(int argc, wchar_t** argv) {
+    pulse::l10n::Initialize(nullptr, L"zh-CN");
     setvbuf(stdout, nullptr, _IONBF, 0);
     if (argc == 2 && std::wstring(argv[1]) == L"--manual-restore") return ManualRestoreFixtures();
     if (argc == 2 && std::wstring(argv[1]) == L"--operation-labels") return OperationLabelFixtures();

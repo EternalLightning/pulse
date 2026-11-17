@@ -15,7 +15,7 @@ namespace {
 
 constexpr UINT kFirstString = IDS_SETTINGS;
 // Must stay on the highest allocated string id, otherwise Get() returns empty.
-constexpr UINT kLastString = IDS_CLEAR_FILTER;
+constexpr UINT kLastString = IDS_LOCALIZATION_LAST;
 static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstString &&
               static_cast<UINT>(StringId::ChangeDisabled) <= kLastString &&
               static_cast<UINT>(StringId::FolderSortMixed) <= kLastString &&
@@ -47,19 +47,7 @@ std::array<std::array<std::wstring, kLastString - kFirstString + 1>, 2> g_cache;
 std::array<std::array<bool, kLastString - kFirstString + 1>, 2> g_loaded{};
 const std::wstring g_empty;
 
-const std::wstring& RuntimeMessage(UINT id, Language language) {
-    switch (id) {
-#define PULSE_LOCALIZED_MESSAGE(message_id, zh, en) \
-    case message_id: { \
-        static const std::wstring chinese = L##zh; \
-        static const std::wstring english = L##en; \
-        return language == Language::ZhCN ? chinese : english; \
-    }
-#include "runtime_messages.inc"
-#undef PULSE_LOCALIZED_MESSAGE
-    default: return g_empty;
-    }
-}
+#include "runtime_messages.generated.h"
 
 Language SystemLanguage() noexcept {
     const LANGID language = GetUserDefaultUILanguage();

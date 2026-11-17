@@ -61,12 +61,12 @@ ui::ChangeBadge Badge(const index::ChangeSummary& summary, int days) {
     badge.status = summary.last_change < app::ChangeLocalMidnight(app::ChangeNow()) ? 1 : 0;
     if (summary.count && summary.last_change >= app::ChangeSince(days, app::ChangeNow()))
         badge.label = AgeText(summary.last_change);
-    badge.tooltip = DaysText(days) + L" · " + Text(I::ChangeIncludesChildren);
+    badge.tooltip = DaysText(days) + L"  " + Text(I::ChangeIncludesChildren);
     if (summary.last_change) badge.tooltip += L"\n" + format::LocalFileTime(app::ChangeFileTime(summary.last_change));
     std::wstring counts;
     for (uint32_t i = 0; i < 6; ++i) {
         if (!summary.counts[i]) continue;
-        if (!counts.empty()) counts += L" · ";
+        if (!counts.empty()) counts += L"  ";
         counts += KindText(i) + L" " + std::to_wstring(summary.counts[i]);
     }
     if (!counts.empty()) badge.tooltip += L"\n" + counts;
@@ -186,7 +186,7 @@ bool TickChangeTracking(AppState& s) {
 
 void LoadChangeView(AppState& s, app::Tab& tab, const std::wstring& root, bool append, bool refresh) {
     const auto slash = root.find_last_of(L"\\/");
-    tab.virtual_title = Text(I::ChangeTitle) + L" · " + root.substr(slash == std::wstring::npos ? 0 : slash + 1);
+    tab.virtual_title = Text(I::ChangeTitle) + L" (" + root.substr(slash == std::wstring::npos ? 0 : slash + 1) + L")";
     tab.view_mode = ui::ViewMode::Details;
     tab.SetBannerTitle(app::BannerType::Other, Text(I::ChangeTitle));
     tab.banner_message = Text(I::ChangeScope);

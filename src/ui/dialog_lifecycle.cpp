@@ -19,6 +19,7 @@ namespace pulse::ui {
 namespace {
 constexpr wchar_t kDevice[] = L"Pulse.DialogComposition.Device";
 constexpr wchar_t kVisual[] = L"Pulse.DialogComposition.Visual";
+constexpr wchar_t kEffect[] = L"Pulse.DialogComposition.Effect";
 constexpr wchar_t kFading[] = L"Pulse.DialogFading";
 constexpr wchar_t kFadeState[] = L"Pulse.DialogFadeState";
 constexpr wchar_t kClosing[] = L"Pulse.DialogClosing";
@@ -149,6 +150,9 @@ struct FadeState {
     Microsoft::WRL::ComPtr<IDCompositionDevice> device;
     Microsoft::WRL::ComPtr<IDCompositionVisual> visual;
     Microsoft::WRL::ComPtr<IDCompositionEffectGroup> effect;
+    bool shared_effect = false;
+    struct ChildSurface { HWND window; COLORREF key; BYTE alpha; DWORD flags; };
+    std::vector<ChildSurface> children;
     SurfaceFadeScope surface;
 
     FadeState(HWND hwnd, HWND overlay) : window(hwnd), dim(overlay),
@@ -156,12 +160,29 @@ struct FadeState {
         device(reinterpret_cast<IDCompositionDevice*>(GetPropW(hwnd, kDevice))),
         visual(reinterpret_cast<IDCompositionVisual*>(GetPropW(hwnd, kVisual))),
         surface(hwnd, device && visual) {
+        effect = reinterpret_cast<IDCompositionEffectGroup*>(GetPropW(hwnd, kEffect));
+        shared_effect = effect != nullptr;
+        if (device && visual) EnumChildWindows(hwnd, [](HWND child, LPARAM data) -> BOOL {
+            ChildSurface surface{child, 0, 255, 0};
+            if ((GetWindowLongPtrW(child, GWL_STYLE) & WS_VISIBLE) &&
+                (GetWindowLongPtrW(child, GWL_EXSTYLE) & WS_EX_LAYERED) &&
+                GetLayeredWindowAttributes(child, &surface.key, &surface.alpha, &surface.flags))
+                reinterpret_cast<FadeState*>(data)->children.push_back(surface);
+            return TRUE;
+        }, reinterpret_cast<LPARAM>(this));
         if (original_style & WS_EX_LAYERED)
             GetLayeredWindowAttributes(hwnd, &original_key, &original_alpha, &original_flags);
     }
     ~FadeState() {
+        RemovePropW(window, L"Pulse.DialogChildOpacity");
+        for (const auto& child : children)
+            if (IsWindow(child.window)) {
+                SetLayeredWindowAttributes(child.window, child.key, child.alpha, child.flags);
+                SendMessageW(child.window, DialogEditFadeMessage(), FALSE, 0);
+            }
         if (effect) {
-            visual->SetEffect(nullptr);
+            if (shared_effect) effect->SetOpacity(1.0f);
+            else visual->SetEffect(nullptr);
             device->Commit();
         } else if (IsWindow(window)) {
             if (original_style & WS_EX_LAYERED)
@@ -172,26 +193,33 @@ struct FadeState {
             }
         }
     }
-    bool Prepare(float from, float to, float seconds) {
+    bool Prepare(float from) {
         if (device && visual) {
-            Microsoft::WRL::ComPtr<IDCompositionAnimation> animation;
+            for (const auto& child : children) SendMessageW(child.window, DialogEditFadeMessage(), TRUE, 0);
             return (effect || SUCCEEDED(device->CreateEffectGroup(&effect))) &&
-                SUCCEEDED(device->CreateAnimation(&animation)) &&
-                SUCCEEDED(animation->AddCubic(0.0, from, 0.0f,
-                    3.0f * (to - from) / (seconds * seconds),
-                    -2.0f * (to - from) / (seconds * seconds * seconds))) &&
-                SUCCEEDED(animation->End(seconds, to)) &&
-                SUCCEEDED(effect->SetOpacity(animation.Get())) &&
-                SUCCEEDED(visual->SetEffect(effect.Get())) && SUCCEEDED(device->Commit());
+                SUCCEEDED(visual->SetEffect(effect.Get())) && SetOpacity(from);
         }
         if (original_style & WS_EX_NOREDIRECTIONBITMAP) return false;
         const LONG_PTR current_style = GetWindowLongPtrW(window, GWL_EXSTYLE);
         SetWindowLongPtrW(window, GWL_EXSTYLE, current_style | WS_EX_LAYERED);
         return SetOpacity(from);
     }
+    void SetChildOpacity(float opacity) {
+        const auto alpha = static_cast<BYTE>(std::lround(opacity * 255.0f));
+        SetPropW(window, L"Pulse.DialogChildOpacity", reinterpret_cast<HANDLE>(static_cast<ULONG_PTR>(alpha) + 1));
+        for (const auto& child : children)
+            if (IsWindow(child.window)) SetLayeredWindowAttributes(child.window, child.key,
+                GetPropW(child.window, L"Pulse.DialogNativeEditSnapshot") ? 0 :
+                    static_cast<BYTE>((child.alpha * alpha + 127) / 255), child.flags | LWA_ALPHA);
+    }
     bool SetOpacity(float opacity) {
         SetDimOpacity(dim, opacity);
-        return effect || SetLayeredWindowAttributes(window, original_key,
+        if (effect) {
+            // The content, composed editors and native fallback children use the same frame clock.
+            SetChildOpacity(opacity);
+            return SUCCEEDED(effect->SetOpacity(opacity)) && SUCCEEDED(device->Commit());
+        }
+        return SetLayeredWindowAttributes(window, original_key,
             static_cast<BYTE>(std::lround(opacity * original_alpha)), original_flags | LWA_ALPHA);
     }
 };
@@ -242,7 +270,7 @@ void ShowFade(HWND window, int show_command) {
     if (!AnimationsEnabled()) { show_immediately(); return; }
     auto* state = new (std::nothrow) FadeState(window, dim);
     if (!state) { show_immediately(); return; }
-    const bool ready = state->Prepare(0.0f, 1.0f, kFadeSeconds);
+    const bool ready = state->Prepare(0.0f);
     if (!ready || !SetPropW(window, kFadeState, state)) {
         delete state;
         show_immediately();
@@ -280,7 +308,7 @@ std::unique_ptr<FadeState> FadeBeforeHide(HWND window, HWND dim) {
     if (!state) return state;
     state->dim = dim;
     const float seconds = kFadeSeconds * from;
-    if (!state->Prepare(from, 0.0f, seconds)) return state;
+    if (!state->Prepare(from)) return state;
     const uint64_t start = AnimationTimeMs();
     // Callers release their compositor immediately after hiding. Keep its references
     // and the final transparent frame alive until the entire owned tree is hidden.
@@ -306,15 +334,19 @@ std::unique_ptr<FadeState> FadeBeforeHide(HWND window, HWND dim) {
 
 }
 
-void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual) {
+void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual,
+                           IDCompositionEffectGroup* effect) {
     if (!window) return;
     CancelFade(window);
     if (device && visual) {
         SetPropW(window, kDevice, device);
         SetPropW(window, kVisual, visual);
+        if (effect) SetPropW(window, kEffect, effect);
+        else RemovePropW(window, kEffect);
     } else {
         RemovePropW(window, kDevice);
         RemovePropW(window, kVisual);
+        RemovePropW(window, kEffect);
     }
 }
 

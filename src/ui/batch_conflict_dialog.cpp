@@ -162,8 +162,8 @@ std::wstring BatchConflictDialog::Metadata(const ops::ConflictRowInfo& row, bool
     const bool directory = source ? row.source_is_directory : row.destination_is_directory;
     const bool reparse = source ? row.source_is_reparse : row.destination_is_reparse;
     std::wstring value = directory ? labels_.folder : format::ByteSize(source ? row.source_size : row.destination_size);
-    if (reparse) value += L" · " + labels_.reparse;
-    value += L" · " + format::LocalFileTime(source ? row.source_modified : row.destination_modified, labels_.unknown.c_str());
+    if (reparse) value += L"  " + labels_.reparse;
+    value += L"  " + format::LocalFileTime(source ? row.source_modified : row.destination_modified, labels_.unknown.c_str());
     return value;
 }
 

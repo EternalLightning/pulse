@@ -404,7 +404,7 @@ MainRenderer::ColumnAutoWidths MainRenderer::AutoColumnWidths() const {
             StringId::TypeApplication, StringId::Unavailable};
         const float chip = TypeChipWidthDip(L"XLSX");
         for (StringId id : kinds) type = std::max(type, measure(fmt, pulse::l10n::Get(id)) + chip);
-        type = std::max(type, measure(fmt, L"AutoCAD " + pulse::l10n::Get(StringId::TypeFile)) + chip);
+        type = std::max(type, measure(fmt, pulse::l10n::Get(StringId::TypeAutocadFile)) + chip);
         float size = std::max(header_w(StringId::ColumnSize), measure(fmt, L"1023.9") + kSizeUnitDip);
         out.date = std::clamp(date + pad, 72.0f, 176.0f);
         out.type = std::clamp(type + pad, 64.0f, 196.0f);
@@ -2152,9 +2152,9 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             bool manual_size = false;
             std::wstring meta = !e.snippet.empty() ? e.snippet : e.type_text;
             if (e.snippet.empty() && !e.size_text.empty())
-                meta += (meta.empty() ? L"" : L" \u00B7 ") + e.size_text;
+                meta += (meta.empty() ? L"" : L"  ") + e.size_text;
             if (e.snippet.empty() && vm.view_mode == ViewMode::Content && !e.date_text.empty())
-                meta += (meta.empty() ? L"" : L" \u00B7 ") + e.date_text;
+                meta += (meta.empty() ? L"" : L"  ") + e.date_text;
             if (e.is_dir) {
                 const auto size = vm.folder_size_labels.find(src);
                 if (size != vm.folder_size_labels.end()) {

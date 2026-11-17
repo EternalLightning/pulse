@@ -25,7 +25,7 @@ public:
                     IDCompositionEffectGroup* effect);
     ~EditComposition();
     bool Available() const;
-    bool Present(HWND edit, ID2D1Bitmap1* bitmap);
+    bool Present(HWND edit, ID2D1Bitmap1* bitmap, bool allow_hidden = false);
     void Synchronize(HWND edit);
     void Remove(HWND edit);
 private:

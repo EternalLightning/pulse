@@ -96,9 +96,9 @@ void ActivatePreview(AppState& state, const H& hit) {
     std::vector<ui::FluentMenuItem> items;
     if (hit.region == H::SettingsToggle) {
         items.push_back({}); items.back().command = 1;
-        items.back().text = l10n::Pick(L"上移", L"Move up");
+        items.back().text = l10n::Get(l10n::StringId::MoveUp).c_str();
         items.push_back({}); items.back().command = 2;
-        items.back().text = l10n::Pick(L"下移", L"Move down");
+        items.back().text = l10n::Get(l10n::StringId::MoveDown).c_str();
     } else {
         const auto view = state.settings.SystemCtx().View();
         const int index = hit.index - ui::kSysCtxPreviewBase;
@@ -109,10 +109,10 @@ void ActivatePreview(AppState& state, const H& hit) {
             if (!item.movable && zone != ui::kSysCtxZoneDefault && zone != ui::kSysCtxZoneHidden) continue;
             ui::FluentMenuItem action;
             action.command = zone + 1;
-            action.text = zone == ui::kSysCtxZoneTop ? l10n::Pick(L"置于顶部", L"Move to top")
-                : zone == ui::kSysCtxZoneBottom ? l10n::Pick(L"置于底部", L"Move to bottom")
-                : zone == ui::kSysCtxZoneHidden ? l10n::Pick(L"隐藏", L"Hide")
-                : l10n::Pick(L"默认位置", L"Default position");
+            action.text = zone == ui::kSysCtxZoneTop ? l10n::Get(l10n::StringId::ContextMoveTop).c_str()
+                : zone == ui::kSysCtxZoneBottom ? l10n::Get(l10n::StringId::ContextMoveBottom).c_str()
+                : zone == ui::kSysCtxZoneHidden ? l10n::Get(l10n::StringId::Hidden).c_str()
+                : l10n::Get(l10n::StringId::ContextDefaultPosition).c_str();
             items.push_back(std::move(action));
         }
     }

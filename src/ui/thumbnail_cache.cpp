@@ -15,6 +15,7 @@ namespace {
 std::atomic<uint32_t> g_preview_cache_sequence{1};
 constexpr uint32_t kMaxFailureAttempts = 3;
 constexpr ULONGLONG kFailureRetryDelayMs = 2000;
+constexpr ULONGLONG kFailureCacheTtlMs = 10000;
 constexpr size_t kCacheBudget = 16ull * 1024ull * 1024ull;
 }
 
@@ -429,7 +430,14 @@ PreviewDrawResult ThumbnailCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F
                 Trim();
                 return PreviewDrawResult::Bitmap;
             }
-            if (item.failed) return PreviewDrawResult::Failed;
+            if (item.failed) {
+                if (!item.retryable || pending_.contains(key) || GetTickCount64() < item.retry_after)
+                    return PreviewDrawResult::Failed;
+                // A temporary failure must not poison this icon size for the rest of the session.
+                SetCacheBytes(cache_bytes_ - item.cost);
+                lru_.erase(item.lru_position);
+                items_.erase(it);
+            }
         }
         queue_request();
     }
@@ -492,6 +500,7 @@ bool ThumbnailCache::StoreResult(const Request& req, Item result) {
     if (!notify[0] && !notify[1]) return false;
 
     result.failure_attempts = result.failed ? req.failure_attempts + 1 : 0;
+    if (result.failed && result.retryable) result.retry_after = GetTickCount64() + kFailureCacheTtlMs;
     const bool retry = result.failed && result.retryable &&
         result.failure_attempts < kMaxFailureAttempts;
     const uint32_t attempts = result.failure_attempts;

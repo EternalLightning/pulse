@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "delete_service.h"
 
 #include <limits>
@@ -17,7 +18,7 @@ DeletePreparation DeleteService::Prepare(DeletePlan plan) {
     plan_.reset();
 
     if (plan.targets.empty()) {
-        return { DeleteDecision::Blocked, 0, L"The deletion plan has no targets." };
+        return { DeleteDecision::Blocked, 0, l10n::Get(l10n::StringId::DeletePlanNoTargets).c_str() };
     }
 
     bool has_unknown = false;
@@ -36,7 +37,7 @@ DeletePreparation DeleteService::Prepare(DeletePlan plan) {
         default:
             if (!has_unknown) {
                 unknown_reason = target.reason.empty()
-                    ? L"Recyclability is not proven for every target."
+                    ? l10n::Get(l10n::StringId::DeleteRecyclabilityUnknown).c_str()
                     : target.reason;
             }
             has_unknown = true;
@@ -44,14 +45,14 @@ DeletePreparation DeleteService::Prepare(DeletePlan plan) {
         }
 
         if (target.path.empty() && invalid_reason.empty()) {
-            invalid_reason = L"A deletion target has no logical path.";
+            invalid_reason = l10n::Get(l10n::StringId::DeleteLogicalPathMissing).c_str();
         }
         if (target.physical_paths.empty() && invalid_reason.empty()) {
-            invalid_reason = L"A deletion target has no physical paths.";
+            invalid_reason = l10n::Get(l10n::StringId::DeletePhysicalPathsMissing).c_str();
         }
         for (const auto& path : target.physical_paths) {
             if (path.empty() && invalid_reason.empty()) {
-                invalid_reason = L"A deletion target has an empty physical path.";
+                invalid_reason = l10n::Get(l10n::StringId::DeletePhysicalPathEmpty).c_str();
             }
         }
     }
@@ -64,7 +65,7 @@ DeletePreparation DeleteService::Prepare(DeletePlan plan) {
         return { DeleteDecision::Blocked, 0, std::move(invalid_reason) };
     }
     if (last_token_ == std::numeric_limits<uint64_t>::max()) {
-        return { DeleteDecision::Blocked, 0, L"Deletion admission tokens are exhausted." };
+        return { DeleteDecision::Blocked, 0, l10n::Get(l10n::StringId::DeleteAdmissionExhausted).c_str() };
     }
 
     // Only a fully validated batch becomes the retained snapshot. Never wrap a token.

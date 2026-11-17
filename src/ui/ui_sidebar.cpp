@@ -669,7 +669,7 @@ void MainRenderer::DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& pa
         else if (card.metadata_unavailable) sub = l10n::Get(l10n::StringId::Unavailable);
         else {
             if (!card.is_dir && card.size > 0)
-                sub = pulse::format::ByteSize(card.size, true) + L" \xB7 ";
+                sub = pulse::format::ByteSize(card.size, true) + L"  ";
             sub += FormatListType(card.name, card.is_dir);
         }
         DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, subFmt, color(subColor), sub, tx, ty, tw, lineSub);

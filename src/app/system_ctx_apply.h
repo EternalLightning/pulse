@@ -24,8 +24,7 @@ inline bool ApplySystemContextChanges(app::SystemCtxModel& model, app::ContextMe
         for (const auto& [key, hidden] : pulse.hidden) staged.SetItemEnabled(key, !hidden);
         for (const auto& clsid : pulse.skipped) staged.SetComDisabled(ipc::HandlerCatalogKey(clsid), true);
         if (!(save ? save(staged) : staged.Save())) {
-            model.ReportError(l10n::Pick(L"Pulse 菜单设置保存失败，待应用更改已保留；未开始写入注册表。",
-                                         L"Could not save Pulse menu settings. Pending changes are kept; registry changes have not started."));
+            model.ReportError(l10n::Get(l10n::StringId::SysCtxPulseSettingsSaveFailed).c_str());
             return false;
         }
         prefs = std::move(staged);

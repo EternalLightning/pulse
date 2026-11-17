@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "index_shard.h"
 #include "../common/json_utils.h"
 #include <algorithm>
@@ -134,7 +135,7 @@ bool LoadShardManifest(const std::wstring& path, ShardManifest& out, std::wstrin
         const auto failure = OpenFailureStatus();
         SetStatus(status, failure);
         if (failure == ShardReadStatus::Missing) return true;
-        SetError(error, L"无法读取分片清单");
+        SetError(error, l10n::Get(l10n::StringId::IndexManifestReadFailed).c_str());
         return false;
     }
     LARGE_INTEGER size{};
@@ -143,7 +144,7 @@ bool LoadShardManifest(const std::wstring& path, ShardManifest& out, std::wstrin
     if (!GetFileSizeEx(h, &size)) {
         CloseHandle(h);
         SetStatus(status, ShardReadStatus::IoError);
-        SetError(error, L"无法读取分片清单大小");
+        SetError(error, l10n::Get(l10n::StringId::IndexManifestSizeReadFailed).c_str());
         return false;
     }
     if (size.QuadPart > 0 &&
@@ -153,7 +154,7 @@ bool LoadShardManifest(const std::wstring& path, ShardManifest& out, std::wstrin
         if (!ReadFile(h, json.data(), static_cast<DWORD>(size.QuadPart), &bytes, nullptr)) {
             CloseHandle(h);
             SetStatus(status, ShardReadStatus::IoError);
-            SetError(error, L"无法读取分片清单内容");
+            SetError(error, l10n::Get(l10n::StringId::IndexManifestContentsReadFailed).c_str());
             return false;
         }
         if (bytes != static_cast<DWORD>(size.QuadPart)) json.clear();
@@ -164,11 +165,11 @@ bool LoadShardManifest(const std::wstring& path, ShardManifest& out, std::wstrin
     uint64_t version = 0, active_slot = 0, previous_slot = 0;
     if (first == std::wstring::npos || json[first] != L'{' || json[last] != L'}' ||
         !ReadU64(json, L"version", version) || !version) {
-        SetError(error, L"分片清单损坏"); return false;
+        SetError(error, l10n::Get(l10n::StringId::IndexManifestDamaged).c_str()); return false;
     }
     if (version > 9) {
         SetStatus(status, ShardReadStatus::Unsupported);
-        SetError(error, L"分片清单版本不受支持"); return false;
+        SetError(error, l10n::Get(l10n::StringId::IndexManifestVersionUnsupported).c_str()); return false;
     }
     out.version = static_cast<uint32_t>(version);
     if (!ReadU64(json, L"generation", out.generation) ||
@@ -178,24 +179,24 @@ bool LoadShardManifest(const std::wstring& path, ShardManifest& out, std::wstrin
         !ReadU64(json, L"previous_slot", previous_slot) || active_slot > 1 || previous_slot > 1 ||
         !ReadU64(json, L"active_bytes", out.active_bytes) ||
         !ReadU64(json, L"active_crc64", out.active_crc64)) {
-        out = {}; SetError(error, L"分片清单字段无效"); return false;
+        out = {}; SetError(error, l10n::Get(l10n::StringId::IndexManifestFieldsInvalid).c_str()); return false;
     }
     out.active_slot = static_cast<uint8_t>(active_slot);
     out.previous_slot = static_cast<uint8_t>(previous_slot);
     out.source_id = pulse::json::ExtractString(json, L"source_id", L"");
-    if (out.source_id.empty()) { out = {}; SetError(error, L"分片清单来源无效"); return false; }
+    if (out.source_id.empty()) { out = {}; SetError(error, l10n::Get(l10n::StringId::IndexManifestSourceInvalid).c_str()); return false; }
     SetStatus(status, ShardReadStatus::Valid);
     return true;
 }
 
 bool SaveShardManifest(const std::wstring& path, const ShardManifest& value, std::wstring* error) {
-    if (path.empty() || value.source_id.empty()) { SetError(error, L"分片清单参数无效"); return false; }
+    if (path.empty() || value.source_id.empty()) { SetError(error, l10n::Get(l10n::StringId::IndexManifestArgumentsInvalid).c_str()); return false; }
     const std::wstring temp = path + L".tmp";
     if (!WriteThroughFile(temp, ManifestJson(value))) {
-        SetError(error, L"无法创建分片清单临时文件"); return false;
+        SetError(error, l10n::Get(l10n::StringId::IndexManifestTempCreateFailed).c_str()); return false;
     }
     if (!MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        DeleteFileW(temp.c_str()); SetError(error, L"无法发布分片清单"); return false;
+        DeleteFileW(temp.c_str()); SetError(error, l10n::Get(l10n::StringId::IndexManifestPublishFailed).c_str()); return false;
     }
     return true;
 }
@@ -277,7 +278,7 @@ bool ResolveActiveShard(const ShardPaths& paths, ShardManifest& manifest,
         }
         if (BlocksRecovery(active_status)) { SetStatus(status, active_status); return false; }
         if (loaded.previous_slot == loaded.active_slot) {
-            SetError(error, L"分片清单未指定独立回退槽");
+            SetError(error, l10n::Get(l10n::StringId::IndexManifestFallbackMissing).c_str());
             return false;
         }
         const uint8_t fallback_slot = loaded.previous_slot;
@@ -302,7 +303,7 @@ bool ResolveActiveShard(const ShardPaths& paths, ShardManifest& manifest,
             loaded.active_crc64 = FileCrc64(fallback);
             if (!loaded.active_bytes || !loaded.active_crc64) {
                 SetStatus(status, ShardReadStatus::IoError);
-                SetError(error, L"无法完整读取回退分片，未更新分片清单");
+                SetError(error, l10n::Get(l10n::StringId::IndexFallbackIncomplete).c_str());
                 return false;
             }
             loaded.previous_slot = static_cast<uint8_t>(1 - loaded.active_slot);
@@ -319,7 +320,7 @@ bool ResolveActiveShard(const ShardPaths& paths, ShardManifest& manifest,
         SetStatus(status, active_status == ShardReadStatus::Missing && fallback_status == ShardReadStatus::Missing
             ? ShardReadStatus::Missing : ShardReadStatus::Invalid);
         // A manifest-rejected slot must not be retried without its checksum.
-        SetError(error, L"清单指定的分片及回退分片均不可用");
+        SetError(error, l10n::Get(l10n::StringId::IndexShardsUnavailable).c_str());
         return false;
     }
 
@@ -354,7 +355,7 @@ bool ResolveActiveShard(const ShardPaths& paths, ShardManifest& manifest,
     }
     if (!found) {
         SetStatus(status, all_missing ? ShardReadStatus::Missing : ShardReadStatus::Invalid);
-        if (error && error->empty()) *error = L"没有可用的 V9 分片";
+        if (error && error->empty()) *error = l10n::Get(l10n::StringId::IndexV9Unavailable).c_str();
         return false;
     }
     manifest = {};
@@ -374,7 +375,7 @@ bool PublishShardBase(const ShardPaths& paths, const std::wstring& temp_path,
                       ShardManifest& published, std::wstring* error,
                       const std::wstring& source_id) {
     if (!ValidateShardBase(temp_path)) {
-        SetError(error, L"V9 base 校验失败");
+        SetError(error, l10n::Get(l10n::StringId::IndexV9ValidationFailed).c_str());
         return false;
     }
     ShardManifest current;
@@ -382,7 +383,7 @@ bool PublishShardBase(const ShardPaths& paths, const std::wstring& temp_path,
     ShardReadStatus status;
     if (!ResolveActiveShard(paths, current, active, nullptr, &status)) {
         if (BlocksRecovery(status)) {
-            SetError(error, L"现有分片暂不可读或版本不受支持，未发布新分片");
+            SetError(error, l10n::Get(l10n::StringId::IndexShardUnreadable).c_str());
             return false;
         }
         ShardManifest existing;
@@ -390,7 +391,7 @@ bool PublishShardBase(const ShardPaths& paths, const std::wstring& temp_path,
         LoadShardManifest(paths.manifest, existing, nullptr, &manifest_status);
         if (BlocksRecovery(manifest_status) || (manifest_status == ShardReadStatus::Valid &&
             existing.previous_slot == existing.active_slot)) {
-            SetError(error, L"无法确认独立回退槽，未发布新分片");
+            SetError(error, l10n::Get(l10n::StringId::IndexFallbackUnverified).c_str());
             return false;
         }
         if (manifest_status == ShardReadStatus::Valid) current = existing;
@@ -399,7 +400,7 @@ bool PublishShardBase(const ShardPaths& paths, const std::wstring& temp_path,
     const std::wstring target_path = SlotPath(paths, target);
     if (!MoveFileExW(temp_path.c_str(), target_path.c_str(),
                      MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        SetError(error, L"无法发布 V9 base");
+        SetError(error, l10n::Get(l10n::StringId::IndexV9PublishFailed).c_str());
         return false;
     }
     ShardManifest next;
@@ -420,7 +421,7 @@ bool PublishShardBase(const ShardPaths& paths, const std::wstring& temp_path,
     }
     next.active_crc64 = FileCrc64(target_path);
     if (next.active_bytes == static_cast<uint64_t>(-1) || !next.active_crc64) {
-        SetError(error, L"无法完整读取 V9 base，未发布分片清单");
+        SetError(error, l10n::Get(l10n::StringId::IndexV9Incomplete).c_str());
         return false;
     }
     next.source_id = source_id.empty()

@@ -7,6 +7,7 @@
 #include <windows.h>
 struct IDCompositionDevice;
 struct IDCompositionVisual;
+struct IDCompositionEffectGroup;
 
 namespace pulse::ui {
 // A nested modal loop must leave thread shutdown for the outer message loop.
@@ -19,7 +20,17 @@ inline bool IsDialogSurfaceFading(HWND window) {
     return GetPropW(window, L"Pulse.DialogSurfaceFading") != nullptr;
 }
 // Composition handles are borrowed only while the window's compositor is alive.
-void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual);
+void BindDialogComposition(HWND window, IDCompositionDevice* device, IDCompositionVisual* visual,
+                           IDCompositionEffectGroup* effect = nullptr);
+inline BYTE DialogChildOpacity(HWND child, BYTE opacity) {
+    if (GetPropW(child, L"Pulse.DialogNativeEditSnapshot")) return 0;
+    const auto fade = reinterpret_cast<ULONG_PTR>(GetPropW(GetAncestor(child, GA_ROOT), L"Pulse.DialogChildOpacity"));
+    return fade ? static_cast<BYTE>((opacity * (fade - 1) + 127) / 255) : opacity;
+}
+inline UINT DialogEditFadeMessage() {
+    static const UINT message = RegisterWindowMessageW(L"Pulse.DialogEditFade");
+    return message;
+}
 // Fade-in returns immediately; closing reverses it and compositor teardown cancels it.
 void ShowDialogWithFade(HWND dialog);
 void ShowDialogWithFade(HWND dialog, int show_command);

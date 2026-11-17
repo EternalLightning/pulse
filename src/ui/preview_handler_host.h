@@ -22,6 +22,7 @@ namespace pulse::ui {
 // The overlay matches the details preview rect so Word/Excel keep their own
 // scrollbars inside the pane (Explorer behavior).
 class PreviewHandlerHost {
+    friend struct PreviewVisibilityTest;
 public:
     enum class State { Idle, Loading, Shown, Failed };
 

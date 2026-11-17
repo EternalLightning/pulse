@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "sidebar_pin_menu.h"
 #include "app_commands.h"
 #include "app_navigation.h"
@@ -36,8 +37,8 @@ bool ShowSidebarPinMenu(AppState& s, const std::wstring& path, POINT point) {
         const auto name = s.places.workspaces[static_cast<size_t>(index)].name;
         std::wstring renamed;
         if (app::PromptSettingsValue(s.hwnd,
-            l10n::Pick(L"重命名工作区", L"Rename workspace"),
-            l10n::Pick(L"工作区名称", L"Workspace name"), name, renamed, 128,
+            l10n::Get(l10n::StringId::RenameWorkspace).c_str(),
+            l10n::Get(l10n::StringId::WorkspaceName).c_str(), name, renamed, 128,
             l10n::Get(l10n::StringId::Rename), s.darkMode, s.accentColor)) {
             s.places.RenameWorkspace(target->path, renamed);
             InvalidateRect(s.hwnd, nullptr, FALSE);

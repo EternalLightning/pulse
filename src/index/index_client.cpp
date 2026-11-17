@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 // index_client.cpp — Connect to Pulse.Index (service or spawned helper).
+#include "../common/localization.h"
 #include "../common/command_line.h"
 #include "index_client.h"
 #include "persistent_index_policy.h"
@@ -36,7 +37,7 @@ void IndexClient::Start(HWND notify, UINT status_msg, UINT search_msg, std::wstr
     helper_missing_ = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        status_ = L"索引未连接";
+        status_ = l10n::Get(l10n::StringId::IndexDisconnected).c_str();
         query_status_.clear();
         scope_ready_ = false;
     }
@@ -72,7 +73,7 @@ bool IndexClient::SpawnHelper() {
     if (ServiceInstalled()) {
         {
             std::lock_guard<std::mutex> lock(mu_);
-            status_ = L"正在等待索引服务…";
+            status_ = l10n::Get(l10n::StringId::IndexWaitingService).c_str();
         }
         if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
         return false;
@@ -81,7 +82,7 @@ bool IndexClient::SpawnHelper() {
     if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) {
         helper_missing_ = true;
         std::lock_guard<std::mutex> lock(mu_);
-        status_ = L"找不到 Pulse.Index.exe";
+        status_ = l10n::Get(l10n::StringId::IndexExecutableMissing).c_str();
         return false;
     }
     std::wstring cmd = L"\"" + exe + L"\" " + std::to_wstring(GetCurrentProcessId());
@@ -210,7 +211,7 @@ void IndexClient::HandleStatus(const uint8_t* p, size_t n) {
     count_.store(count);
     uint64_t revision = 0; uint32_t version = 0;
     if (r.GetU64(revision) && r.GetU32(version) && version == 1) revision_ = revision;
-    else { std::lock_guard lock(mu_); status_ = L"索引进程版本过旧，请重启 Pulse 和索引服务以启用实时搜索"; }
+    else { std::lock_guard lock(mu_); status_ = l10n::Get(l10n::StringId::IndexProcessOutdated).c_str(); }
     if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
 }
 
@@ -222,9 +223,9 @@ void IndexClient::HandleSearch(uint32_t id, const uint8_t* p, size_t n) {
         std::lock_guard<std::mutex> lock(mu_);
         const auto reply = replies_.find(id);
         if (reply == replies_.end()) return;
-        if (sr.error == ERROR_BUSY) query_status_ = L"索引查询过载，请减少同时打开的搜索并重试";
-        else if (sr.error) query_status_ = L"索引查询失败，请重试";
-        else if (sr.incomplete) query_status_ = L"当前结果不完整：部分路径无法授权或授权检查超时，请缩小搜索范围";
+        if (sr.error == ERROR_BUSY) query_status_ = l10n::Get(l10n::StringId::IndexQueryBusy).c_str();
+        else if (sr.error) query_status_ = l10n::Get(l10n::StringId::IndexQueryFailed).c_str();
+        else if (sr.incomplete) query_status_ = l10n::Get(l10n::StringId::IndexQueryIncomplete).c_str();
         else query_status_.clear();
         TraceSearch("filename_received", sr.revision);
         results_[id] = std::move(sr);
@@ -373,7 +374,7 @@ void IndexClient::Disconnect() {
         std::lock_guard<std::mutex> lock(mu_);
         connected_ = false;
         query_status_.clear();
-        status_ = L"索引连接已断开，正在重新连接…";
+        status_ = l10n::Get(l10n::StringId::IndexReconnecting).c_str();
     }
     pending_cv_.notify_all();
     if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
@@ -386,7 +387,7 @@ void IndexClient::Worker() {
                 {
                     std::lock_guard<std::mutex> lock(mu_);
                     if (!helper_missing_)
-                        status_ = L"索引未连接";
+                        status_ = l10n::Get(l10n::StringId::IndexDisconnected).c_str();
                 }
                 for (int i = 0; i < 10 && running_; ++i) Sleep(100);
                 continue;
@@ -554,20 +555,20 @@ bool IndexClient::ConfigureIndexPathElevated(const std::wstring& path, std::wstr
     if (RunElevatedIndexCommand(ExePath(), L"--set-index-path " + pulse::QuoteWindowsArgument(path), &code)) return true;
     if (error) {
         switch (code) {
-        case ERROR_CANCELLED: *error = L"已取消索引迁移，原位置保持不变。"; break;
-        case ERROR_BUSY: *error = L"另一项索引设置正在处理，请完成后重试。"; break;
+        case ERROR_CANCELLED: *error = l10n::Get(l10n::StringId::IndexMigrationCancelled).c_str(); break;
+        case ERROR_BUSY: *error = l10n::Get(l10n::StringId::IndexSettingsBusy).c_str(); break;
         case ERROR_DISK_FULL: case ERROR_HANDLE_DISK_FULL:
-            *error = L"目标磁盘空间不足，索引未迁移。请释放空间后重试。"; break;
+            *error = l10n::Get(l10n::StringId::IndexMoveNoSpace).c_str(); break;
         case ERROR_ALREADY_EXISTS: case ERROR_FILE_EXISTS:
-            *error = L"目标位置已有另一份索引。请选择空目录，避免覆盖已有数据。"; break;
+            *error = l10n::Get(l10n::StringId::IndexMigrationTargetExists).c_str(); break;
         case ERROR_INVALID_PARAMETER:
-            *error = L"请选择独立的索引文件夹，不能与原位置互相包含，也不能使用链接目录。选择磁盘根目录时会自动使用其中的 Index 文件夹。"; break;
+            *error = l10n::Get(l10n::StringId::IndexMigrationSeparateFolder).c_str(); break;
         case ERROR_PARTIAL_COPY:
-            *error = L"索引已切换到新位置，但部分旧文件被占用，未能清理。新索引可以正常使用。"; break;
+            *error = l10n::Get(l10n::StringId::IndexMigrationOldFilesBusy).c_str(); break;
         case ERROR_SERVICE_NOT_ACTIVE: case ERROR_SERVICE_REQUEST_TIMEOUT:
-            *error = L"索引服务未能恢复。原索引文件已保留，请重新启动索引服务后重试。"; break;
+            *error = l10n::Get(l10n::StringId::IndexMigrationServiceRestoreFailed).c_str(); break;
         default:
-            *error = L"索引迁移未完成，原索引已保留。请检查目标目录的权限和磁盘连接后重试。"; break;
+            *error = l10n::Get(l10n::StringId::IndexMigrationPreserved).c_str(); break;
         }
     }
     return false;

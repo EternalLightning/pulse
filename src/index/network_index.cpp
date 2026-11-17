@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "network_index.h"
 #include "search_result_order.h"
 #include "index_transport_security.h"
@@ -99,7 +100,7 @@ std::wstring Win32Message(DWORD code) {
     FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
                        FORMAT_MESSAGE_IGNORE_INSERTS,
                    nullptr, code, 0, reinterpret_cast<wchar_t*>(&message), 0, nullptr);
-    std::wstring out = L"错误 " + std::to_wstring(code);
+    std::wstring out = l10n::Format(l10n::StringId::NetworkIndexErrorCodeFormat, code);
     if (message) {
         while (*message && iswspace(message[wcslen(message) - 1]))
             message[wcslen(message) - 1] = 0;
@@ -504,7 +505,7 @@ bool LoadNetworkRoots(std::vector<std::wstring>& roots, std::wstring* error) {
     const std::wstring path = NetworkConfigPath();
     if (path.empty()) {
         roots.clear();
-        SetError(error, L"无法定位当前用户配置目录");
+        SetError(error, l10n::Get(l10n::StringId::NetworkIndexUserDirectoryUnavailable).c_str());
         return false;
     }
     return LoadNetworkRootsFile(path, roots, error);
@@ -525,35 +526,35 @@ bool LoadNetworkRootsFile(const std::wstring& path, std::vector<std::wstring>& r
     if (status) *status = NetworkConfigLoadStatus::Invalid;
     std::wstring json;
     if (!pulse::DecodeUtf8Bytes(bytes, json)) {
-        SetError(error, L"网络索引配置不是有效的 UTF-8 文件");
+        SetError(error, l10n::Get(l10n::StringId::NetworkIndexConfigNotUtf8).c_str());
         return false;
     }
     const pulse::json::Document document(json);
     if (!document.Is(pulse::json::Kind::Object)) {
-        SetError(error, L"网络索引配置已损坏");
+        SetError(error, l10n::Get(l10n::StringId::NetworkIndexConfigDamaged).c_str());
         return false;
     }
     const auto* array = document.Find(L"roots");
     if (!array) {
         if (status) *status = NetworkConfigLoadStatus::MissingRoots;
-        SetError(error, L"网络索引配置缺少 roots 数组");
+        SetError(error, l10n::Get(l10n::StringId::NetworkIndexRootsMissing).c_str());
         return false;
     }
     const auto root_keys = std::count_if(document.Root().children.begin(),
         document.Root().children.end(), [](const auto& item) { return item.name == L"roots"; });
     if (root_keys != 1 || array->kind != pulse::json::Kind::Array) {
-        SetError(error, L"网络索引配置的 roots 必须是唯一的字符串数组");
+        SetError(error, l10n::Get(l10n::StringId::NetworkIndexRootsInvalid).c_str());
         return false;
     }
     std::vector<std::wstring> configured;
     for (const auto& item : array->children) {
         if (item.kind != pulse::json::Kind::String) {
-            SetError(error, L"网络索引配置的 roots 包含非字符串项");
+            SetError(error, l10n::Get(l10n::StringId::NetworkIndexRootNotString).c_str());
             return false;
         }
         std::wstring root = NormalizeNetworkRoot(item.text);
         if (root.empty() || item.text.find(L'\0') != std::wstring::npos) {
-            SetError(error, L"网络索引配置包含无效的 UNC 路径");
+            SetError(error, l10n::Get(l10n::StringId::NetworkIndexUncInvalid).c_str());
             return false;
         }
         if (std::none_of(configured.begin(), configured.end(), [&](const auto& existing) {
@@ -568,7 +569,7 @@ bool LoadNetworkRootsFile(const std::wstring& path, std::vector<std::wstring>& r
 bool SaveNetworkRoots(const std::vector<std::wstring>& roots, std::wstring* error) {
     const std::wstring path = NetworkConfigPath();
     if (path.empty()) {
-        SetError(error, L"无法定位当前用户配置目录");
+        SetError(error, l10n::Get(l10n::StringId::NetworkIndexUserDirectoryUnavailable).c_str());
         return false;
     }
     return SaveNetworkRootsFile(path, roots, error);
@@ -590,7 +591,7 @@ bool SaveNetworkRootsFile(const std::wstring& path, const std::vector<std::wstri
     json += L"]\n}\n";
     std::vector<uint8_t> bytes;
     if (!pulse::EncodeUtf8Bytes(json, bytes)) {
-        SetError(error, L"无法将网络索引配置编码为 UTF-8");
+        SetError(error, l10n::Get(l10n::StringId::NetworkIndexConfigEncodeFailed).c_str());
         return false;
     }
     return WriteBytesAtomic(path, bytes, error);
@@ -715,7 +716,7 @@ void NetworkIndex::RefreshConfiguration() {
         else {
             RootState root;
             root.info.path = value;
-            root.info.state = L"等待扫描";
+            root.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingScan).c_str();
             next.push_back(std::move(root));
         }
     }
@@ -750,7 +751,7 @@ void NetworkIndex::Start(HWND notify, UINT status_msg, UINT search_msg) {
             else if (second) state.shard = std::move(second);
             else state.shard = Shard::Open(ShardPath(path));
             state.info.indexed_items = state.shard ? state.shard->count : 0;
-            state.info.state = state.shard ? L"等待服务器校验" : L"等待扫描";
+            state.info.state = state.shard ? l10n::Get(l10n::StringId::NetworkIndexWaitingValidation).c_str() : l10n::Get(l10n::StringId::NetworkIndexWaitingScan).c_str();
             roots_.push_back(std::move(state));
             dirty_roots_.insert(path);
         }
@@ -794,7 +795,7 @@ std::vector<NetworkRootInfo> NetworkIndex::Roots() const {
 bool NetworkIndex::AddRoot(const std::wstring& raw, std::wstring* error) {
     const std::wstring path = NormalizeNetworkRoot(raw);
     if (path.empty()) {
-        SetError(error, L"请选择服务器共享中的文件夹（UNC 路径）");
+        SetError(error, l10n::Get(l10n::StringId::NetworkIndexChooseUnc).c_str());
         return false;
     }
     std::lock_guard<std::mutex> lock(mu_);
@@ -812,7 +813,7 @@ bool NetworkIndex::AddRoot(const std::wstring& raw, std::wstring* error) {
     if (!SaveNetworkRoots(configured, error)) return false;
     RootState state;
     state.info.path = path;
-    state.info.state = L"等待扫描";
+    state.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingScan).c_str();
     roots_.push_back(std::move(state));
     dirty_roots_.insert(path);
     ++generation_;
@@ -855,7 +856,7 @@ void NetworkIndex::Rebuild(const std::wstring& raw) {
     for (auto& root : roots_) {
         if (path.empty() || EqualPath(root.info.path, path)) {
             dirty_roots_.insert(root.info.path);
-            root.info.state = L"等待重新扫描";
+            root.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingRescan).c_str();
         }
     }
     crawl_cv_.notify_one();
@@ -877,7 +878,7 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
         for (auto& root : roots_) {
             if (!EqualPath(root.info.path, path)) continue;
             root.info.building = false;
-            root.info.state = L"等待重新扫描";
+            root.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingRescan).c_str();
             dirty_roots_.insert(root.info.path);
             break;
         }
@@ -889,7 +890,7 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
             root.info.building = true;
             root.info.watching = false;
             root.info.progress = 0;
-            root.info.state = L"正在扫描服务器文件夹";
+            root.info.state = l10n::Get(l10n::StringId::NetworkIndexScanning).c_str();
             root.info.error.clear();
             break;
         }
@@ -937,7 +938,7 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
                 for (auto& root : roots_) {
                     if (!EqualPath(root.info.path, path)) continue;
                     root.info.indexed_items = builder.Count();
-                    root.info.state = L"正在扫描 · " + std::to_wstring(builder.Count()) + L" 项";
+                    root.info.state = l10n::Format(l10n::StringId::NetworkIndexFoundCountFormat, static_cast<unsigned long long>(builder.Count()));
                     break;
                 }
                 NotifyStatus();
@@ -979,7 +980,7 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
             for (auto& root : roots_) {
                 if (!EqualPath(root.info.path, path)) continue;
                 root.info.building = false;
-                root.info.state = L"等待重新扫描";
+                root.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingRescan).c_str();
                 dirty_roots_.insert(root.info.path);
                 break;
             }
@@ -994,7 +995,7 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
                 root.shard = std::move(shard);
                 root.info.online = true;
                 root.info.indexed_items = root.shard ? root.shard->count : 0;
-                root.info.state = L"已同步 · " + std::to_wstring(root.info.indexed_items) + L" 项";
+                root.info.state = l10n::Format(l10n::StringId::NetworkIndexSyncedCountFormat, static_cast<unsigned long long>(root.info.indexed_items));
                 root.info.error.clear();
                 if (old_shard && old_shard->slot != root.shard->slot)
                     DeleteFileW(ShardPath(path, old_shard->slot).c_str());
@@ -1003,8 +1004,8 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
                 root.info.online = server_accessible && root.shard != nullptr;
                 root.info.indexed_items = root.shard ? root.shard->count : 0;
                 root.info.state = server_accessible && root.shard
-                    ? L"同步失败，继续使用原有索引"
-                    : root.shard ? L"服务器离线，索引已保留" : L"无法访问";
+                    ? l10n::Get(l10n::StringId::NetworkIndexSyncFailedPreserved).c_str()
+                    : root.shard ? l10n::Get(l10n::StringId::NetworkIndexOfflinePreserved).c_str() : l10n::Get(l10n::StringId::NetworkIndexUnavailable).c_str();
                 root.info.error = Win32Message(failure);
             }
             break;
@@ -1117,8 +1118,7 @@ void NetworkIndex::WatchLoop() {
                 for (auto& root : roots_) {
                     if (!EqualPath(root.info.path, path)) continue;
                     root.info.watching = true;
-                    root.info.state = L"实时监视 · " +
-                        std::to_wstring(root.info.indexed_items) + L" 项";
+                    root.info.state = l10n::Format(l10n::StringId::NetworkIndexWatchingCountFormat, static_cast<unsigned long long>(root.info.indexed_items));
                     break;
                 }
             }

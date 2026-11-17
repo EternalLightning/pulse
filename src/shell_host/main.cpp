@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "../common/file_operation_error.h"
 #include "host_log_line.h"
 #include "device_operations.h"
@@ -56,6 +57,7 @@
 #pragma comment(lib, "uuid.lib")
 
 using namespace pulse::ipc;
+namespace l10n = pulse::l10n;
 
 namespace {
 
@@ -201,15 +203,15 @@ std::wstring DescribeCreateError(HRESULT hr) {
     case ERROR_ACCESS_DENIED:
     case ERROR_WRITE_PROTECT:
     case ERROR_PRIVILEGE_NOT_HELD:
-        return L"没有权限在此位置新建";
+        return l10n::Get(l10n::StringId::ShellCreateAccessDenied).c_str();
     case ERROR_PATH_NOT_FOUND:
     case ERROR_FILE_NOT_FOUND:
-        return L"目标文件夹不存在";
+        return l10n::Get(l10n::StringId::ShellCreateDestinationMissing).c_str();
     case ERROR_FILE_EXISTS:
     case ERROR_ALREADY_EXISTS:
-        return L"已存在同名项目";
+        return l10n::Get(l10n::StringId::ShellCreateNameExists).c_str();
     case ERROR_INVALID_NAME:
-        return L"名称无效";
+        return l10n::Get(l10n::StringId::ShellCreateNameInvalid).c_str();
     default:
         break;
     }
@@ -223,7 +225,7 @@ std::wstring DescribeCreateError(HRESULT hr) {
         while (!text.empty() && (text.back() == L'\r' || text.back() == L'\n'))
             text.pop_back();
     }
-    return text.empty() ? L"新建失败" : text;
+    return text.empty() ? l10n::Get(l10n::StringId::ShellCreateFailed).c_str() : text;
 }
 
 // Compatibility messages use the same Shell engine as the generic operation.
@@ -271,7 +273,7 @@ void ExecuteRequest(std::unique_ptr<Request> req) {
         return;
     }
     if (req->type == REQ_DELETE_RECYCLE || req->type == REQ_REALDELETE) {
-        SendDone(req->id, E_ACCESSDENIED, false, L"Legacy deletion frame has no deletion-service authorization.");
+        SendDone(req->id, E_ACCESSDENIED, false, l10n::Get(l10n::StringId::ShellLegacyDeleteUnauthorized).c_str());
         return;
     }
     if (IsAuthorizedDeletion(req->type)) {
@@ -282,7 +284,7 @@ void ExecuteRequest(std::unique_ptr<Request> req) {
         static DeleteHostAdmission admission;
         const DeleteWirePlan authorized{req->delete_epoch, req->delete_token, req->sources, req->expected_identities};
         if (!have_epoch || !admission.Consume(authorized, epoch.QuadPart)) {
-            SendDeleteDone(req->id, E_ACCESSDENIED, false, L"Expired or repeated deletion authorization.", {});
+            SendDeleteDone(req->id, E_ACCESSDENIED, false, l10n::Get(l10n::StringId::ShellDeleteAuthorizationExpired).c_str(), {});
             return;
         }
     }
@@ -305,9 +307,9 @@ void ExecuteRequest(std::unique_ptr<Request> req) {
                 SendProgress(id, total ? static_cast<float>(done * 100.0 / total) : 0.0f, path, done, total);
             }, req->expected_identities);
         const auto error = result.identity_mismatch
-            ? L"原操作产物已改变或无法核对身份，撤销已停止；不会删除当前同名项目。 | " + result.failed_path
+            ? l10n::Format(l10n::StringId::ShellUndoOutputChangedFormat, result.failed_path.c_str())
             : FAILED(result.error) && !result.cancelled
-                ? L"回收失败：" + pulse::format::FileOperationErrorText(result.error) + L" | " + result.failed_path
+                ? l10n::Format(l10n::StringId::ShellRecycleFailedFormat, pulse::format::FileOperationErrorText(result.error).c_str(), result.failed_path.c_str())
                 : std::wstring{};
         if (g.cancel_id.load() == req->id) g.cancel_id.store(0);
         SendDeleteDone(req->id, result.error, result.cancelled, error, {}, result.sources, result.destinations, result.failed_path);
@@ -321,7 +323,7 @@ void ExecuteRequest(std::unique_ptr<Request> req) {
         return;
     }
 
-    SendDone(req->id, E_INVALIDARG, false, L"Unsupported shell-operation request.");
+    SendDone(req->id, E_INVALIDARG, false, l10n::Get(l10n::StringId::ShellOperationUnsupported).c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -440,7 +442,7 @@ DWORD WINAPI ReaderThreadImpl() {
                     PayloadWriter response;
                     response.PutU32(static_cast<uint32_t>(E_ACCESSDENIED));
                     response.PutU32(0);
-                    response.PutString(L"This worker cannot broker Shell launches; no launch occurred.");
+                    response.PutString(l10n::Get(l10n::StringId::ShellLaunchBrokerUnavailable).c_str());
                     SendMsg(RSP_SHELL_LAUNCH_DONE, h.request_id, response.data());
                 }
                 break;
@@ -458,7 +460,7 @@ DWORD WINAPI ReaderThreadImpl() {
                     PostCtxMessage(invocation.session, WM_CTX_INVOKE, 0,
                                    reinterpret_cast<LPARAM>(inv));
                 } else {
-                    SendDone(h.request_id, E_INVALIDARG, false, L"malformed ctx invoke");
+                    SendDone(h.request_id, E_INVALIDARG, false, l10n::Get(l10n::StringId::ShellContextInvokeMalformed).c_str());
                 }
                 break;
             }
@@ -473,7 +475,7 @@ DWORD WINAPI ReaderThreadImpl() {
             }
             case REQ_DEVICE_OPERATION: {
                 if (g_context_worker) {
-                    SendDone(h.request_id, E_ACCESSDENIED, false, L"Context workers cannot perform device operations");
+                    SendDone(h.request_id, E_ACCESSDENIED, false, l10n::Get(l10n::StringId::ShellContextDeviceForbidden).c_str());
                     break;
                 }
                 auto request = std::make_unique<Request>();
@@ -485,13 +487,13 @@ DWORD WINAPI ReaderThreadImpl() {
                 if (!reader.GetU64(owner) || !reader.GetString(operation.verb) ||
                     !reader.GetString(operation.name) || !reader.GetStringArray(operation.ids) ||
                     reader.remaining() != 0 || operation.ids.empty() || operation.ids.size() > 4096) {
-                    SendDone(h.request_id, E_INVALIDARG, false, L"Malformed device operation");
+                    SendDone(h.request_id, E_INVALIDARG, false, l10n::Get(l10n::StringId::ShellDeviceRequestMalformed).c_str());
                     break;
                 }
                 operation.owner = reinterpret_cast<HWND>(static_cast<uintptr_t>(owner));
                 if (PostMessageW(g.hwnd_msg, WM_EXEC_REQUEST, 0, reinterpret_cast<LPARAM>(request.get())))
                     request.release();
-                else SendDone(h.request_id, HRESULT_FROM_WIN32(GetLastError()), false, L"Shell queue unavailable");
+                else SendDone(h.request_id, HRESULT_FROM_WIN32(GetLastError()), false, l10n::Get(l10n::StringId::ShellQueueUnavailable).c_str());
                 break;
             }
             case REQ_DELETE_RECYCLE:
@@ -502,7 +504,7 @@ DWORD WINAPI ReaderThreadImpl() {
             case REQ_NEW_FOLDER:
             case REQ_NEW_FILE: {
                 if (g_context_worker) {
-                    SendDone(h.request_id, E_ACCESSDENIED, false, L"Context workers cannot perform file operations");
+                    SendDone(h.request_id, E_ACCESSDENIED, false, l10n::Get(l10n::StringId::ShellContextFileForbidden).c_str());
                     break;
                 }
                 auto* req = new Request();
@@ -535,14 +537,14 @@ DWORD WINAPI ReaderThreadImpl() {
                     }
                 }
                 if (!ok || r.remaining() != 0) {
-                    SendDone(req->id, E_INVALIDARG, false, L"malformed request payload");
+                    SendDone(req->id, E_INVALIDARG, false, l10n::Get(l10n::StringId::ShellPayloadMalformed).c_str());
                     delete req;
                     break;
                 }
                 if (!PostMessageW(g.hwnd_msg, WM_EXEC_REQUEST, 0,
                                   reinterpret_cast<LPARAM>(req))) {
                     SendDone(req->id, HRESULT_FROM_WIN32(GetLastError()), false,
-                             L"host message queue unavailable");
+                             l10n::Get(l10n::StringId::ShellMessageQueueUnavailable).c_str());
                     delete req;
                 }
                 break;
@@ -706,7 +708,7 @@ HRESULT BuildCtxMenu(const CtxSessionData& d, IContextMenu** out_menu, HMENU* ou
 void CtxInvoke(const CtxSessionData& d, IContextMenu* menu, UINT id_first,
                uint32_t invoke_req_id, uint32_t item_id) {
     if (!menu || item_id < id_first) {
-        SendDone(invoke_req_id, E_INVALIDARG, false, L"context menu invoke failed");
+        SendDone(invoke_req_id, E_INVALIDARG, false, l10n::Get(l10n::StringId::ShellContextInvokeFailed).c_str());
         return;
     }
     const auto dir = pulse::shell::ContextInvokeDirectory(d.paths.front(), d.background);
@@ -720,7 +722,7 @@ void CtxInvoke(const CtxSessionData& d, IContextMenu* menu, UINT id_first,
     info.nShow = SW_SHOWNORMAL;
     const HRESULT hr = menu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
     SendDone(invoke_req_id, hr, false,
-             FAILED(hr) ? L"context menu invoke failed" : L"");
+             FAILED(hr) ? l10n::Get(l10n::StringId::ShellContextInvokeFailed).c_str() : L"");
 }
 
 bool SessionCloseRequested(uint32_t sid) {
@@ -860,7 +862,7 @@ DWORD HandlerWorkerThreadImpl(LPVOID param) {
                     CtxInvoke(d, w->slot.menu, w->id_first, inv->invoke_req_id, inv->item_id);
                 else
                     SendDone(inv->invoke_req_id, E_INVALIDARG, false,
-                             L"context menu invoke failed");
+                             l10n::Get(l10n::StringId::ShellContextInvokeFailed).c_str());
                 invoked = true;
             } else if (msg.message == WM_CTX_CLOSE) {
                 // coordinator uses exit_event; ignore stray close
@@ -1083,11 +1085,11 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
                                         reinterpret_cast<LPARAM>(raw))) {
                     std::unique_ptr<CtxInvokeMsg> back(raw);
                     SendDone(back->invoke_req_id, HRESULT_FROM_WIN32(GetLastError()),
-                             false, L"context menu session not ready");
+                             false, l10n::Get(l10n::StringId::ShellContextSessionNotReady).c_str());
                 }
             } else {
                 SendDone(inv->invoke_req_id, E_INVALIDARG, false,
-                         L"context menu invoke failed");
+                         l10n::Get(l10n::StringId::ShellContextInvokeFailed).c_str());
             }
             return;
         }
@@ -1095,7 +1097,7 @@ DWORD WINAPI CtxSessionThreadImpl(LPVOID param) {
             CtxInvoke(*data, fallback_menu, kCtxIdFirst, inv->invoke_req_id, live);
         else
             SendDone(inv->invoke_req_id, E_INVALIDARG, false,
-                     L"context menu invoke failed");
+                     l10n::Get(l10n::StringId::ShellContextInvokeFailed).c_str());
     };
 
     bool done = workers.empty() && fallback_menu == nullptr;
@@ -1220,7 +1222,7 @@ void PostCtxMessage(uint32_t session_id, UINT message, WPARAM wParam, LPARAM lPa
         if (message == WM_CTX_INVOKE) {
             std::unique_ptr<CtxInvokeMsg> inv(reinterpret_cast<CtxInvokeMsg*>(lParam));
             SendDone(inv->invoke_req_id, HRESULT_FROM_WIN32(ERROR_NOT_FOUND), false,
-                     L"context menu session expired");
+                     l10n::Get(l10n::StringId::ShellContextSessionExpired).c_str());
         }
         return;
     }
@@ -1229,7 +1231,7 @@ void PostCtxMessage(uint32_t session_id, UINT message, WPARAM wParam, LPARAM lPa
         if (message == WM_CTX_INVOKE) {
             std::unique_ptr<CtxInvokeMsg> inv(reinterpret_cast<CtxInvokeMsg*>(lParam));
             SendDone(inv->invoke_req_id, HRESULT_FROM_WIN32(ERROR_NOT_READY), false,
-                     L"context menu session not ready");
+                     l10n::Get(l10n::StringId::ShellContextSessionNotReady).c_str());
         }
         return;
     }
@@ -1237,7 +1239,7 @@ void PostCtxMessage(uint32_t session_id, UINT message, WPARAM wParam, LPARAM lPa
         message == WM_CTX_INVOKE) {
         std::unique_ptr<CtxInvokeMsg> inv(reinterpret_cast<CtxInvokeMsg*>(lParam));
         SendDone(inv->invoke_req_id, HRESULT_FROM_WIN32(GetLastError()), false,
-                 L"context menu session not ready");
+                 l10n::Get(l10n::StringId::ShellContextSessionNotReady).c_str());
     }
 }
 

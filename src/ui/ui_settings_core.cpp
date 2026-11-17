@@ -93,9 +93,9 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         dc->SetTransform(transform);
     };
     auto section=[&](int i,I title) { text(l10n::Get(title),lay.section[i]); };
-    auto segmented=[&](D2D1_RECT_F card,D2D1_RECT_F const* choices,const I* labels,const int* values,int current,H::Region hit,I title,I desc,float description_height=21.0f) {
+    auto segmented=[&](D2D1_RECT_F card,D2D1_RECT_F const* choices,const I* labels,const int* values,int current,H::Region hit,I title,const std::wstring& desc,float description_height=21.0f) {
         const bool stacked=choices[0].left<card.left+100*scale_;
-        label(card,l10n::Get(title),l10n::Get(desc),L"\xE8A4",stacked ? card.right-16*scale_ : choices[0].left-12*scale_,description_height);
+        label(card,l10n::Get(title),desc,L"\xE8A4",stacked ? card.right-16*scale_ : choices[0].left-12*scale_,description_height);
         painter_.DrawSegmentedTrack(D2D1::RectF(choices[0].left,choices[0].top,choices[2].right,choices[2].bottom));
         for(int i=0;i<3;++i) {
             fluent::SegmentedItemSpec item{};item.bounds=choices[i];item.text=l10n::Get(labels[i]);
@@ -288,7 +288,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                    0);
             const I blurs[] = {I::WallpaperBlurOff, I::WallpaperBlurLight, I::WallpaperBlurStrong};
             segmented(lay.wallpaper_blur_card, lay.wallpaper_blur_row, blurs, levels, vm.wallpaper_blur,
-                      H::SettingsWallpaperBlur, I::SettingsWallpaperBlur, I::SettingsWallpaperBlurDesc);
+                      H::SettingsWallpaperBlur, I::SettingsWallpaperBlur, l10n::Get(I::SettingsWallpaperBlurDesc));
             dropdown(lay.language_card, lay.language_choice, I::SettingsLanguage, I::SettingsLanguageDesc,
                      l10n::Get(languages[vm.settings_language]), 1);
             const I text_render[] = {I::TextRenderAuto, I::TextRenderSharp, I::TextRenderSmooth};
@@ -301,7 +301,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                                       text_render_right - lay.text_render_card.left - 54 * scale_, scale_, &painter_) /
                 scale_;
             segmented(lay.text_render_card, lay.text_render_row, text_render, text_render_values,
-                      vm.settings_text_render, H::SettingsTextRender, I::SettingsTextRender, I::SettingsTextRenderDesc,
+                      vm.settings_text_render, H::SettingsTextRender, I::SettingsTextRender, l10n::Get(I::SettingsTextRenderDesc),
                       std::max(22.0f, text_render_caption));
         } else if (vm.settings_page == 6) {
             toggle(lay.blank_click_row, I::SettingsBlankClickBack, I::SettingsBlankClickBackDesc, L"\xE72B",
@@ -314,7 +314,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             const I density[] = {I::SettingsDensityCompact, I::SettingsDensityStandard, I::SettingsDensityRoomy};
             const int heights[] = {28, 34, 40};
             segmented(lay.density_card, lay.density_row, density, heights, vm.settings_row_height, H::SettingsDensity,
-                      I::SettingsRowHeight, I::SettingsRowHeightDesc);
+                      I::SettingsRowHeight, l10n::Get(I::SettingsRowHeightDesc));
             toggle(lay.list_style_row[0], I::ListSmartDate, I::ListSmartDateDesc, L"\xE787",
                    vm.settings_list_smart_date, 17);
             toggle(lay.list_style_row[1], I::ListZebraRows, I::ListZebraRowsDesc, L"\xE8FD",
@@ -323,7 +323,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             const I folder_sort[] = {I::FolderSortTop, I::FolderSortFollow, I::FolderSortMixed};
             const int folder_sort_values[] = {0, 1, 2};
             segmented(lay.folder_sort_card, lay.folder_sort_row, folder_sort, folder_sort_values,
-                      vm.settings_folder_sort, H::SettingsFolderSort, I::SettingsFolderSort, I::SettingsFolderSortDesc);
+                      vm.settings_folder_sort, H::SettingsFolderSort, I::SettingsFolderSort, l10n::Get(I::SettingsFolderSortDesc));
             toggle(lay.auto_folder_size_row, I::AutoFolderSize, I::AutoFolderSizeDesc, L"\xE8B7",
                    vm.settings_auto_folder_size, 35);
             toggle(lay.performance_row, I::SettingsShowPerformance, I::SettingsShowPerformanceDesc, L"\xE946",
@@ -421,7 +421,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             const I days[] = {I::ChangeToday, I::ChangeLast3Days, I::ChangeLast7Days};
             const int day_values[] = {1, 3, 7};
             segmented(lay.change_days_row, lay.change_days, days, day_values, vm.settings_change_days,
-                      H::SettingsChangeDays, I::SettingsChangeDays, I::SettingsChangeTrackingDesc);
+                      H::SettingsChangeDays, I::SettingsChangeDays, L"");
         }
     } else {
         section(0,I::SearchModeName);section(1,I::SearchModeContent);

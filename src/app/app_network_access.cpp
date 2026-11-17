@@ -113,7 +113,7 @@ void PumpNetworkAccess(AppState& s) {
                 tab->pending_network_pin.clear();
                 tab->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::CannotOpen));
                 tab->banner_message = app::NetworkConnectErrorText(result.error);
-                if (tab->snapshot) tab->banner_message += L" · " + l10n::Get(l10n::StringId::CachedReadOnly);
+                if (tab->snapshot) tab->banner_message += L" (" + l10n::Get(l10n::StringId::CachedReadOnly) + L")";
             }
         });
         InvalidateRect(s.hwnd, nullptr, FALSE);

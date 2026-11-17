@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "filename_pinyin.h"
 // index_engine.cpp — mmap v6 base + heap delta (优化.md).
 #include "index_engine.h"
@@ -74,23 +75,16 @@ uint64_t UnixToFt(uint32_t u) {
 }
 
 std::wstring StatusItemCount(uint64_t count, std::wstring_view detail = {}) {
-    std::wstring text = L"已索引 ";
-    text += std::to_wstring(count);
-    text += L" 项";
+    std::wstring text = l10n::Format(l10n::StringId::IndexItemCountFormat, static_cast<unsigned long long>(count));
     if (!detail.empty()) {
-        text += L" · ";
+        text += L"  ";
         text.append(detail.data(), detail.size());
     }
     return text;
 }
 
 std::wstring StatusDriveProgress(wchar_t letter, size_t count) {
-    std::wstring text = L"正在索引 ";
-    text += letter;
-    text += L": ";
-    text += std::to_wstring(count);
-    text += L" 项";
-    return text;
+    return l10n::Format(l10n::StringId::IndexDriveProgressFormat, letter, static_cast<unsigned long long>(count));
 }
 
 std::wstring Display(std::wstring p) {
@@ -453,7 +447,7 @@ std::wstring Engine::Status() const {
 void Engine::RequestRebuild() {
     IndexConfig config;
     if (MachineIndexScope() && !LoadMachineConfig(config, nullptr)) {
-        SetStatus(L"索引配置无法读取，已保留原有索引，请检查配置后重试");
+        SetStatus(l10n::Get(l10n::StringId::IndexConfigUnreadablePreserved).c_str());
         PingNotify(true);
         return;
     }
@@ -464,7 +458,7 @@ void Engine::RequestRebuild() {
     }
     rebuild_requested_.store(true);
     if (change_signal_) SetEvent(change_signal_);
-    SetStatus(L"索引配置已更改，准备重建…");
+    SetStatus(l10n::Get(l10n::StringId::IndexConfigChangedRebuild).c_str());
     PingNotify(true);
 }
 
@@ -482,13 +476,13 @@ std::vector<VolumeInfo> Engine::Volumes() const {
         if (it != vols_.end() && volume.enabled) {
             volume.indexed_items = it->item_count;
             volume.progress = 100;
-            volume.state = volume.online ? L"已就绪" : L"离线，仍可搜索";
+            volume.state = volume.online ? l10n::Get(l10n::StringId::IndexVolumeReady).c_str() : l10n::Get(l10n::StringId::IndexOfflineSearchable).c_str();
         } else if (volume.enabled && building_) {
-            volume.state = L"正在建立索引";
+            volume.state = l10n::Get(l10n::StringId::IndexVolumeBuilding).c_str();
         } else if (volume.enabled && ready_) {
             volume.failed = true;
-            volume.state = L"索引失败";
-            volume.error = L"无法读取该磁盘的文件变更记录";
+            volume.state = l10n::Get(l10n::StringId::IndexVolumeFailed).c_str();
+            volume.error = l10n::Get(l10n::StringId::IndexJournalReadFailed).c_str();
         }
     }
     return result;
@@ -558,7 +552,7 @@ void Engine::Start(HWND notify, UINT msg) {
     notify_msg_ = msg;
     const auto directory = DataDir();
     if (directory.empty()) {
-        SetStatus(L"索引目录无法读取，请检查配置和权限");
+        SetStatus(l10n::Get(l10n::StringId::IndexDirectoryUnreadable).c_str());
         PingNotify(true);
         return;
     }
@@ -2224,7 +2218,7 @@ void Engine::FlushDeltas() {
     bool saved = true;
     for (auto& [k, log] : delta_logs_)
         if (log && !log->Flush()) saved = false;
-    if (!saved) SetStatus(L"索引更新暂时无法保存，正在等待重试；请检查磁盘空间和权限");
+    if (!saved) SetStatus(l10n::Get(l10n::StringId::IndexSaveRetry).c_str());
     last_delta_flush_tick_ = GetTickCount64();
     filename_timing_.End(FilenameStage::DeltaFlush, timing, 0,
         saved ? ERROR_SUCCESS : ERROR_WRITE_FAULT, saved ? "scheduled" : "write_failed");
@@ -2530,7 +2524,7 @@ void Engine::MergeBase(bool force, const char* reason) {
                 if (entry.second) stats.merge.delta_bytes += entry.second->BytesOnDisk();
         }
         if (!FlattenLocked(snap, vols)) {
-            SetStatus(L"索引结构校验失败，已保留原有缓存");
+            SetStatus(l10n::Get(l10n::StringId::IndexStructureInvalid).c_str());
             merging_ = false;
             return;
         }
@@ -2613,8 +2607,8 @@ bool Engine::TryLoadCache() {
     AdoptMappedLocked(std::move(mapped));
     ReplayDeltasLocked();
     OpenDeltasLocked();
-    SetStatus(delta_replay_failed_ ? L"索引增量日志需要恢复，正在准备重建" :
-        L"已加载 " + std::to_wstring(indexed_.load()) + L" 项");
+    SetStatus(delta_replay_failed_ ? l10n::Get(l10n::StringId::IndexDeltaRecoveryRebuild).c_str() :
+        l10n::Format(l10n::StringId::IndexLoadedCountFormat, static_cast<unsigned long long>(indexed_.load())));
     ready_ = true;
     return true;
 }
@@ -2988,7 +2982,7 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
             std::unique_lock state_lock(mutex_);
             GapFeed();
             v.journal_id = 0;
-            SetStatus(std::wstring(1, letter) + L": 的变更跟踪失效，正在重建索引…");
+            SetStatus(l10n::Format(l10n::StringId::IndexDriveTrackingLostFormat, letter));
         }
         SetLastError(error);
         filename_timing_.End(FilenameStage::Journal, timing, applied, error, "read_failed", letter);
@@ -3313,7 +3307,7 @@ bool Engine::RebuildVolumeMft(const VolumeInfo& volume) {
         GapFeed();
         indexed_.store(build_.nodes.size());
     }
-    SetStatus(L"正在重建 " + volume.mount_point + L" 的索引…");
+    SetStatus(l10n::Format(l10n::StringId::IndexDriveRebuildingFormat, volume.mount_point.c_str()));
     if (!IndexVolumeMft(volume)) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         build_.Clear();
@@ -3352,7 +3346,7 @@ bool Engine::RebuildVolumeMft(const VolumeInfo& volume) {
     OpenDeltasLocked();
     building_ = false;
     ready_ = true;
-    SetStatus(volume.mount_point + L" 的索引已重建完成");
+    SetStatus(l10n::Format(l10n::StringId::IndexDriveRebuiltFormat, volume.mount_point.c_str()));
     PingNotify(true);
     return true;
 }
@@ -3408,7 +3402,7 @@ void Engine::FullRebuild(const char* reason) {
     const auto previous_count = indexed_.load();
     IndexConfig config;
     if (MachineIndexScope() && !LoadMachineConfig(config, nullptr)) {
-        SetStatus(L"索引配置无法读取，已保留原有索引，请检查配置后重试");
+        SetStatus(l10n::Get(l10n::StringId::IndexConfigUnreadablePreserved).c_str());
         filename_timing_.End(FilenameStage::Rebuild, timing, previous_count, ERROR_INVALID_DATA, reason);
         PingNotify(true);
         return;
@@ -3424,8 +3418,8 @@ void Engine::FullRebuild(const char* reason) {
         building_ = true;
         build_vols_.clear();
     }
-    if (indexed_.load() == 0) SetStatus(L"正在建立索引…");
-    else SetStatus(L"已索引 " + std::to_wstring(indexed_.load()) + L" 项，正在重建…");
+    if (indexed_.load() == 0) SetStatus(l10n::Get(l10n::StringId::IndexBuilding).c_str());
+    else SetStatus(l10n::Format(l10n::StringId::IndexCountRebuildingFormat, static_cast<unsigned long long>(indexed_.load())));
     PingNotify(true);
 
     bool used_mft = false;
@@ -3442,7 +3436,7 @@ void Engine::FullRebuild(const char* reason) {
                     build_vols_.clear();
                     building_ = false;
                     indexed_.store(previous_count);
-                    SetStatus(L"索引重建失败，已保留原有索引，请重试");
+                    SetStatus(l10n::Get(l10n::StringId::IndexRebuildFailedPreserved).c_str());
                 }
                 PingNotify(true);
                 filename_timing_.End(FilenameStage::Rebuild, timing, previous_count, build_error, "volume_read_failed");
@@ -3482,7 +3476,7 @@ void Engine::FullRebuild(const char* reason) {
                 OpenDeltasLocked();
                 ready_ = true;
                 if (MachineIndexScope())
-                    SetStatus(StatusItemCount(indexed_.load(), L"正在完成"));
+                    SetStatus(StatusItemCount(indexed_.load(), l10n::Get(l10n::StringId::IndexFinalizing).c_str()));
             } else {
                 if (wrote) build_error = GetLastError() ? GetLastError() : ERROR_WRITE_FAULT;
                 if (map_) { map_->Close(); map_.reset(); }
@@ -3514,8 +3508,8 @@ void Engine::FullRebuild(const char* reason) {
                 std::all_of(vols_.begin(), vols_.end(),
                             [](const VolState& v) { return v.journal_id != 0; });
             SetStatus(committed ? StatusItemCount(indexed_.load(),
-                      live_tracked ? L"实时更新" : L"正在监视")
-                      : L"索引可用，但保存失败，请检查索引目录权限及磁盘空间");
+                      live_tracked ? l10n::Get(l10n::StringId::IndexLiveUpdates).c_str() : l10n::Get(l10n::StringId::IndexWatching).c_str())
+                      : l10n::Get(l10n::StringId::IndexAvailableSaveFailed).c_str());
             ready_ = true;
             building_ = false;
             folder_size_gap_ = false;
@@ -3578,7 +3572,7 @@ void Engine::RecoverFailedVolumes(const std::vector<VolumeInfo>& volumes, ULONGL
             // Keep healthy collectors running and the last good snapshot
             // queryable. A persistent failed disk must not trigger full scans.
             volume_retry_after_[volume.id] = (std::max)(now, GetTickCount64()) + 60000;
-            SetStatus(volume.mount_point + L" 的变更跟踪暂不可用，稍后重试");
+            SetStatus(l10n::Format(l10n::StringId::IndexDriveTrackingUnavailableFormat, volume.mount_point.c_str()));
             continue;
         }
         volume_retry_after_.erase(volume.id);
@@ -3600,7 +3594,7 @@ void Engine::Worker() {
     ResolveIndexDirFrn();
     IndexConfig startup_config;
     if (MachineIndexScope() && !LoadMachineConfig(startup_config, nullptr)) {
-        SetStatus(L"索引配置无法读取，请检查配置后重新启动索引");
+        SetStatus(l10n::Get(l10n::StringId::IndexConfigUnreadableRestart).c_str());
         PingNotify(true);
         return;
     }
@@ -3674,7 +3668,7 @@ void Engine::Worker() {
                 }
             }
             if (fresh)
-                SetStatus(StatusItemCount(indexed_.load(), L"实时更新"));
+                SetStatus(StatusItemCount(indexed_.load(), l10n::Get(l10n::StringId::IndexLiveUpdates).c_str()));
         }
     } else if (have_cache && !needs_search_rebuild && !IsAdmin()) {
         const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
@@ -3689,7 +3683,7 @@ void Engine::Worker() {
         // become available immediately instead of appearing hung.
         if (!have_cache) {
             ready_ = true;
-            SetStatus(L"索引正在后台建立…");
+            SetStatus(l10n::Get(l10n::StringId::IndexBackgroundBuilding).c_str());
             PingNotify(true);
         }
         FullRebuild(have_cache ? (needs_search_rebuild ? "snapshot_upgrade" : "startup_stale") : "cold_start");
@@ -3748,7 +3742,7 @@ void Engine::Worker() {
             IndexConfig topology_config;
             if (!MachineIndexScope() || LoadMachineConfig(topology_config, nullptr))
                 online = ConfiguredVolumes(topology_config);
-            else SetStatus(L"索引配置无法读取，已保留上次磁盘范围");
+            else SetStatus(l10n::Get(l10n::StringId::IndexConfigPreviousVolumes).c_str());
             topology_tick = loop_tick;
             filename_timing_.End(FilenameStage::Topology, timing, online.size(), ERROR_SUCCESS, "periodic");
         }
@@ -3780,7 +3774,7 @@ void Engine::Worker() {
                     const bool live_tracked = std::all_of(vols_.begin(), vols_.end(),
                         [](const VolState& v) { return v.journal_id != 0; });
                     SetStatus(StatusItemCount(indexed_.load(),
-                              live_tracked ? L"实时更新" : L"部分磁盘未实时更新"));
+                              live_tracked ? l10n::Get(l10n::StringId::IndexLiveUpdates).c_str() : l10n::Get(l10n::StringId::IndexSomeVolumesNotLive).c_str()));
                 }
             }
         }

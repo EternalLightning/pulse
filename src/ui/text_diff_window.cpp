@@ -984,7 +984,7 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
                     small_.get(), NewerBadgeText(pal.panel));
         }
         std::wstring sub = fi.folder;
-        if (!fi.time.empty()) sub += (sub.empty() ? L"" : L"  \x00B7  ") + fi.time;
+        if (!fi.time.empty()) sub += (sub.empty() ? L"" : L"  ") + fi.time;
         text_at(sub, D2D1::RectF(x0, header_.top + 24.0f * s, x1, header_.top + 42.0f * s),
                 small_.get(), theme.text_secondary);
     }
@@ -1201,8 +1201,8 @@ bool TextDiffWindow::Render(const wchar_t* snapshot_path) {
         const diff::DiffSide* ds = side == 0 ? left_.get() : right_.get();
         if (!ds || ds->status != diff::LoadStatus::Ok) continue;
         std::wstring text = Fill(Str(Sid::DiffLines), L"{n}", std::to_wstring(ds->lines.size()));
-        if (!ds->encoding.empty()) text += L"  \x00B7  " + ds->encoding;
-        if (!ds->eol.empty()) text += L"  \x00B7  " + ds->eol;
+        if (!ds->encoding.empty()) text += L"  " + ds->encoding;
+        if (!ds->eol.empty()) text += L"  " + ds->eol;
         const float x0 = body_.left + half * static_cast<float>(side) + 14.0f * s;
         text_at(text, D2D1::RectF(x0, status_.top, x0 + half - 20.0f * s, status_.bottom),
                 small_.get(), theme.text_secondary);

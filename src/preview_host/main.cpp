@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "shell_thumbnail_bitmap.h"
 #include "../fs/cloud_state.h"
 #include "../ipc/preview_protocol.h"
@@ -14,6 +15,7 @@
 #include "image_decoder.h"
 #include "jpeg_embedded_preview.h"
 #include "svg_raster.h"
+#include "svg_fallback.h"
 #include "video_codec.h"
 #include <shobjidl.h>
 #include <shlobj.h>
@@ -260,29 +262,29 @@ std::vector<PreviewPropertyValue> ReadProperties(const std::wstring& path) {
                                                  IID_PPV_ARGS(&store)))) return out;
     const std::wstring extension = ExtensionOf(path);
     if (IsOneOf(extension, {L".jpg", L".jpeg", L".png", L".gif", L".bmp", L".tif", L".tiff", L".webp", L".heic"})) {
-        AddProperty(store.Get(), PKEY_Image_Dimensions, L"尺寸", out);
-        AddProperty(store.Get(), PKEY_Photo_DateTaken, L"拍摄时间", out);
-        AddProperty(store.Get(), PKEY_Photo_CameraModel, L"相机", out);
+        AddProperty(store.Get(), PKEY_Image_Dimensions, l10n::Get(l10n::StringId::PreviewPropertyDimensions).c_str(), out);
+        AddProperty(store.Get(), PKEY_Photo_DateTaken, l10n::Get(l10n::StringId::PreviewPropertyDateTaken).c_str(), out);
+        AddProperty(store.Get(), PKEY_Photo_CameraModel, l10n::Get(l10n::StringId::PreviewPropertyCamera).c_str(), out);
     } else if (IsOneOf(extension, {L".mp4", L".mkv", L".mov", L".avi", L".webm", L".wmv", L".m4v"})) {
-        AddProperty(store.Get(), PKEY_Media_Duration, L"时长", out);
+        AddProperty(store.Get(), PKEY_Media_Duration, l10n::Get(l10n::StringId::PreviewPropertyDuration).c_str(), out);
         uint32_t width = 0, height = 0;
         if (ReadUintProperty(store.Get(), PKEY_Video_FrameWidth, width) &&
             ReadUintProperty(store.Get(), PKEY_Video_FrameHeight, height) &&
             width > 0 && height > 0) {
             wchar_t dims[64];
             swprintf_s(dims, L"%u x %u", width, height);
-            out.push_back({ L"分辨率", dims });
+            out.push_back({ l10n::Get(l10n::StringId::PreviewPropertyResolution).c_str(), dims });
         }
-        AddProperty(store.Get(), PKEY_Video_FrameRate, L"帧率", out);
-        AddProperty(store.Get(), PKEY_Video_Compression, L"编码格式", out);
+        AddProperty(store.Get(), PKEY_Video_FrameRate, l10n::Get(l10n::StringId::PreviewPropertyFrameRate).c_str(), out);
+        AddProperty(store.Get(), PKEY_Video_Compression, l10n::Get(l10n::StringId::PreviewPropertyCodec).c_str(), out);
     } else if (IsOneOf(extension, {L".mp3", L".wav", L".flac", L".m4a", L".aac"})) {
-        AddProperty(store.Get(), PKEY_Media_Duration, L"时长", out);
-        AddProperty(store.Get(), PKEY_Music_Artist, L"艺术家", out);
-        AddProperty(store.Get(), PKEY_Music_AlbumTitle, L"专辑", out);
+        AddProperty(store.Get(), PKEY_Media_Duration, l10n::Get(l10n::StringId::PreviewPropertyDuration).c_str(), out);
+        AddProperty(store.Get(), PKEY_Music_Artist, l10n::Get(l10n::StringId::PreviewPropertyArtist).c_str(), out);
+        AddProperty(store.Get(), PKEY_Music_AlbumTitle, l10n::Get(l10n::StringId::PreviewPropertyAlbum).c_str(), out);
     } else if (IsOneOf(extension, {L".pdf", L".doc", L".docx", L".xls", L".xlsx", L".ppt", L".pptx", L".odt", L".ods", L".odp"})) {
-        AddProperty(store.Get(), PKEY_Title, L"标题", out);
-        AddProperty(store.Get(), PKEY_Author, L"作者", out);
-        AddProperty(store.Get(), PKEY_Document_PageCount, L"页数", out);
+        AddProperty(store.Get(), PKEY_Title, l10n::Get(l10n::StringId::PreviewPropertyTitle).c_str(), out);
+        AddProperty(store.Get(), PKEY_Author, l10n::Get(l10n::StringId::PreviewPropertyAuthor).c_str(), out);
+        AddProperty(store.Get(), PKEY_Document_PageCount, l10n::Get(l10n::StringId::PreviewPropertyPageCount).c_str(), out);
     }
     return out;
 }
@@ -733,14 +735,23 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                 if (made) {
                     response.kind = ipc::PreviewContentKind::Bitmap;
                 } else {
-                    // No Direct2D SVG support (Windows before 1703), a document
-                    // too large to parse, or damaged markup: keep the previous
-                    // behaviour and show the file as text instead of an empty
-                    // placeholder.
-                    errorText.clear();
-                    made = MakeTextOrHex(path, req.attrs, response.kind, previewText,
-                                         bytesRead, truncated);
-                    if (!made) errorText = L"svg-render-failed";
+                    pixels.clear();
+                    w = h = stride = source_w = source_h = 0;
+                    made = preview::MakeSvgFallback(req.kind == ipc::PreviewRequestKind::Thumbnail,
+                        [&] {
+                            if (!MakeShellThumbnail(path, req.attrs,
+                                    ipc::ClampPreviewPixelSize(req.pixel_size, false),
+                                    pixels, w, h, stride)) return false;
+                            response.kind = ipc::PreviewContentKind::Bitmap;
+                            errorText.clear();
+                            return true;
+                        },
+                        [&] {
+                            errorText.clear();
+                            return MakeTextOrHex(path, req.attrs, response.kind, previewText,
+                                                 bytesRead, truncated);
+                        });
+                    if (!made && errorText.empty()) errorText = L"svg-render-failed";
                 }
             } else if (preview::IsMetaFileExtension(extension)) {
                 // WMF/EMF: WIC decodes them only when its codec is installed,

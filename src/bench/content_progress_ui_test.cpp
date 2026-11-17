@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
     capture(L"known");
     capture(L"known-hover",true);
     l10n::SetLanguage(L"en-US");
-    check(l10n::Get(l10n::StringId::ContentCancelSearch)==L"Cancel search · Esc","English cancel tooltip includes shortcut");
+    check(l10n::Get(l10n::StringId::ContentCancelSearch)==L"Cancel search (Esc)","English cancel tooltip includes shortcut");
     capture(L"known-hover-en",true);
     l10n::SetLanguage(L"zh-CN");
     update(20000,20000,true);

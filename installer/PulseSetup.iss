@@ -63,10 +63,12 @@ UninstallDisplayIcon={app}\Pulse.exe
 Name: "chinesesimp"; MessagesFile: "installer\Languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+#include "messages.iss"
+
 [Tasks]
-Name: "indexservice"; Description: "启用全盘文件索引（安装 PulseIndex 后台服务，推荐） / Enable full-disk file index (installs the PulseIndex background service, recommended)"; GroupDescription: "搜索与索引 / Search && indexing:"
-Name: "startup"; Description: "开机自动启动 Pulse / Launch Pulse at sign-in"; GroupDescription: "其他 / Other:"; Flags: unchecked
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "其他 / Other:"; Flags: unchecked
+Name: "indexservice"; Description: "{cm:IndexServiceTask}"; GroupDescription: "{cm:SearchGroup}"
+Name: "startup"; Description: "{cm:StartupTask}"; GroupDescription: "{cm:OtherGroup}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:OtherGroup}"; Flags: unchecked
 
 [Files]
 Source: "LICENSE"; DestDir: "{app}"; Flags: ignoreversion
@@ -134,7 +136,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 ; Index configuration runs in CurStepChanged so helper failures are not ignored.
-Filename: "{app}\Pulse.exe"; Parameters: "--seed-shell-verbs"; StatusMsg: "正在缓存右键菜单项… / Caching context-menu verbs…"; Flags: runhidden waituntilterminated
+Filename: "{app}\Pulse.exe"; Parameters: "--seed-shell-verbs"; StatusMsg: "{cm:CachingMenus}"; Flags: runhidden waituntilterminated
 Filename: "{app}\Pulse.exe"; Description: "{cm:LaunchProgram,Pulse}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
@@ -215,11 +217,6 @@ begin
       RegWriteStringValue(HKCU, Key + '\open', 'DelegateExecute', '');
       RegWriteStringValue(HKCU, Key, '', 'open');
     end;
-end;
-
-function IsChinese: Boolean;
-begin
-  Result := ActiveLanguage = 'chinesesimp';
 end;
 
 function ReadJsonString(const Json, Key: String): String;
@@ -383,10 +380,7 @@ begin
     HeadingLabel.Width := ScaleX(360);
     HeadingLabel.AutoSize := False;
     HeadingLabel.Font.Style := [fsBold];
-    if IsChinese then
-      HeadingLabel.Caption := '卸载 Pulse'
-    else
-      HeadingLabel.Caption := 'Uninstall Pulse';
+    HeadingLabel.Caption := CustomMessage('UninstallTitle');
 
     DetailLabel := TNewStaticText.Create(Form);
     DetailLabel.Parent := Form;
@@ -396,10 +390,7 @@ begin
     DetailLabel.Height := ScaleY(54);
     DetailLabel.AutoSize := False;
     DetailLabel.WordWrap := True;
-    if IsChinese then
-      DetailLabel.Caption := 'Pulse 将停止并移除索引服务。你也可以删除 Pulse 创建的设置、缓存、日志和索引数据。'
-    else
-      DetailLabel.Caption := 'Pulse will stop and remove its index service. You can also delete settings, caches, logs, and index data created by Pulse.';
+    DetailLabel.Caption := CustomMessage('UninstallDetails');
 
     CleanupCheck := TNewCheckBox.Create(Form);
     CleanupCheck.Parent := Form;
@@ -407,10 +398,7 @@ begin
     CleanupCheck.Top := ScaleY(108);
     CleanupCheck.Width := ScaleX(360);
     CleanupCheck.Checked := True;
-    if IsChinese then
-      CleanupCheck.Caption := '同时删除 Pulse 设置、缓存和索引数据（推荐）'
-    else
-      CleanupCheck.Caption := 'Also delete Pulse settings, caches, and index data (recommended)';
+    CleanupCheck.Caption := CustomMessage('CleanupData');
 
     ContinueButton := TNewButton.Create(Form);
     ContinueButton.Parent := Form;
@@ -420,10 +408,7 @@ begin
     ContinueButton.Top := Form.ClientHeight - ScaleY(44);
     ContinueButton.Default := True;
     ContinueButton.ModalResult := mrOk;
-    if IsChinese then
-      ContinueButton.Caption := '继续'
-    else
-      ContinueButton.Caption := 'Continue';
+    ContinueButton.Caption := CustomMessage('Continue');
 
     CancelButton := TNewButton.Create(Form);
     CancelButton.Parent := Form;
@@ -433,10 +418,7 @@ begin
     CancelButton.Top := Form.ClientHeight - ScaleY(44);
     CancelButton.Cancel := True;
     CancelButton.ModalResult := mrCancel;
-    if IsChinese then
-      CancelButton.Caption := '取消'
-    else
-      CancelButton.Caption := 'Cancel';
+    CancelButton.Caption := CustomMessage('Cancel');
 
     Form.ActiveControl := ContinueButton;
     Result := Form.ShowModal = mrOk;
@@ -533,11 +515,11 @@ end;
 procedure InitializeWizard;
 begin
   IndexDirPage := CreateInputDirPage(wpSelectTasks,
-    '搜索索引位置 / Search index location',
-    '选择 Pulse 索引数据库的存储目录 / Choose where Pulse stores its index database',
-    '默认覆盖全部本地 NTFS 固定盘和移动盘。服务器文件夹可稍后在 Pulse 设置中按当前 Windows 用户凭据添加。',
+    CustomMessage('IndexLocationTitle'),
+    CustomMessage('IndexLocationSubtitle'),
+    CustomMessage('IndexLocationDetails'),
     False, '');
-  IndexDirPage.Add('索引目录 / Index directory:');
+  IndexDirPage.Add(CustomMessage('IndexDirectory'));
   IndexDirPage.Values[0] := ConfiguredIndexPath;
   if IndexDirPage.Values[0] = '' then
     IndexDirPage.Values[0] := ExpandConstant('{commonappdata}\Pulse\Index');
@@ -737,23 +719,21 @@ begin
   if not WizardIsTaskSelected('indexservice') then Exit;
   IndexExe := ExpandConstant('{app}\Pulse.Index.exe');
   Path := RemoveBackslashUnlessRoot(GetIndexPath(''));
-  WizardForm.StatusLabel.Caption := '正在设置索引位置… / Configuring index location…';
+  WizardForm.StatusLabel.Caption := CustomMessage('ConfiguringIndex');
   Code := -1;
   if not Exec(IndexExe, '--set-index-path "' + Path + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
   begin
     Log('Index location configuration failed: ' + IntToStr(Code));
-    SuppressibleMsgBox('索引位置设置未完全完成，错误码：' + IntToStr(Code) +
-      '。请在 Pulse 设置中查看实际位置后重试。 / Index relocation needs attention. Check Settings.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox(FmtMessage(CustomMessage('IndexLocationError'), [IntToStr(Code)]), mbError, MB_OK, IDOK);
     Exit;
   end;
   { Configure the location before starting the service: an upgrade must not
     start a full scan only to immediately stop it for the same index path. }
-  WizardForm.StatusLabel.Caption := '正在准备索引服务… / Preparing index service…';
+  WizardForm.StatusLabel.Caption := CustomMessage('PreparingService');
   Code := -1;
   if not Exec(IndexExe, '--install', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
   begin
-    SuppressibleMsgBox('索引服务启动失败，错误码：' + IntToStr(Code) +
-      '。软件已安装，可稍后在设置中重试。 / Index service setup failed. Retry in Settings.', mbError, MB_OK, IDOK);
+    SuppressibleMsgBox(FmtMessage(CustomMessage('IndexServiceError'), [IntToStr(Code)]), mbError, MB_OK, IDOK);
     Exit;
   end;
 end;

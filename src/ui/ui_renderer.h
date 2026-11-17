@@ -919,6 +919,7 @@ class MainRenderer {
     friend struct TrayCardMotionTest;
     friend struct StagingTrayMotionTest;
     friend struct EmptyStateRenderTest;
+    friend struct PreviewVisibilityTest;
 public:
     MainRenderer();
     explicit MainRenderer(RenderCaches& caches);
@@ -936,6 +937,7 @@ public:
     void SetIconNotifyWindow(HWND hwnd);
     void InvalidateShellIcon(const std::wstring& path) { icon_cache_.Invalidate(path); }
     void NotifyPreviewActivate(bool active) { preview_handler_.NotifyAppActivate(active); }
+    void NotifyPreviewOwnerHidden() { preview_handler_.Hide(); }
     void NotifyPreviewOwnerMoved() { preview_handler_.Reposition(); }
 
     // Layout metrics (DIPs).

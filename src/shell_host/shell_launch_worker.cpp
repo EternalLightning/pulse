@@ -3,6 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
+#include "../common/localization.h"
 #include "shell_launch_process.h"
 #include "shell_interaction_worker.h"
 #include "ctx_session_process.h"
@@ -92,8 +93,9 @@ HRESULT ShellError() {
 std::wstring ErrorDetail(HRESULT error, const ipc::ShellLaunchRequest& request) {
     wchar_t code[32]{};
     swprintf_s(code, L"0x%08lX", static_cast<unsigned long>(error));
-    std::wstring detail = L"Shell launch failed (" + std::wstring(code) + L")";
-    if (!request.paths.empty()) detail += L" for " + request.paths.front();
+    std::wstring detail = request.paths.empty()
+        ? l10n::Format(l10n::StringId::ShellLaunchFailedCodeFormat, code)
+        : l10n::Format(l10n::StringId::ShellLaunchFailedPathFormat, code, request.paths.front().c_str());
     wchar_t* message = nullptr;
     const DWORD system_error = HRESULT_FACILITY(error) == FACILITY_WIN32 ? HRESULT_CODE(error) :
         static_cast<DWORD>(error);
@@ -411,7 +413,7 @@ int RunShellLaunchWorker(DWORD parent_pid, uint32_t request_id) {
     if (detail.empty() && SUCCEEDED(result)) detail = L"worker PID " + std::to_wstring(GetCurrentProcessId());
 #endif
     const bool cancelled = result == HRESULT_FROM_WIN32(ERROR_CANCELLED);
-    if (FAILED(result) && detail.empty()) detail = cancelled ? L"Shell launch cancelled." : ErrorDetail(result, request);
+    if (FAILED(result) && detail.empty()) detail = cancelled ? l10n::Get(l10n::StringId::ShellLaunchCancelled).c_str() : ErrorDetail(result, request);
     ipc::PayloadWriter response;
     response.PutU32(static_cast<uint32_t>(result));
     response.PutU32(cancelled ? 1u : 0u);

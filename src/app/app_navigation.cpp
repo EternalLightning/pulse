@@ -114,7 +114,7 @@ static void SetPathFailure(app::Tab& tab, DWORD error) {
         l10n::Get(offline ? l10n::StringId::Offline : l10n::StringId::CannotOpen));
     tab.banner_message = format::FileOperationErrorText(HRESULT_FROM_WIN32(error));
     if (tab.snapshot && tab.net_readonly)
-        tab.banner_message += L" · " + l10n::Get(l10n::StringId::CachedReadOnly);
+        tab.banner_message += L" (" + l10n::Get(l10n::StringId::CachedReadOnly) + L")";
 }
 
 static void FailListing(AppState& s, app::Tab& tab, DWORD error) {
@@ -608,10 +608,10 @@ void ApplyContentSearchUpdate(AppState& s, index::ContentSearchUpdate update) {
         target->pending_generation = 0;
         target->search_content_active = false;
         target->loading = false;
-        const auto scan_message = target->content_scan_error ? target->banner_title + L" · " + target->banner_message : std::wstring{};
+        const auto scan_message = target->content_scan_error ? target->banner_title + L": " + target->banner_message : std::wstring{};
         target->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::ContentUpdatesPaused));
         target->banner_message = l10n::Get(l10n::StringId::ContentUpdatesPausedDesc);
-        if (!scan_message.empty()) target->banner_message += L" · " + scan_message;
+        if (!scan_message.empty()) target->banner_message += L"  " + scan_message;
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return;
     }
@@ -673,7 +673,7 @@ void ApplyContentSearchUpdate(AppState& s, index::ContentSearchUpdate update) {
         swprintf_s(title, l10n::Get(l10n::StringId::ContentFoundFormat).c_str(), needle.c_str(), target->search_total);
         target->virtual_title = title;
     } else if (search_kind == L"saved-search") {
-        target->virtual_title = s.savedSearches.items()[saved_index].name + L" · " + item_count;
+        target->virtual_title = s.savedSearches.items()[saved_index].name + L" (" + item_count + L")";
     } else {
         SetQuerySearchTitle(*target, rest, target->search_total);
     }
@@ -1274,7 +1274,7 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
                 tab->cache_unix = res.cache_unix;
                 tab->SetBannerTitle(app::BannerType::Other, l10n::Get(l10n::StringId::Cache));
                 tab->banner_message = res.cache_unix
-                    ? app::FormatCacheAge(res.cache_unix) + L" · " + l10n::Get(l10n::StringId::Refreshing)
+                    ? app::FormatCacheAge(res.cache_unix) + L"  " + l10n::Get(l10n::StringId::Refreshing)
                     : l10n::Get(l10n::StringId::Refreshing);
             }
             if (tab->EntryCount() != 0 && tab->selected_index < 0) tab->SelectOnly(0);

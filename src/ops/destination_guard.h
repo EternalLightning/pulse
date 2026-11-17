@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "../common/localization.h"
 #include "file_identity.h"
 #include "file_object_reference.h"
 #include "../common/file_create.h"
@@ -336,7 +337,7 @@ public:
 
 private:
     static bool Fail(const std::wstring& path, std::wstring& error) {
-        error = L"目标路径身份无法确认或已变化，操作已停止：" + path;
+        error = l10n::Format(l10n::StringId::OperationDestinationIdentityChangedFormat, path.c_str());
         return false;
     }
     static HANDLE Open(const std::wstring& path, bool deletion, DWORD extra_access = 0) {

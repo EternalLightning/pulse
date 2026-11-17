@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "ops/archive.h"
+#include "../common/localization.h"
 #include "ops/archive_retry.h"
 #include <windows.h>
 #include <winioctl.h>
@@ -920,6 +921,7 @@ void RecoveryTests() {
 }
 #endif
 int wmain(int argc, wchar_t** argv) {
+    pulse::l10n::Initialize(nullptr, L"zh-CN");
     std::cout << std::unitbuf;
     if (argc == 2 && std::wstring_view(argv[1]) == L"--member-names-only") {
         Check(IsSafeArchiveMember(L"子目录/你好.txt") && IsSafeArchiveMember(L"safe/.gitignore") &&

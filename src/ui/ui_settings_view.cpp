@@ -394,7 +394,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
             MakeBrush(dc, network.online ? theme.text_secondary : theme.text_disabled,
                       brTextSecondary_);
             const std::wstring detail = network.detail.empty() ? network.state
-                                                               : network.state + L" · " + network.detail;
+                                                               : network.state + L"  " + network.detail;
             DrawTextRect(dc, compositor_->SmallFormat(), brTextSecondary_.get(), detail,
                          row.left + 16.0f * scale_, row.top + 34.0f * scale_,
                          (std::max)(40.0f * scale_,

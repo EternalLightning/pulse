@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 // shell_client.cpp — See shell_client.h for the contract.
+#include "../common/localization.h"
 #include "shell_client.h"
 #include "file_identity_protocol.h"
 #include <algorithm>
@@ -23,11 +24,11 @@ HRESULT DisconnectResult(uint32_t type) {
 const wchar_t* DisconnectMessage(uint32_t type) {
     if (type == REQ_AUTHORIZED_DELETE || type == REQ_AUTHORIZED_RECYCLE ||
         type == REQ_AUTHORIZED_DELETE_ELEVATED)
-        return L"Deletion outcome is unknown; the destructive request was not replayed.";
+        return l10n::Get(l10n::StringId::ShellDeleteOutcomeUnknown).c_str();
     if (type == REQ_SHELL_LAUNCH || type == REQ_CTX_INVOKE)
-        return L"Shell 操作结果未知；为避免重复执行，未自动重试。";
-    return CanReplay(type) ? L"shell host died twice on one request"
-                           : L"Shell operation outcome is unknown; the request was not replayed.";
+        return l10n::Get(l10n::StringId::ShellOutcomeUnknown).c_str();
+    return CanReplay(type) ? l10n::Get(l10n::StringId::ShellHostRepeatedFailure).c_str()
+                           : l10n::Get(l10n::StringId::ShellOutcomeUnknown).c_str();
 }
 }
 
@@ -141,7 +142,7 @@ void ShellClient::Stop() {
         stopped.swap(pending_);
     }
     for (const auto& [id, pending] : stopped)
-        FireRequestDone(pending.type, id, HRESULT_FROM_WIN32(ERROR_CANCELLED), true, L"Shell client stopped.");
+        FireRequestDone(pending.type, id, HRESULT_FROM_WIN32(ERROR_CANCELLED), true, l10n::Get(l10n::StringId::ShellClientStopped).c_str());
     std::map<uint32_t, LaunchReply> replies;
     {
         std::lock_guard lock(launch_reply_mutex_);
@@ -149,7 +150,7 @@ void ShellClient::Stop() {
     }
     for (auto& [id, reply] : replies) {
         (void)id;
-        reply(HRESULT_FROM_WIN32(ERROR_CANCELLED), true, L"Shell client stopped.");
+        reply(HRESULT_FROM_WIN32(ERROR_CANCELLED), true, l10n::Get(l10n::StringId::ShellClientStopped).c_str());
     }
 }
 
@@ -192,10 +193,9 @@ bool ShellClient::SpawnChild() {
         const DWORD gle = GetLastError();
         fprintf(stderr, "[shell_client] CreateProcess failed gle=%lu cmd=%ls\n", gle, cmd.c_str());
         if (gle == ERROR_FILE_NOT_FOUND) {
-            last_error_ = L"\u627E\u4E0D\u5230 Pulse.Shell.exe\uFF08\u9700\u4E0E Pulse \u653E\u5728\u540C\u4E00\u76EE\u5F55\uFF09";
+            last_error_ = l10n::Get(l10n::StringId::ShellExecutableMissing);
         } else {
-            last_error_ = L"\u65E0\u6CD5\u542F\u52A8 Pulse.Shell.exe\uFF08\u9519\u8BEF " +
-                          std::to_wstring(gle) + L"\uFF09";
+            last_error_ = l10n::Format(l10n::StringId::ShellExecutableStartFailedFormat, gle);
         }
         return false;
     }
@@ -229,14 +229,14 @@ bool ShellClient::EnsureConnected() {
                 server_pid == child_.dwProcessId)
                 break;
             CloseHandle(h);
-            last_error_ = L"Pulse.Shell.exe pipe identity mismatch";
+            last_error_ = l10n::Get(l10n::StringId::ShellPipeIdentityMismatch).c_str();
             return false;
         }
         const DWORD err = GetLastError();
         if (err == ERROR_PIPE_BUSY) {
             WaitNamedPipeW(name.c_str(), 200);
             if (GetTickCount64() > deadline) {
-                last_error_ = L"Pulse.Shell.exe \u7BA1\u9053\u5FD9\u788C";
+                last_error_ = l10n::Get(l10n::StringId::ShellPipeBusy);
                 return false;
             }
             continue;
@@ -246,12 +246,12 @@ bool ShellClient::EnsureConnected() {
                 DWORD code = 0;
                 GetExitCodeProcess(child_.hProcess, &code);
                 fprintf(stderr, "[shell_client] child exited early code=%lu\n", code);
-                last_error_ = L"Pulse.Shell.exe \u542F\u52A8\u540E\u7ACB\u5373\u9000\u51FA";
+                last_error_ = l10n::Get(l10n::StringId::ShellExitedAtStartup);
                 KillChild();
                 return false;
             }
             if (GetTickCount64() > deadline) {
-                last_error_ = L"Pulse.Shell.exe \u672A\u54CD\u5E94\u7BA1\u9053";
+                last_error_ = l10n::Get(l10n::StringId::ShellPipeNoResponse);
                 return false;
             }
             Sleep(50);
@@ -367,7 +367,7 @@ uint32_t ShellClient::DeleteAuthorized(const std::vector<std::wstring>& paths, u
     }
     if (!sent && connection) HandleDisconnect(connection);
     else if (!sent) FireDone(pending.id, HRESULT_FROM_WIN32(ERROR_PIPE_NOT_CONNECTED), false,
-                        L"Deletion outcome is unknown; the destructive request was not replayed.");
+                        l10n::Get(l10n::StringId::ShellDeleteOutcomeUnknown).c_str());
     return pending.id;
 }
 
@@ -526,8 +526,7 @@ void ShellClient::FireRequestDone(uint32_t type, uint32_t id, uint32_t hr, bool 
 }
 
 std::wstring ShellClient::UnreachableMessage() const {
-    static const std::wstring kFallback = L"shell host unreachable";
-    return last_error_.empty() ? kFallback : last_error_;
+    return last_error_.empty() ? l10n::Get(l10n::StringId::ShellHostUnreachable) : last_error_;
 }
 
 void ShellClient::ReaderThread() {
@@ -626,7 +625,7 @@ void ShellClient::ReaderThread() {
                     DeleteResultPayload result;
                     if (!ReadDeleteResultPayload(r, result)) {
                         result.hr = static_cast<uint32_t>(kMalformedDeleteResult);
-                        result.error = L"Malformed deletion result";
+                        result.error = l10n::Get(l10n::StringId::ShellDeleteResultMalformed).c_str();
                     }
                     Dispatch(h.request_id, true, [&](Callbacks& cb) {
                         if (cb.delete_done)
@@ -637,19 +636,19 @@ void ShellClient::ReaderThread() {
                     });
                 } else if (pending) {
                     uint32_t hr = static_cast<uint32_t>(E_INVALIDARG), cancelled = 0;
-                    std::wstring err = L"Malformed operation result";
+                    std::wstring err = l10n::Get(l10n::StringId::ShellOperationResultMalformed).c_str();
                     std::vector<FileIdentity> produced;
                     if (r.GetU32(hr) && r.GetU32(cancelled) && cancelled <= 1 && r.GetString(err)) {
                         if (r.remaining() && (!ReadFileIdentities(r, produced) || r.remaining())) {
                             hr = static_cast<uint32_t>(E_INVALIDARG);
                             cancelled = 0;
-                            err = L"Malformed produced-item identity result";
+                            err = l10n::Get(l10n::StringId::ShellProducedIdentityMalformed).c_str();
                             produced.clear();
                         }
                     } else {
                         hr = static_cast<uint32_t>(E_INVALIDARG);
                         cancelled = 0;
-                        err = L"Malformed operation result";
+                        err = l10n::Get(l10n::StringId::ShellOperationResultMalformed).c_str();
                     }
                     Dispatch(h.request_id, true, [&](Callbacks& cb) {
                         if (cb.produced_done && !produced.empty())
