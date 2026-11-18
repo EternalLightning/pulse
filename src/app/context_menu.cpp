@@ -402,9 +402,6 @@ std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset) {
         it.pictogram = row.pictogram;
         items.push_back(std::move(it));
     }
-    items.back().separator_after = true;
-    items.push_back(Item(CmdCopyToTarget, l10n::Get(l10n::StringId::CopyToTarget).c_str(), kGlyphCopy, L"Ctrl+Alt+C"));
-    items.push_back(Item(CmdMoveToTarget, l10n::Get(l10n::StringId::MoveToTarget).c_str(), kGlyphCut, L"Ctrl+Alt+X"));
     return items;
 }
 

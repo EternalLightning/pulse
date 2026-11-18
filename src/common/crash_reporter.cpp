@@ -312,10 +312,6 @@ LONG WINAPI TopLevelFilter(EXCEPTION_POINTERS* exception) noexcept {
 
 } // namespace
 
-const wchar_t* RoleName(ProcessRole role) noexcept {
-    return RoleToken(role);
-}
-
 bool Initialize(const Config& config) noexcept {
     if (g_initialized) return true;
     g_config = config;
@@ -385,10 +381,6 @@ LONG ReportRecoverable(EXCEPTION_POINTERS* exception, const char* context) noexc
 
 bool SafeModeRequested() noexcept {
     return g_safe_mode;
-}
-
-const std::wstring& DiagnosticsRoot() noexcept {
-    return g_diagnostics_root;
 }
 
 } // namespace pulse::crash

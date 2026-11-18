@@ -12,6 +12,8 @@
 #include "tab_shortcuts.h"
 #include "tab_transfer.h"
 #include "app_internal.h"
+#include "details_columns_ui.h"
+#include "../ui/toolbar_layout.h"
 #include "app_hover.h"
 #include "app_network_locations.h"
 #include "app_column_view.h"
@@ -59,6 +61,7 @@
 #include <cmath>
 #include <cwctype>
 #include <unordered_set>
+#include <utility>
 
 using namespace pulse;
 
@@ -1173,7 +1176,11 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                         ? columns.right + static_cast<float>(mx) - s->columnResizeLastX
                         : static_cast<float>(mx);
                     s->columnResizeLastX = static_cast<float>(mx);
-                    if (paneVm.is_search) {
+                    if (resizeTab->details_columns.configured && !paneVm.is_search) {
+                        auto configured = paneVm;
+                        s->renderer.ResizeConfiguredColumn(paneRect, configured, s->columnResizeIndex, cursor);
+                        resizeTab->details_columns = std::move(configured.details_columns);
+                    } else if (paneVm.is_search) {
                         resizeTab->search_column_dividers =
                             s->renderer.ResizeSearchColumnDivider(
                                 paneRect, resizeTab->search_column_dividers,
@@ -2124,6 +2131,7 @@ LRESULT HandleMouseLeave(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
 LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        s->nameSelectionCycle = {};
         s->blankDoubleTab = nullptr;
         s->blankDoublePending = false;
         int mx = GET_X_LPARAM(lParam);
@@ -2395,6 +2403,9 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             NavigateTo(*s, app::MakeHomePath());
         } else if (hit.region == ui::HitTestResult::HomeNetworkSettings) {
             OpenNetworkSettings(s->hwnd);
+        } else if (hit.region == ui::HitTestResult::HomeCustomize) {
+            if (app::Pane* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
+            OpenSettingsTab(*s, 11);
         } else if (hit.region == ui::HitTestResult::HomeCard) {
             if (app::Pane* pane = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, pane);
         } else if (hit.region == ui::HitTestResult::HomeGroup && hit.index >= 0 && hit.index < 3) {
@@ -2431,6 +2442,8 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             GoUp(*s);
         } else if (hit.region == ui::HitTestResult::NavRefresh) {
             RefreshActiveTab(*s);
+        } else if (hit.region == ui::HitTestResult::CustomToolbarCommand) {
+            DispatchMenuCommand(*s, hit.index);
         } else if (hit.region == ui::HitTestResult::NewButton) {
             if (s->menu && s->menu->IsOpen()) {
                 s->menu->RequestDismiss();
@@ -2622,7 +2635,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
         } else if (hit.region == ui::HitTestResult::SplitButton) {
-            ShowSplitDropdown(*s);
+            ShowSplitDropdown(*s, hit.pane_index);
         } else if (hit.region == ui::HitTestResult::DetailsToggle) {
             s->showDetailsPanel = !s->showDetailsPanel;
             s->renderer.SetDetailsPanelVisible(s->showDetailsPanel);
@@ -2706,7 +2719,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
         } else if (hit.region == ui::HitTestResult::ColumnHeader) {
-            SortBy(*s, hit.column);
+            if (hit.index != -2) SortBy(*s, hit.column);
         } else if (hit.region == ui::HitTestResult::SidebarHeaderAction) {
             if (hit.sidebar_action == ui::SidebarAddAction::AddNetwork) {
                 ShowConnectServer(*s);
@@ -2889,7 +2902,12 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
             app::Tab* fitTab = fitPane ? fitPane->ActiveTab() : nullptr;
             if (fitTab && hit.pane_index >= 0 &&
                 hit.pane_index < static_cast<int>(vm.pane_slots.size())) {
-                s->renderer.AutoFitColumnDivider(
+                if (fitTab->details_columns.configured) {
+                    auto configured = vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane;
+                    s->renderer.AutoFitConfiguredColumn(configured,
+                        s->renderer.PaneBodyBounds(configured, vm.pane_slots[static_cast<size_t>(hit.pane_index)].rect), hit.index);
+                    fitTab->details_columns = std::move(configured.details_columns);
+                } else s->renderer.AutoFitColumnDivider(
                     s->renderer.PaneBodyBounds(vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane,
                         vm.pane_slots[static_cast<size_t>(hit.pane_index)].rect),
                     fitTab->details_column_dividers,
@@ -3387,6 +3405,7 @@ LRESULT HandleCaptureChanged(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LP
 
 LRESULT HandleRButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        s->nameSelectionCycle = {};
         if (s->filterEditing) HideFilterEditor(*s, true);
         s->blankClickTab = nullptr;
         CancelRenameClick(*s);
@@ -3438,6 +3457,27 @@ LRESULT HandleRButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         }
         POINT sp{ mx, my };
         ClientToScreen(hwnd, &sp);
+        if (hit.region == ui::HitTestResult::ColumnHeader || hit.region == ui::HitTestResult::ColumnDivider) {
+            ShowDetailsColumnsMenu(*s, sp, hit.pane_index);
+            s->context_menu.Close();
+            return 0;
+        }
+        if (my >= s->renderer.TitleBarHeight() + 44 * s->scale &&
+            my < s->renderer.TitleBarHeight() + s->renderer.ToolbarHeight() &&
+            mx >= s->renderer.EffectiveSidebarWidth(rect.right)) {
+            s->context_menu.Close();
+            const float width = rect.right;
+            const float left = s->renderer.EffectiveSidebarWidth(width);
+            const auto layout = ui::MakeToolbarLayout(width, s->scale, s->renderer.TitleBarHeight(),
+                s->renderer.Margin(), s->renderer.NewButtonWidthPx(width-left < 600*s->scale),
+                left, vm.pane.filter_expand, vm.archive_view, vm.pane.is_recycle, vm.toolbar_order);
+            int command = 0;
+            for (const auto& placed : layout.placed_commands)
+                if (mx >= placed.bounds.left && mx < placed.bounds.right &&
+                    my >= placed.bounds.top && my < placed.bounds.bottom) { command = placed.command; break; }
+            ShowToolbarContextMenu(*s, sp, command);
+            return 0;
+        }
         bool shown = false;
         if (hit.region == ui::HitTestResult::TabGroup && hit.index >= 0 &&
             hit.index < static_cast<int>(vm.tab_groups.size())) {
@@ -3678,8 +3718,34 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         return 0;
 }
 
+static bool SelectByInitial(AppState& s, app::Tab& tab, const ui::PaneViewModel& pane,
+    wchar_t letter, const AppState::NameSelectionCycle& previous) {
+    const int count = static_cast<int>(pane.EntryCount());
+    if (count == 0) return false;
+    int view = 0;
+    if (previous.letter == letter && previous.tab_identity == tab.network_identity &&
+        previous.view_generation == tab.view_generation && previous.selection_revision == tab.selection_revision) {
+        const int next = pane.ViewIndex(tab.selected_index) + 1;
+        if (next < count) view = next;
+    }
+    const auto lowercase = static_cast<wchar_t>(letter + (L'a' - L'A'));
+    for (int scanned = 0; scanned < count; ++scanned) {
+        const int source = pane.SourceIndex(view);
+        const auto& name = (*pane.snapshot)[static_cast<size_t>(source)].name;
+        if (!name.empty() && (name.front() == letter || name.front() == lowercase)) {
+            tab.SelectOnly(source);
+            s.nameSelectionCycle = {letter, tab.network_identity, tab.view_generation, tab.selection_revision};
+            EnsureRowVisible(s, tab, source, true);
+            return true;
+        }
+        if (++view == count) view = 0;
+    }
+    return false;
+}
+
 LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        const auto previous_name_selection = std::exchange(s->nameSelectionCycle, {});
         if (HandleSettingsKey(*s, wParam, lParam)) return 0;
         if (wParam == VK_ESCAPE && (SysCtxPreviewDragCancel(*s) || PulseMenuPreviewDragCancel(*s))) return 0;
         if (wParam == VK_ESCAPE && CancelWindowTransferDrag(*s)) return 0;
@@ -3692,6 +3758,15 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         bool alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        const HWND focused = GetFocus();
+        const bool editing = focused && focused != hwnd && IsChild(hwnd, focused);
+        if (!editing) {
+            const int command = app::LookupCommandShortcut(static_cast<unsigned>(wParam), ctrl, shift, alt);
+            if (command != app::CmdNone) {
+                if (app::IsCommandEnabled(command, BuildCommandContext(*s))) DispatchMenuCommand(*s, command);
+                return 0;
+            }
+        }
         bool handled = true;
 
         if (app::IsTabShortcut(static_cast<UINT>(wParam), ctrl, shift, alt)) {
@@ -3720,8 +3795,6 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 auto apply=[tag_id](AppState& v){if(auto* current=ActiveTab(v)) ToggleTagForSelection(v,tag_id,SelectedFullPaths(*current));};
                 if(!DeferContentSelection(*s,apply)) apply(*s);
             }
-        } else if (ctrl && shift && wParam == L'F') {
-            ShowAdvancedSearch(*s);
         } else if (ctrl && wParam == L'F') {
             if (IsAddressSearchResults(tab)) ShowAddressSearch(*s);
             else ShowFilterEditor(*s);
@@ -3729,44 +3802,13 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             MarkTargetPane(*s);
         } else if (wParam == VK_F6) {
             CycleFocus(*s);
-        } else if (ctrl && wParam == L'1') {
-            ApplyLayoutPreset(*s, app::LayoutPreset::Single);
-        } else if (ctrl && wParam == L'2') {
-            ApplyLayoutPreset(*s, app::LayoutPreset::TwoVertical);
-        } else if (ctrl && wParam == L'3') {
-            ApplyLayoutPreset(*s, app::LayoutPreset::Three);
-        } else if (ctrl && wParam == L'4') {
-            ApplyLayoutPreset(*s, app::LayoutPreset::FourGrid);
-        } else if (ctrl && alt && wParam == L'C') {
-            TransferToTarget(*s, false);
-        } else if (ctrl && alt && wParam == L'X') {
-            TransferToTarget(*s, true);
         } else if (ctrl && wParam == L'W') {
             CloseActiveTab(*s);
         } else if (ctrl && wParam == L'L') {
             ShowOmnibar(*s, OmnibarMode::Path);
         } else if (wParam == VK_F4) {
             ShowOmnibar(*s, OmnibarMode::Path);
-        } else if (ctrl && shift && wParam == L'C') {
-            CopySelectedPath(*s);
-        } else if (ctrl && wParam == L'C') {
-            CollectToTray(*s, false);
-        } else if (ctrl && wParam == L'X') {
-            CollectToTray(*s, true);
-        } else if (ctrl && wParam == L'V') {
-            PasteIntoCurrent(*s);
-        } else if (ctrl && wParam == L'Z') {
-            if (s->ops.CanUndo()) s->ops.Undo();
-            else InvalidateRect(hwnd, nullptr, FALSE);
-        } else if (ctrl && shift && wParam == L'R') {
-            ShowBatchRename(*s);
-        } else if (wParam == VK_F2) {
-            ShowRenameOverlay(*s);
-        } else if (wParam == VK_F7) {
-            CreateNewItem(*s, true);
-        } else if (alt && wParam == VK_RETURN) {
-            DispatchMenuCommand(*s, app::CmdProperties);
-        } else if (wParam == VK_DELETE) {
+        } else if (wParam == VK_DELETE && shift && !ctrl && !alt) {
             DeleteSelected(*s, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
         } else if (wParam == VK_RETURN) {
             OpenSelected(*s);
@@ -3776,8 +3818,6 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             GoBack(*s);
         } else if (alt && wParam == VK_RIGHT) {
             GoForward(*s);
-        } else if (wParam == VK_F5) {
-            DispatchMenuCommand(*s, app::CmdRefresh);
         } else if (wParam == VK_F1) {
             s->appPrefs.show_status_performance = !s->appPrefs.show_status_performance;
             s->showFps = s->forceStatusPerformance || s->appPrefs.show_status_performance;
@@ -3785,12 +3825,6 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (wParam == VK_SPACE) {
             ToggleQuickPreview(*s);
-        } else if (ctrl && shift && wParam == L'A') {
-            DispatchMenuCommand(*s, app::CmdSelectWildcard);
-        } else if (ctrl && wParam == L'A') {
-            DispatchMenuCommand(*s, app::CmdSelectAll);
-        } else if (ctrl && wParam == L'I') {
-            DispatchMenuCommand(*s, app::CmdInvertSelection);
         } else if (wParam == VK_ESCAPE) {
             s->contentSelectionAction.reset();
             if (tab->search_content_active || tab->search_awaiting_content || tab->search_live_generation) {
@@ -3861,6 +3895,12 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 s->scrollTargetY = tab->scroll_y;
                 MaybePrefetchSearchPage(*s);
             }
+        } else if (msg == WM_KEYDOWN && wParam >= L'A' && wParam <= L'Z' &&
+                   !ctrl && !alt && !shift && focused == hwnd &&
+                   GetKeyState(VK_LWIN) >= 0 && GetKeyState(VK_RWIN) >= 0 &&
+                   !s->addressEditing && !s->filterEditing && !vm.settings_open &&
+                   !vm.pane.is_home && vm.pane.snapshot && !vm.pane.content_results) {
+            handled = SelectByInitial(*s, *tab, vm.pane, static_cast<wchar_t>(wParam), previous_name_selection);
         } else {
             handled = false;
         }

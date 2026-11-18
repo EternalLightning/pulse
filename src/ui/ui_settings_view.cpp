@@ -56,7 +56,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
 
     static constexpr const wchar_t* kNavIcon[] = {
         L"\xE790", kIconSearch, kIconSettings, kIconInfo, kIconCopy, kIconSettings,
-        L"\xED25", L"\xE737", L"\xE7E8", L"\xE8DE"
+        L"\xED25", L"\xE737", L"\xE7E8", L"\xE8DE", L"\xE765", L"\xE8B7"
     };
     static constexpr l10n::StringId groups[] = {l10n::StringId::SettingsNavPersonal,
         l10n::StringId::SettingsNavBrowse,l10n::StringId::SettingsNavSystem,
@@ -113,7 +113,7 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
                      kNavIcon[i], L"*", highlighted ? theme.text_selected :
                          BlendOver(WithAlpha(theme.accent_ink, selection.value), theme.text_secondary), 0.85f);
         MakeBrush(dc, highlighted ? theme.text_selected : theme.text, brText_);
-        if (!compact_nav) DrawTextRect(dc, compositor_->TextFormat(), brText_.get(), pulse::l10n::Get(kSettingsNavTitles[i]),
+        if (!compact_nav) DrawTextRect(dc, compositor_->TextFormat(), brText_.get(), SettingsPageTitle(i),
                      rc.left + 42.0f * scale_, rc.top, rc.right - rc.left - 48.0f * scale_,
                      rc.bottom - rc.top);
     }
@@ -124,9 +124,8 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
     const float pad = 20.0f * scale_;
     const float origin = lay.content_origin;
 
-    const auto page_title_id = kSettingsNavTitles[sidebar_page];
     MakeBrush(dc, theme.text, brText_);
-    const auto& title = l10n::Get(page_title_id);
+    const auto title = SettingsPageTitle(sidebar_page);
     ComPtr<IDWriteTextFormat> title_format;
     typography::CreateTextFormat(compositor_->DwriteFactory(),
         {typography::FontRole::Display, 22*scale_, DWRITE_FONT_WEIGHT_NORMAL}, &title_format);
@@ -162,6 +161,60 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
 
     if (IsSettingsCategory(vm.settings_page)) {
         DrawSettingsCore(vm, rect, theme);
+    } else if (vm.settings_page == 11) {
+        DrawSettingsHomeQuickAccess(vm, rect, theme);
+    } else if (vm.settings_page == 10) {
+        auto card = [&](D2D1_RECT_F bounds) {
+            painter_.FillRoundedRect(bounds, 8 * scale_, vm.dark && !IsHighContrast() ? theme.fill_input : theme.surface_card);
+            painter_.StrokeRoundedRect(bounds, 8 * scale_, theme.stroke_card);
+        };
+        auto button = [&](D2D1_RECT_F bounds, const std::wstring& label, int action,
+                          int command = -1, bool enabled = true, const wchar_t* glyph = L"") {
+            fluent::ButtonSpec spec;
+            spec.bounds = bounds; spec.text = label; spec.glyph = glyph;
+            spec.state.enabled = enabled;
+            spec.state.hovered = enabled && IsHovered(vm, HitTestResult::SettingsShortcut, action, command);
+            DrawSettingsButton(vm, spec);
+        };
+        button(lay.shortcut_search, l10n::Pick(L"搜索快捷键…", L"Find shortcuts…"), ShortcutFilter);
+        button(lay.shortcut_clear, l10n::Pick(L"清除搜索", L"Clear search"), ShortcutClearFilter,
+            -1, !vm.settings_shortcut_filter.empty());
+        button(lay.shortcut_reset_all, l10n::Pick(L"恢复全部快捷键", L"Reset all shortcuts"), ShortcutResetAll);
+        if (!vm.settings_shortcut_filter.empty()) painter_.DrawText(vm.settings_shortcut_filter,
+            D2D1::RectF(lay.shortcut_search.left, std::max({lay.shortcut_search.bottom,lay.shortcut_clear.bottom,lay.shortcut_reset_all.bottom}) + 8 * scale_,
+                lay.content.right - pad, std::max({lay.shortcut_search.bottom,lay.shortcut_clear.bottom,lay.shortcut_reset_all.bottom}) + 32 * scale_),
+            compositor_->SmallFormat(), theme.text_secondary);
+        card(lay.global_search_row);
+        const bool global_stacked = lay.global_search_hotkey_button.left < lay.global_search_row.left + 100 * scale_;
+        const auto global_title = D2D1::RectF(lay.global_search_row.left + 16 * scale_, lay.global_search_row.top + 12 * scale_,
+            global_stacked ? lay.global_search_row.right - 16 * scale_ : lay.global_search_hotkey_button.left - 12 * scale_,
+            lay.global_search_row.top + 40 * scale_);
+        painter_.DrawText(l10n::Get(l10n::StringId::GlobalSearchHotkey), global_title, compositor_->TextFormat(), theme.text);
+        fluent::ButtonSpec global;
+        global.bounds = lay.global_search_hotkey_button;
+        global.text = vm.settings_global_search_capturing ? l10n::Get(l10n::StringId::GlobalSearchRecording) : vm.settings_global_search_hotkey;
+        global.state.hovered = IsHovered(vm, HitTestResult::SettingsGlobalSearchHotkey);
+        DrawSettingsButton(vm, global);
+        if (!vm.settings_global_search_error.empty()) painter_.DrawWrappedCaption(vm.settings_global_search_error,
+            D2D1::Point2F(lay.shortcut_global_error.left, lay.shortcut_global_error.top),
+            lay.shortcut_global_error.right - lay.shortcut_global_error.left, theme.text_secondary);
+        for (size_t i = 0; i < lay.shortcut_rows.size() && i < vm.settings_shortcuts.size(); ++i) {
+            const auto& row = vm.settings_shortcuts[i];
+            const auto& geometry = lay.shortcut_rows[i];
+            if (geometry.group.bottom > geometry.group.top)
+                painter_.DrawText(row.group, geometry.group, compositor_->HeaderFormat(), theme.text_secondary);
+            if (!VisibleInContent(geometry.card, lay.content, 0)) continue;
+            card(geometry.card);
+            const auto row_title = FitEndEllipsis(row.title, std::max(0.0f, geometry.title.right - geometry.title.left),
+                [&](const std::wstring& value) { return CellTextWidth(value); });
+            painter_.DrawText(row_title, geometry.title, compositor_->TextFormat(), theme.text);
+            button(geometry.binding, row.binding.empty() ? std::wstring(l10n::Pick(L"未设置", L"Unassigned")) : row.binding,
+                ShortcutEdit, row.command);
+            button(geometry.remove, L"", ShortcutRemove, row.command, !row.binding.empty(), L"\xE74D");
+            button(geometry.reset, L"", ShortcutReset, row.command, row.customized, L"\xE72C");
+        }
+        if (vm.settings_shortcuts.empty()) painter_.DrawText(l10n::Get(l10n::StringId::SettingsNoMatches),
+            lay.shortcut_empty, compositor_->TextFormat(), theme.text_secondary);
     } else if (vm.settings_page == 1) {
         auto draw_card = [&](const D2D1_RECT_F& card) {
             MakeBrush(dc, (vm.dark && !IsHighContrast() ? theme.fill_input : WithAlpha(theme.surface_card, std::max(card_alpha_, 0.65f))), brFillInput_);
@@ -824,6 +877,8 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     switch(static_cast<I>(setting_id)) {
     case I::SettingsTextRender: target=l.text_render_card;break;
     case I::SettingsExplorerTakeover: target=l.explorer_takeover_row;break;
+    case I::SettingsFileDialogBridge: target=l.file_dialog_bridge_row;break;
+    case I::SettingsFileDialogTakeover: target=l.file_dialog_takeover_row;break;
     case I::SettingsLockWindowSize: target=l.window_size_lock_row;break;
     case I::SettingsChangeDays: target=l.change_days_row;break;
     case I::SettingsTheme: target=l.theme_row;break;

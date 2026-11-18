@@ -6,6 +6,7 @@
 #include "ui_renderer_internal.h"
 #include "pane_header_icons.h"
 #include "command_icons.h"
+#include "toolbar_icons.h"
 
 namespace pulse::ui {
 
@@ -27,8 +28,7 @@ void MainRenderer::DrawPaneHeaderIcon(const D2D1_RECT_F& rc, PaneHeaderIcon icon
     case PaneHeaderIcon::Filter: command = I::Filter; break;
     }
     MakeBrush(dc, color, brText_);
-    command_icons::Draw(dc, brText_.get(), paneHeaderStroke_.get(), command,
-                        command_icons::CenteredBounds(rc, 18.0f * scale_));
+    toolbar_icons::Draw(dc, brText_.get(), paneHeaderStroke_.get(), command, rc, scale_);
 }
 
 } // namespace pulse::ui

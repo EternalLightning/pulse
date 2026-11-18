@@ -26,7 +26,9 @@ enum class Icon {
     File, Image, Drive, Network, Delete, Recycle, Tag, Settings, Sun,
     Cut, Copy, Paste, Rename, Sort, Filter, List, Grid, Split, Columns,
     Panel, PanelClose, Check, Eye, Info, Home, Tray, Pin, Link,
-    Palette, Sliders, Warning, Lock, OpenExternal, StarFilled, More, Count
+    Palette, Sliders, Warning, Lock, OpenExternal, StarFilled, More,
+    Undo, SelectAll, InvertSelection, Terminal, NewFolder, Library, Applications,
+    LayoutSingle, LayoutStacked, LayoutThree, LayoutFour, Count
 };
 
 inline Icon FromGlyph(std::wstring_view glyph) noexcept {
@@ -114,7 +116,8 @@ inline D2D1_RECT_F CenteredBounds(D2D1_RECT_F bounds, float preferred_size) noex
                       cx + side * 0.5f, cy + side * 0.5f);
 }
 
-inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon) noexcept {
+inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
+                                      float pixel_size = 0, float pixel_stroke = 1) noexcept {
     ID2D1PathGeometry* geometry = nullptr;
     ID2D1GeometrySink* sink = nullptr;
     if (FAILED(factory->CreatePathGeometry(&geometry))) return nullptr;
@@ -122,13 +125,20 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon) noexce
         geometry->Release();
         return nullptr;
     }
+    const float pixel_scale = pixel_size > 0 ? pixel_size/kCanvas : 1;
+    const float phase = std::fmod(pixel_stroke, 2.0f)*0.5f;
+    const auto point = [&](float x, float y) {
+        return pixel_size > 0 ? D2D1::Point2F(std::round(x*pixel_scale-phase)+phase,
+            std::round(y*pixel_scale-phase)+phase) : D2D1::Point2F(x,y);
+    };
+    const auto radius = [&](float r) { return pixel_size > 0 ? (std::max)(1.0f,std::round(r*pixel_scale)) : r; };
     const auto begin = [&](float x, float y) {
-        sink->BeginFigure({x,y}, (icon == Icon::StarFilled || icon == Icon::More) ?
+        sink->BeginFigure(point(x,y), (icon == Icon::StarFilled || icon == Icon::More) ?
             D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
     };
-    const auto to = [&](float x, float y) { sink->AddLine({x,y}); };
+    const auto to = [&](float x, float y) { sink->AddLine(point(x,y)); };
     const auto curve = [&](float x, float y, float a, float b, float c, float d) {
-        sink->AddBezier(D2D1::BezierSegment({x,y},{a,b},{c,d}));
+        sink->AddBezier(D2D1::BezierSegment(point(x,y),point(a,b),point(c,d)));
     };
     const auto end = [&](bool closed = false) {
         sink->EndFigure(closed ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);
@@ -141,7 +151,7 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon) noexce
         const auto first = *points.begin(), last = *(points.end()-1);
         const bool closed = first.x == last.x && first.y == last.y;
         begin(first.x,first.y);
-        sink->AddLines(points.begin()+1,static_cast<UINT32>(points.size()-1-(closed ? 1 : 0)));
+        for (auto it = points.begin()+1; it != points.end()-(closed ? 1 : 0); ++it) to(it->x,it->y);
         end(closed);
     };
     const auto box = [&](float x, float y, float a, float b, float r = 2.0f) {
@@ -152,24 +162,27 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon) noexce
         to(x,y+r); curve(x,y+r-c,x+r-c,y,x+r,y); end(true);
     };
     const auto circle = [&](float x, float y, float r) {
-        begin(x+r,y);
-        sink->AddArc(D2D1::ArcSegment({x-r,y},{r,r},0,D2D1_SWEEP_DIRECTION_CLOCKWISE,D2D1_ARC_SIZE_SMALL));
-        sink->AddArc(D2D1::ArcSegment({x+r,y},{r,r},0,D2D1_SWEEP_DIRECTION_CLOCKWISE,D2D1_ARC_SIZE_SMALL));
+        const auto center = point(x,y);
+        const float rr = radius(r);
+        sink->BeginFigure({center.x+rr,center.y}, (icon == Icon::StarFilled || icon == Icon::More) ?
+            D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
+        sink->AddArc(D2D1::ArcSegment({center.x-rr,center.y},{rr,rr},0,D2D1_SWEEP_DIRECTION_CLOCKWISE,D2D1_ARC_SIZE_SMALL));
+        sink->AddArc(D2D1::ArcSegment({center.x+rr,center.y},{rr,rr},0,D2D1_SWEEP_DIRECTION_CLOCKWISE,D2D1_ARC_SIZE_SMALL));
         end(true);
     };
     const auto dot = [&](float x, float y, float r = 0.85f) {
         // A short round-capped stroke stays solid in the shared outline pass.
         line(x,y,x+(std::max)(0.01f,2*r-kStroke),y);
     };
-    const auto arc = [&](float cx, float cy, float radius, float from, float finish) {
-        auto point = [&](float a) {
+    const auto arc = [&](float cx, float cy, float r, float from, float finish) {
+        const auto center = point(cx,cy);
+        const float rr = radius(r);
+        const auto on_circle = [&](float a) {
             const float angle = a * 0.01745329252f;
-            return D2D1::Point2F(cx + radius * std::cos(angle),
-                                 cy + radius * std::sin(angle));
+            return D2D1::Point2F(center.x + rr * std::cos(angle), center.y + rr * std::sin(angle));
         };
-        const auto first = point(from);
-        begin(first.x,first.y);
-        sink->AddArc(D2D1::ArcSegment(point(finish),{radius,radius},0,
+        sink->BeginFigure(on_circle(from), D2D1_FIGURE_BEGIN_HOLLOW);
+        sink->AddArc(D2D1::ArcSegment(on_circle(finish),{rr,rr},0,
             D2D1_SWEEP_DIRECTION_CLOCKWISE,finish-from > 180 ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL));
         end();
     };
@@ -316,6 +329,25 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon) noexce
     case Icon::Sliders:
         line(3,6,8,6); line(13,6,21,6); circle(10.5f,6,2.5f);
         line(3,18,14,18); line(19,18,21,18); circle(16.5f,18,2.5f); break;
+    case Icon::Undo:
+        path({{8,4},{3,9},{8,14}}); line(3,9,15,9);
+        begin(15,9); curve(23,9,23,20,15,20); to(11,20); end(); break;
+    case Icon::SelectAll:
+        box(3,3,21,21,1); line(8,3,8,21); line(16,3,16,21); line(3,8,21,8); line(3,16,21,16); break;
+    case Icon::InvertSelection:
+        circle(12,12,9); line(12,3,12,21); line(4,8,12,8); line(3,12,12,12); line(4,16,12,16); break;
+    case Icon::Terminal:
+        box(3,4,21,20,1); path({{6,8},{10,12},{6,16}}); line(13,16,18,16); break;
+    case Icon::NewFolder:
+        folder(); line(12,11,12,17); line(9,14,15,14); break;
+    case Icon::Library:
+        box(3,4,7,21,0); box(10,4,14,21,0); path({{17,4},{21,4},{23,20},{19,21},{17,4}}); break;
+    case Icon::Applications:
+        box(3,3,10,10,1); box(14,3,21,10,1); box(3,14,10,21,1); box(14,14,21,21,1); break;
+    case Icon::LayoutSingle: box(3,4,21,20,1); break;
+    case Icon::LayoutStacked: box(3,4,21,20,1); line(3,12,21,12); break;
+    case Icon::LayoutThree: box(3,4,21,20,1); line(9,4,9,20); line(15,4,15,20); break;
+    case Icon::LayoutFour: box(3,4,21,20,1); line(12,4,12,20); line(3,12,21,12); break;
     case Icon::Warning: path({{12,3},{22,21},{2,21},{12,3}}); line(12,9,12,14); dot(12,17.5f); break;
     case Icon::Lock: box(4,10,20,21); arc(12,8,5,180,360); line(7,8,7,10); line(17,8,17,10); line(12,14,12,17); break;
     default: break;

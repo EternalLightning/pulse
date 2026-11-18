@@ -30,6 +30,8 @@ void Check(bool passed, const char* name) {
 
 class VirtualFileData final : public IDataObject {
 public:
+    explicit VirtualFileData(std::wstring file_drop) : file_drop_(std::move(file_drop)) {}
+
     explicit VirtualFileData(std::string contents, bool corrupt_descriptor = false,
                              bool cancel_contents = false)
         : contents_(std::move(contents)), corrupt_descriptor_(corrupt_descriptor),
@@ -58,6 +60,21 @@ public:
     HRESULT STDMETHODCALLTYPE GetData(FORMATETC* format, STGMEDIUM* medium) override {
         if (!format || !medium) return E_POINTER;
         *medium = {};
+        if (!file_drop_.empty()) {
+            if (FAILED(QueryGetData(format))) return DV_E_FORMATETC;
+            const size_t size = sizeof(DROPFILES) + (file_drop_.size() + 2) * sizeof(wchar_t);
+            HGLOBAL block = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, size);
+            if (!block) return E_OUTOFMEMORY;
+            auto* header = static_cast<DROPFILES*>(GlobalLock(block));
+            if (!header) { GlobalFree(block); return E_OUTOFMEMORY; }
+            header->pFiles = sizeof(DROPFILES);
+            header->fWide = TRUE;
+            std::memcpy(header + 1, file_drop_.c_str(), (file_drop_.size() + 1) * sizeof(wchar_t));
+            GlobalUnlock(block);
+            medium->tymed = TYMED_HGLOBAL;
+            medium->hGlobal = block;
+            return S_OK;
+        }
         if (format->cfFormat == descriptor_format_ && (format->tymed & TYMED_HGLOBAL)) {
             if (corrupt_descriptor_) {
                 HGLOBAL block = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DWORD));
@@ -142,6 +159,8 @@ public:
     HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC*, STGMEDIUM*) override { return E_NOTIMPL; }
     HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* format) override {
         if (!format) return E_POINTER;
+        if (!file_drop_.empty())
+            return format->cfFormat == CF_HDROP && (format->tymed & TYMED_HGLOBAL) ? S_OK : DV_E_FORMATETC;
         if (format->cfFormat == descriptor_format_ && (format->tymed & TYMED_HGLOBAL)) return S_OK;
         if (format->cfFormat == contents_format_ && format->lindex == 0 &&
             (format->tymed & (TYMED_ISTREAM | TYMED_HGLOBAL)))
@@ -156,6 +175,10 @@ public:
     HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** out) override {
         if (out) *out = nullptr;
         if (direction != DATADIR_GET || !out) return E_NOTIMPL;
+        if (!file_drop_.empty()) {
+            FORMATETC format{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+            return SHCreateStdEnumFmtEtc(1, &format, out);
+        }
         FORMATETC formats[] = {
             {descriptor_format_, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL},
             {contents_format_, nullptr, DVASPECT_CONTENT, 0, TYMED_ISTREAM | TYMED_HGLOBAL},
@@ -172,6 +195,7 @@ private:
     CLIPFORMAT descriptor_format_ = 0;
     CLIPFORMAT contents_format_ = 0;
     std::string contents_;
+    std::wstring file_drop_;
     bool corrupt_descriptor_ = false;
     bool cancel_contents_ = false;
 };
@@ -307,6 +331,24 @@ int wmain() {
         !std::filesystem::exists(same_folder_source),
         "only explicit cut moves a Shell item and waits for destination completion");
     source_data.Reset(); source_array.Reset(); source_item.Reset();
+
+    const auto hdrop_source = root / L"clipboard source 中文.txt";
+    std::ofstream(hdrop_source, std::ios::binary) << payload;
+    Microsoft::WRL::ComPtr<IDataObject> hdrop_data;
+    hdrop_data.Attach(new VirtualFileData(hdrop_source.wstring()));
+    const auto hdrop_folder = root / L"hdrop";
+    std::filesystem::create_directory(hdrop_folder);
+    Microsoft::WRL::ComPtr<IShellItemArray> hdrop_items;
+    DWORD hdrop_count = 0;
+    Check(!pulse::ops::HasShellFileData(hdrop_data.Get()) &&
+        SUCCEEDED(pulse::ops::ResolveShellClipboardItemsForTest(hdrop_data.Get(), &hdrop_items)) &&
+        SUCCEEDED(hdrop_items->GetCount(&hdrop_count)) && hdrop_count == 1,
+        "the Pulse clipboard's CF_HDROP resolves to a Shell item without a Shell ID list");
+    Check(pulse::ops::PasteShellDataForTest(hdrop_data.Get(),
+        hdrop_folder.wstring(), DROPEFFECT_COPY) &&
+        ReadEquals(hdrop_folder / hdrop_source.filename(), payload) && ReadEquals(hdrop_source, payload),
+        "the shared Shell paste copies a CF_HDROP-only source and preserves the original");
+    hdrop_items.Reset(); hdrop_data.Reset();
 
     const auto drag_folder = root / L"drag";
     std::filesystem::create_directory(drag_folder);

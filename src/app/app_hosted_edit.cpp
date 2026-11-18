@@ -7,6 +7,7 @@
 #include "../ui/edit_host.h"
 // app_hosted_edit.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
+#include "path_aliases_ui.h"
 #include "app_ui_schedule.h"
 #include "tab_shortcuts.h"
 #include "drive_label_rename.h"
@@ -209,7 +210,9 @@ void HideAddressEditor(AppState& s, bool navigate) {
     if (navigate) {
         wchar_t buf[MAX_PATH * 4];
         GetWindowTextW(s.hwndAddressEdit, buf, ARRAYSIZE(buf));
-        NavigateTo(s, FormatAddressPath(buf));
+        std::wstring resolved;
+        if (!ResolvePathAlias(s, buf, resolved)) resolved = FormatAddressPath(buf);
+        if (!resolved.empty()) NavigateTo(s, resolved);
     }
     s.addressIgnoreKillFocus = true;
     ShowWindow(s.hwndAddressEdit, SW_HIDE);
@@ -390,6 +393,7 @@ void LayoutRenameOverlay(AppState& s) {
     PlaceHostedEdit(s.hwndRenameEdit, s.hwnd, field, s.scale, 4, 4);
 }
 void ShowRenameOverlay(AppState& s) {
+    if (BuildCommandContext(s).shell_selection) return;
     if(DeferContentSelection(s,[](AppState& v){ShowRenameOverlay(v);})) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot || tab->selected_index < 0) return;

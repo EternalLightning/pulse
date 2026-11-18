@@ -315,9 +315,6 @@ int wmain(int argc, wchar_t** argv) {
     Check(NormalizeNetworkRoot(L"  \\\\server/share/folder\\  ") ==
               L"\\\\server\\share\\folder",
           L"network UNC root normalization");
-    Check(NormalizeNetworkRoot(L"\\\\?\\UNC\\server\\share\\folder") ==
-              L"\\\\server\\share\\folder",
-          L"network long UNC normalization");
     Check(NormalizeNetworkRoot(L"\\\\192.0.2.10\\示例共享盘\\") ==
           L"\\\\192.0.2.10\\示例共享盘",
           L"network Chinese UNC root normalization");

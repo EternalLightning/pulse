@@ -5,6 +5,7 @@
 
 #pragma once
 #include "ui_renderer.h"
+#include "../common/localization.h"
 #include <cmath>
 
 namespace pulse::ui {
@@ -14,6 +15,7 @@ struct HomeLayout {
     std::array<D2D1_RECT_F, 3> headings{};
     std::array<D2D1_RECT_F, 3> content_clips{};
     std::array<bool, 3> empty{};
+    D2D1_RECT_F customize{};
     D2D1_RECT_F network_notice{};
     float height = 0.0f;
 };
@@ -36,6 +38,9 @@ inline HomeLayout MakeHomeLayout(const PaneViewModel& pane, D2D1_RECT_F bounds, 
     for (int group = 0; group < 3; ++group) {
         const float card_height = (group == 0 ? 60 : 88) * scale;
         out.headings[group] = D2D1::RectF(left, y, left + width, y + 28 * scale);
+        if (group == 0) out.customize = D2D1::RectF(left + width - (width < 240*scale ? 32 :
+            l10n::effective_language() == l10n::Language::ZhCN ? 92 : 128)*scale,
+            y-2*scale, left+width, y+30*scale);
         y += 36 * scale;
         const float expansion = HomeGroupExpansion(pane, group);
         if (expansion <= 0.0f) { y += 12 * scale; continue; }

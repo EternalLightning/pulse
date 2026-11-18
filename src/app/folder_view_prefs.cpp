@@ -134,6 +134,21 @@ bool FolderViewPrefs::SetColumns(const std::wstring& path, const std::array<floa
     return true;
 }
 
+std::optional<model::DetailsColumnPrefs> FolderViewPrefs::FindColumnLayout(const std::wstring& path) const {
+    const auto it = column_layouts_.find(FolderKey(path));
+    return it == column_layouts_.end() ? std::nullopt : std::optional(it->second);
+}
+
+bool FolderViewPrefs::SetColumnLayout(const std::wstring& path, const model::DetailsColumnPrefs& columns) {
+    const auto key = FolderKey(path);
+    if (key.empty() || !model::ValidDetailsColumns(columns)) return false;
+    if (!columns.configured) return column_layouts_.erase(key) != 0;
+    const auto [it, inserted] = column_layouts_.try_emplace(key, columns);
+    if (!inserted && it->second == columns) return false;
+    it->second = columns;
+    return true;
+}
+
 void FolderViewPrefs::AppendJson(std::wstring& out) const {
     // Group paths by stable view names, using the existing string-array codec.
     for (int i = 0; i < 8; ++i) {
@@ -196,6 +211,28 @@ void FolderViewPrefs::AppendJson(std::wstring& out) const {
         out += L"]}";
     }
     out += L"]";
+    out += L",\n  \"folder_column_layouts\":[";
+    first = true;
+    for (const auto& [path, columns] : column_layouts_) {
+        if (!first) out += L",";
+        first = false;
+        out += L"{\"path\":\"";
+        json::Escape(path, out);
+        out += L"\",\"order\":[";
+        for (size_t i = 0; i < columns.order.size(); ++i) {
+            if (i) out += L",";
+            out += L"\"";
+            out += model::DetailsColumnToken(columns.order[i]);
+            out += L"\"";
+        }
+        out += L"],\"widths\":[";
+        for (size_t i = 0; i < columns.widths.size(); ++i) {
+            if (i) out += L",";
+            out += std::to_wstring(columns.widths[i]);
+        }
+        out += L"]}";
+    }
+    out += L"]";
 }
 
 void FolderViewPrefs::ReadJson(const std::wstring& input) {
@@ -235,6 +272,34 @@ void FolderViewPrefs::ReadJson(const std::wstring& input) {
                 if (value.kind != json::Kind::Number || end == value.text.c_str() || *end) valid = false;
             }
             if (valid) SetColumns(path->text, columns);
+        }
+    }
+    const auto* layouts = doc.Find(L"folder_column_layouts");
+    if (layouts && layouts->kind == json::Kind::Array) {
+        for (const auto& item : layouts->children) {
+            const auto* path = item.Find(L"path");
+            const auto* order = item.Find(L"order");
+            if (!path || path->kind != json::Kind::String || !order || order->kind != json::Kind::Array) continue;
+            model::DetailsColumnPrefs columns;
+            columns.configured = true;
+            for (const auto& value : order->children) {
+                if (value.kind != json::Kind::String) continue;
+                for (size_t i = 0; i < model::kDetailsColumnCount; ++i) {
+                    const auto kind = static_cast<model::DetailsColumnKind>(i);
+                    // Unknown future columns are ignored without disturbing known order.
+                    if (value.text == model::DetailsColumnToken(kind)) columns.order.push_back(kind);
+                }
+            }
+            bool valid = true;
+            if (const auto* widths = item.Find(L"widths"); widths && widths->kind == json::Kind::Array) {
+                for (size_t i = 0; i < std::min(widths->children.size(), columns.widths.size()); ++i) {
+                    const auto& value = widths->children[i];
+                    wchar_t* end = nullptr;
+                    columns.widths[i] = std::wcstof(value.text.c_str(), &end);
+                    if (value.kind != json::Kind::Number || end == value.text.c_str() || *end) valid = false;
+                }
+            }
+            if (valid) SetColumnLayout(path->text, columns);
         }
     }
 }

@@ -7,7 +7,9 @@
 
 #include "../common/localization.h"
 #include "../ui/fluent_menu.h"
+#include "command_shortcut.h"
 #include <span>
+#include <vector>
 
 namespace pulse::app {
 
@@ -16,6 +18,7 @@ namespace pulse::app {
 struct CommandContext {
     int selected_count = 0;
     bool archive_view = false;
+    bool shell_selection = false;
     bool read_only = false;
     bool filesystem_folder = false;
     bool selection_filesystem = false;
@@ -40,13 +43,6 @@ enum class CommandAvailability {
     Terminal, CopyPath, View, GroupSelection, DissolveSelection,
 };
 
-struct CommandShortcut {
-    unsigned key = 0;
-    bool ctrl = false;
-    bool shift = false;
-    bool alt = false;
-};
-
 struct CommandDescriptor {
     int command;
     l10n::StringId label;
@@ -60,6 +56,16 @@ std::span<const CommandDescriptor> GetCommandCatalog();
 const CommandDescriptor* FindCommandDescriptor(int command);
 bool IsCommandEnabled(int command, const CommandContext& context);
 std::wstring CommandShortcutText(const CommandShortcut& shortcut);
+CommandShortcut EffectiveCommandShortcut(int command);
+CommandShortcut EffectiveCommandShortcut(int command, std::span<const CommandShortcutOverride> overrides);
+void ConfigureCommandShortcuts(std::span<const CommandShortcutOverride> overrides);
+bool ParseCommandShortcut(std::wstring_view text, CommandShortcut& shortcut);
+enum class ShortcutBindingResult { Success, Invalid, Reserved, Conflict };
+ShortcutBindingResult ValidateCommandShortcut(int command, const CommandShortcut& shortcut,
+    std::span<const CommandShortcutOverride> overrides, int* conflict_command = nullptr);
+ShortcutBindingResult SetCommandShortcut(std::vector<CommandShortcutOverride>& overrides,
+    int command, const CommandShortcut& shortcut, int* conflict_command = nullptr);
+void ResetCommandShortcut(std::vector<CommandShortcutOverride>& overrides, int command);
 // Exact modifier match. Text editors keep their existing, higher-priority input
 // handling; callers decide when a shortcut may be dispatched.
 int LookupCommandShortcut(unsigned key, bool ctrl, bool shift, bool alt);

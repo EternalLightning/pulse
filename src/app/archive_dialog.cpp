@@ -28,7 +28,7 @@ bool ShowArchiveExtractDialog(HWND owner, bool dark, COLORREF accent,
     spec.close_id = 104;
     spec.fields.push_back({100, l10n::Get(l10n::StringId::ArchiveDestination), destination, {}, 100, 32767});
     spec.fields.push_back({101, l10n::Get(l10n::StringId::ArchiveOptionalPassword), options.password, {}, 192, 4096, true});
-    spec.browse_text = l10n::Get(l10n::StringId::DupBrowse) + L"…";
+    spec.browse_text = l10n::Get(l10n::StringId::DupBrowse);
     spec.browse = [](HWND dialog, std::wstring& value) {
         std::wstring selected;
         if (!ipc::PickShellPath(dialog, true, l10n::Get(l10n::StringId::ArchivePickDestination), selected, {}, value)) return false;

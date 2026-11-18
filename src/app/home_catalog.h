@@ -5,6 +5,8 @@
 
 #pragma once
 #include "../ui/ui_renderer.h"
+#include "../model/home_quick_access.h"
+#include <array>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -16,7 +18,7 @@ namespace pulse::app {
 struct SidebarModel;
 class HomeCatalog {
 public:
-    void Refresh();
+    void Refresh(const model::HomeQuickAccessPrefs& prefs = {});
     void UpdateDriveLabel(const std::wstring& root, const std::wstring& label);
     bool ConsumeUpdate();
     bool Loading() const;
@@ -26,9 +28,11 @@ private:
     struct State {
         std::mutex mutex;
         std::vector<ui::HomeCardView> cards;
+        std::array<ui::HomeCardView, model::kHomeQuickAccessItemCount> quick_access_cards;
         std::unordered_map<std::wstring, std::pair<uint64_t, uint64_t>> drive_capacity;
         std::unordered_map<std::wstring, std::wstring> label_updates;
         uint64_t generation = 0;
+        model::HomeQuickAccessPrefs quick_access;
         bool loading = false;
         bool updated = false;
     };

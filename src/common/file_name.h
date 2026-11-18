@@ -10,6 +10,13 @@
 
 namespace pulse::path {
 
+inline std::wstring FileNameOf(std::wstring_view path) {
+    while (path.size() > 1 && (path.back() == L'\\' || path.back() == L'/'))
+        path.remove_suffix(1);
+    const size_t slash = path.find_last_of(L"\\/");
+    return std::wstring(slash == std::wstring_view::npos ? path : path.substr(slash + 1));
+}
+
 inline bool IsValidFileName(std::wstring_view name) {
     // Component length is enforced by the destination filesystem, not a fixed UI limit.
     if (name.empty() || name.back() == L'.' || name.back() == L' ') return false;

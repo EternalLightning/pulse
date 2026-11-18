@@ -29,6 +29,9 @@
 #include "preview_handler_host.h"
 #include "sysctx_view.h"
 #include "../model/builtin_menu_items.h"
+#include "../model/details_columns.h"
+#include "shortcut_settings_model.h"
+#include "home_quick_access_settings_model.h"
 #include "../fs/fs_enum.h"
 #include "../fs/fs_snapshot.h"
 #include <algorithm>
@@ -258,6 +261,7 @@ struct PaneViewModel {
     // Individual column widths in DIPs; zero selects the responsive default.
     // Stored widths: Date, Type, Size, Cloud; search prepends Name.
     std::array<float, 4> details_column_dividers{};
+    model::DetailsColumnPrefs details_columns;
     std::array<float, 5> search_column_dividers{};
     bool focused = true;
     bool marquee_active = false;
@@ -540,7 +544,15 @@ struct DuplicateDriveView {
     bool selected = false;
 };
 
+struct ToolbarCommandView {
+    int command = 0;
+    std::wstring text, glyph;
+    bool enabled = false;
+    fluent::MenuPictogram pictogram = fluent::MenuPictogram::None;
+};
 struct WindowViewModel {
+    std::vector<int> toolbar_order{186, 2, 3, 4, 6, 5, 7};
+    std::vector<ToolbarCommandView> toolbar_commands;
     bool can_paste = false;
     bool selection_has_drive_root = false;
     std::optional<std::array<bool, 6>> toolbar_commands_enabled;
@@ -650,7 +662,11 @@ struct WindowViewModel {
     unsigned settings_expanded = kSettingsDefaultExpandedMask;
     int settings_theme = 0; // system, light, dark
     bool settings_open = false;
-    int settings_page = 0; // 0 appearance, 1 search/index, 2 context, 3 about, 4 duplicates, 5 system menu, 6 files, 7 tabs, 8 startup, 9 operations
+    int settings_page = 0; // 0 appearance, 1 search/index, 2 context, 3 about, 4 duplicates, 5 system menu, 6 files, 7 tabs, 8 startup, 9 operations, 10 shortcuts, 11 quick access
+    std::vector<ShortcutSettingsRow> settings_shortcuts;
+    std::wstring settings_shortcut_filter;
+    uint32_t settings_home_access_hidden = 0;
+    std::vector<HomeQuickAccessSettingsRow> settings_home_access_folders;
     float settings_scroll = 0.0f;
     int settings_focus_region = 0, settings_focus_index = -1, settings_focus_sub_index = -1;
     std::wstring settings_focus_key;
@@ -673,6 +689,8 @@ struct WindowViewModel {
     bool settings_take_over_win_e = false;
     bool settings_take_over_this_pc = false;
     bool settings_explorer_takeover = false;
+    bool settings_file_dialog_takeover = false;
+    bool settings_file_dialog_bridge = false;
     bool settings_system_pending = false;
     std::wstring settings_system_status;
     bool settings_blank_click_go_back = false;
@@ -748,6 +766,7 @@ struct HitTestResult {
         HomeButton,
         HomeCard,
         HomeGroup,
+        HomeCustomize,
         HomeNetworkSettings,
         Minimize,
         Maximize,
@@ -757,6 +776,7 @@ struct HitTestResult {
         NavUp,
         NavRefresh,
         NewButton,
+        CustomToolbarCommand,
         Cut,
         Copy,
         Paste,
@@ -876,6 +896,8 @@ struct HitTestResult {
         SettingsDupGroupDelete,
         SettingsDupGroupIgnore,
         SettingsDupDeleteAll,
+        SettingsShortcut,
+        SettingsHomeQuickAccess,
         SearchFilter,
         TrayPrev,                 // staging tray footer: previous card
         TrayNext,                  // staging tray footer: next card (top card to the back)
@@ -935,6 +957,8 @@ public:
     SIZE BackgroundImageSize(const std::wstring& path);
     void InvalidateTypography();
     void SetIconNotifyWindow(HWND hwnd);
+    void SetToolbarOrder(const std::vector<int>& order) { toolbar_order_ = order; }
+    float ToolbarHeight() const { return toolbar_height_; }
     void InvalidateShellIcon(const std::wstring& path) { icon_cache_.Invalidate(path); }
     void NotifyPreviewActivate(bool active) { preview_handler_.NotifyAppActivate(active); }
     void NotifyPreviewOwnerHidden() { preview_handler_.Hide(); }
@@ -993,6 +1017,8 @@ public:
     D2D1_RECT_F PaneListRect(const PaneViewModel& vm, const D2D1_RECT_F& pane_bounds) const;
     D2D1_RECT_F FilterBoxRect(const D2D1_RECT_F& pane_bounds,
                               float expand = 1.0f) const;
+    D2D1_RECT_F PaneSplitButtonRect(const D2D1_RECT_F& pane_bounds) const;
+    D2D1_RECT_F PaneHeaderTextRect(const D2D1_RECT_F& pane_bounds) const;
     D2D1_RECT_F PaneMediumIconsRect(const D2D1_RECT_F& pane_bounds,
                                     float filter_expand = 1.0f) const;
     D2D1_RECT_F PaneViewButtonRect(const D2D1_RECT_F& pane_bounds,
@@ -1033,7 +1059,7 @@ public:
     void ScrollDetailsPreview(float steps, float x, float y, bool horizontal = false);
     void ToggleDetailsPreviewFit(float x, float y);
 
-    enum class ColumnKind : uint8_t { Name, Path, Date, Type, Size, Cloud };
+    using ColumnKind = model::DetailsColumnKind;
     // Details columns in display order. Name is always first; Cloud precedes Date; Path only in
     // wide search views; Type then Date are dropped first when space is short.
     struct DetailsColumnLayout {
@@ -1041,8 +1067,8 @@ public:
         float right = 0.0f;
         float cloud_left = 0.0f;
         float cloud_width = 0.0f;
-        std::array<float, 6> widths{};
-        std::array<ColumnKind, 6> kinds{ColumnKind::Name, ColumnKind::Date,
+        std::array<float, model::kDetailsColumnCount> widths{};
+        std::array<ColumnKind, model::kDetailsColumnCount> kinds{ColumnKind::Name, ColumnKind::Date,
                                         ColumnKind::Type, ColumnKind::Size, ColumnKind::Size};
         int count = 4;
         // Narrow search view: the folder path is drawn under the name.
@@ -1083,7 +1109,7 @@ public:
     }
     bool ListSmartDate() const { return list_smart_date_; }
     // Columns shown by the last painted Details header of a pane: bit
-    // (1 << ColumnKind), plus bit 8 for the two-line search layout. 0 = unknown.
+    // (1 << ColumnKind), plus bit 31 for the two-line search layout. 0 = unknown.
     uint32_t PaintedColumnMask(int pane_index) const {
         return pane_index >= 0 && pane_index < static_cast<int>(painted_columns_.size())
             ? painted_columns_[static_cast<size_t>(pane_index)] : 0u;
@@ -1108,6 +1134,10 @@ public:
         bool cloud_status = false) const;
     DetailsColumnLayout DetailsColumns(const D2D1_RECT_F& pane_bounds,
                                        const PaneViewModel& vm) const;
+    void ResizeConfiguredColumn(const D2D1_RECT_F& pane_bounds, PaneViewModel& vm,
+                                int divider_index, float cursor_x) const;
+    void AutoFitConfiguredColumn(PaneViewModel& vm, const D2D1_RECT_F& pane_bounds,
+                                 int divider_index) const;
     std::array<float, 4> ResizeDetailsColumnDivider(
         const D2D1_RECT_F& pane_bounds,
         const std::array<float, 4>& dividers,
@@ -1222,6 +1252,7 @@ public:
     int TrayDeckCapacity(float window_w) const;
 
 private:
+    std::vector<int> toolbar_order_{186, 2, 3, 4, 6, 5, 7};
     struct TabStripMetrics {
         float x0 = 0.0f;
         float y = 0.0f;
@@ -1289,6 +1320,7 @@ private:
     ComPtr<IDWriteTextFormat> sysctx_title_format_, sysctx_stat_format_;
     float sysctx_title_scale_ = 0;
     void DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawSettingsHomeQuickAccess(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
 
     void DrawList(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme,
                   int hover_region = 0, int hover_control_index = -1, bool pane_focused = true);
@@ -1478,7 +1510,7 @@ private:
     int painting_pane_ = 0;
     struct HoverTrack { BinaryTransition animation; uint64_t frame = 0; };
     std::unordered_map<std::wstring, HoverTrack> hover_tracks_;
-    std::array<BinaryTransition, 10> settings_nav_tracks_{};
+    std::array<BinaryTransition, 12> settings_nav_tracks_{};
     float HoverOpacity(const std::wstring& key, bool hovered, float enter_ms = 110.0f,
                        float exit_ms = 150.0f);
     float ControlHoverOpacity(const D2D1_RECT_F& bounds, bool hovered);

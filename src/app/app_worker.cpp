@@ -12,6 +12,7 @@
 #include "../fs/fs_enum.h"
 #include "../fs/fs_recycle.h"
 #include "../fs/fs_net_cache.h"
+#include "../fs/shell_namespace.h"
 #include "../common/path_utils.h"
 #include <algorithm>
 #include <chrono>
@@ -222,7 +223,8 @@ uint64_t WorkerPool::Refresh(const std::wstring& path, ui::SortColumn col,
     item.folder_sort = folders;
     item.cache_write_ticket = cache_write_ticket;
     item.cached_snapshot = std::move(cached);
-    item.provider_request = fs::IsUncPath(path) || fs::IsRecycleViewPath(path) || fs::IsDevicePath(path);
+    item.provider_request = fs::IsUncPath(path) || fs::IsRecycleViewPath(path) ||
+        fs::IsDevicePath(path) || fs::IsShellNamespacePath(path);
     if (!fs::IsVirtualPath(path)) {
         std::shared_ptr<DirectoryWork> group;
         const auto previous = state->LatestDirectory(path);
@@ -438,6 +440,15 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
             }
             entries->push_back(std::move(entry));
         }
+    } else if (fs::IsShellNamespacePath(item.path)) {
+        const HRESULT error = fs::EnumerateShellNamespace(item.path, *entries, cancelled);
+        if (FAILED(error)) {
+            res.cancelled = cancelled() || error == HRESULT_FROM_WIN32(ERROR_CANCELLED);
+            res.error = !res.cancelled;
+            res.error_code = HRESULT_FACILITY(error) == FACILITY_WIN32
+                ? HRESULT_CODE(error) : ERROR_GEN_FAILURE;
+            return res;
+        }
     } else if (fs::IsDevicePath(item.path)) {
         const auto error = DeviceRegistry::Instance().ListFolder(item.path, *entries, cancelled);
         if (error != fs::DeviceError::None) {
@@ -498,7 +509,8 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
     if (cancelled()) { res.cancelled = true; res.snapshot.reset(); res.facts.reset(); return res; }
 
     // Resolve .lnk targets (Recent folder, desktop shortcuts) before display.
-    if (!fs::IsRecycleViewPath(item.path) && !fs::IsDevicePath(item.path)) {
+    if (!fs::IsRecycleViewPath(item.path) && !fs::IsDevicePath(item.path) &&
+        !fs::IsShellNamespacePath(item.path)) {
         ResolveLinksInPlace(item.path, *entries, cancelled);
     }
     if (cancelled()) { res.cancelled = true; res.snapshot.reset(); res.facts.reset(); return res; }

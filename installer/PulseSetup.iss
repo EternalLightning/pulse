@@ -104,6 +104,7 @@ Source: "{#BuildDir}\Pulse.Document.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Preview.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Shell.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\Pulse.Integration.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\Pulse.DialogBridge.dll"; DestDir: "{app}"; Flags: ignoreversion restartreplace uninsrestartdelete
 
 [InstallDelete]
 ; The Shell helper was renamed; remove only the superseded app-local binary.
@@ -452,7 +453,20 @@ begin
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  BridgeResult: Integer;
+  PulseExe: String;
 begin
+  if CurUninstallStep = usUninstall then
+  begin
+    PulseExe := ExpandConstant('{app}\Pulse.exe');
+    if FileExists(PulseExe) then
+    begin
+      if not Exec(PulseExe, '--unregister-file-dialog-bridge', '', SW_HIDE,
+        ewWaitUntilTerminated, BridgeResult) or (BridgeResult <> 0) then
+        RaiseException(FmtMessage(CustomMessage('FileDialogBridgeUninstallError'), [IntToStr(BridgeResult)]));
+    end;
+  end;
   if CurUninstallStep = usPostUninstall then
   begin
     { Silent removal must clean up too. The upgrading installer saves and

@@ -122,6 +122,13 @@ enum MenuCmd : int {
     CmdCloudDownload = 198,
     CmdCloudCancelDownload = 199,
     CmdRecentBase = 200,
+    CmdCustomizeCommands = 300,
+    CmdPathAliases,
+    CmdSetPathAlias,
+    CmdLibraries,
+    CmdControlPanel,
+    CmdApplications,
+    CmdSplitMenu,
     CmdIndexBase = 1000,
     // Explorer integration (优化.md §7): registry static verbs bound to the
     // current selection (+index into the StaticVerb list) and pulse_shell

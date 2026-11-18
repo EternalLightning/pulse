@@ -7,6 +7,7 @@
 
 #include "../ui/view_layout.h"
 #include "../model/sort_types.h"
+#include "../model/details_columns.h"
 #include <map>
 #include <optional>
 #include <string>
@@ -36,7 +37,9 @@ public:
     bool SetGroup(const std::wstring& path, ui::GroupMode mode, model::SortDirection direction);
     std::optional<std::array<float, 4>> FindColumns(const std::wstring& path) const;
     bool SetColumns(const std::wstring& path, const std::array<float, 4>& columns);
-    void Clear() { views_.clear(); sorts_.clear(); groups_.clear(); columns_.clear(); }
+    std::optional<model::DetailsColumnPrefs> FindColumnLayout(const std::wstring& path) const;
+    bool SetColumnLayout(const std::wstring& path, const model::DetailsColumnPrefs& columns);
+    void Clear() { views_.clear(); sorts_.clear(); groups_.clear(); columns_.clear(); column_layouts_.clear(); }
     void AppendJson(std::wstring& out) const;
     void ReadJson(const std::wstring& json);
 
@@ -48,6 +51,7 @@ private:
     std::map<std::wstring, FolderSortPrefs, PathLess> sorts_;
     std::map<std::wstring, FolderGroupPrefs, PathLess> groups_;
     std::map<std::wstring, std::array<float, 4>, PathLess> columns_;
+    std::map<std::wstring, model::DetailsColumnPrefs, PathLess> column_layouts_;
 };
 
 } // namespace pulse::app

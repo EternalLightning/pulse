@@ -575,6 +575,7 @@ Pane::~Pane() {
 void Pane::NewTab(const std::wstring& path) {
     const ui::ViewMode mode = view.view_mode;
     const auto columns = view.details_column_dividers;
+    const auto configured_columns = view.details_columns;
     const auto search_columns = view.search_column_dividers;
     const bool column_layout = view.column_layout;
     auto column_widths = std::move(view.column_widths_dip);
@@ -582,6 +583,7 @@ void Pane::NewTab(const std::wstring& path) {
     view = Tab{};
     view.view_mode = mode;
     view.details_column_dividers = columns;
+    view.details_columns = configured_columns;
     view.search_column_dividers = search_columns;
     view.column_layout = column_layout;
     view.column_widths_dip = std::move(column_widths);
@@ -620,6 +622,7 @@ std::unique_ptr<LayoutTab> MakeSingleLayoutTab(const std::wstring& path, const T
     if (source) {
         pane->view.view_mode = source->view_mode;
         pane->view.details_column_dividers = source->details_column_dividers;
+        pane->view.details_columns = source->details_columns;
         pane->view.search_column_dividers = source->search_column_dividers;
         pane->view.column_layout = source->column_layout;
         pane->view.column_widths_dip = source->column_widths_dip;
@@ -1656,6 +1659,7 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.group_mode = tab->group_mode;
     out.group_direction = tab->group_direction;
     out.details_column_dividers = tab->details_column_dividers;
+    out.details_columns = tab->details_columns;
     out.search_column_dividers = tab->search_column_dividers;
     FillColumnStripView(out.column_strip, *tab);
     out.focused = pane.focused;

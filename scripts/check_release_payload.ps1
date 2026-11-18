@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $expectedVersion = [version](Get-Content -LiteralPath (Join-Path $repo 'version.txt') -Raw).Trim()
-foreach ($binary in @('Pulse.exe', 'Pulse.Index.exe', 'Pulse.Document.exe', 'Pulse.Preview.exe', 'Pulse.Shell.exe', 'Pulse.Integration.exe')) {
+foreach ($binary in @('Pulse.exe', 'Pulse.Index.exe', 'Pulse.Document.exe', 'Pulse.Preview.exe', 'Pulse.Shell.exe', 'Pulse.Integration.exe', 'Pulse.DialogBridge.dll')) {
     $binaryPath = Join-Path $BuildDir $binary
     $info = [Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path -LiteralPath $binaryPath).Path)
     if ([version]$info.ProductVersion -ne $expectedVersion -or [version]$info.FileVersion -ne $expectedVersion) {

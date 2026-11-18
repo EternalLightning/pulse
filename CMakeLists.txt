@@ -153,6 +153,11 @@ function(pulse_add_version_resource target description internal_name original_fi
     set(PULSE_FILE_DESCRIPTION "${description}")
     set(PULSE_INTERNAL_NAME "${internal_name}")
     set(PULSE_ORIGINAL_FILENAME "${original_filename}")
+    if(original_filename MATCHES "[.]dll$")
+        set(PULSE_FILE_TYPE VFT_DLL)
+    else()
+        set(PULSE_FILE_TYPE VFT_APP)
+    endif()
     configure_file(cmake/version.rc.in "generated/${target}_version.rc" @ONLY)
     target_sources(${target} PRIVATE "${CMAKE_BINARY_DIR}/generated/${target}_version.rc")
 endfunction()
@@ -384,6 +389,7 @@ list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "image_open\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "device_fake\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "text_task_reader\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "content_timing\\.cpp$")
+list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "/(picker_(client|protocol|transport)|file_save_(model|access_policy|revalidation))\\.cpp$")
 
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "lumatext_renderer\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "(document_(host_main|reader|filter)|office_ooxml|pdfium_text)\\.cpp$")
@@ -433,13 +439,14 @@ if(PULSE_APP_SOURCES)
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/panel_right_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/files_toolbar/delete_color_dark.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/files_toolbar/group.svg"
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/toolbar_customize_16_regular.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/panel_right_contract_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/pc_24_color.svg"
         "${CMAKE_CURRENT_SOURCE_DIR}/assets/fluent/tag_24_color.svg")
     target_link_options(pulse PRIVATE /MANIFEST:NO)
     target_link_libraries(pulse PRIVATE
         d3d11 d2d1 dwrite dxgi dcomp dwmapi shcore ole32 shell32 uuid comctl32 advapi32 shlwapi version windowscodecs gdi32 netapi32 mpr bcrypt pulse_crash_reporter)
-    target_link_libraries(pulse PRIVATE secur32 propsys oleaut32 cfgmgr32)
+    target_link_libraries(pulse PRIVATE secur32 propsys oleaut32 cfgmgr32 uiautomationcore)
     # Keep optional system services out of the initial loader work. These are
     # actual Pulse imports; delay-loading unused import libraries emits warnings.
     target_link_libraries(pulse PRIVATE delayimp)
@@ -453,6 +460,13 @@ if(PULSE_APP_SOURCES)
     pulse_enable_lumatext(pulse)
     pulse_add_version_resource(pulse "Pulse file manager" "Pulse" "Pulse.exe")
 endif()
+
+include(cmake/PulseDialogBridge.cmake)
+target_link_libraries(pulse PRIVATE pulse_picker_wire pulse_picker_save pulse_file_dialog_registration)
+add_dependencies(pulse pulse_dialog_bridge)
+pulse_add_version_resource(pulse_dialog_bridge "Pulse file dialog Shell bridge" "Pulse.DialogBridge" "Pulse.DialogBridge.dll")
+add_executable(pulse_file_dialog_registration_test EXCLUDE_FROM_ALL src/bench/file_dialog_registration_test.cpp)
+target_link_libraries(pulse_file_dialog_registration_test PRIVATE pulse_file_dialog_registration)
 
 # ---- Pulse.Index.exe: index + query host (session helper or Windows service) ----
 add_executable(pulse_index WIN32
@@ -614,7 +628,7 @@ if(PULSE_SHELL_SOURCES)
     add_dependencies(pulse_shell_query_test pulse_shell_query_fixture)
     foreach(shell_host_target pulse_shell pulse_context_worker_fixture
             pulse_shell_launch_worker_fixture pulse_shell_query_fixture)
-        target_sources(${shell_host_target} PRIVATE src/shell_host/shell_host.rc)
+        target_sources(${shell_host_target} PRIVATE src/shell_host/shell_host.rc src/ops/clipboard.cpp)
         target_link_options(${shell_host_target} PRIVATE /MANIFEST:NO)
     endforeach()
     set_property(SOURCE src/shell_host/shell_host.rc APPEND PROPERTY OBJECT_DEPENDS
@@ -1354,7 +1368,7 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     add_executable(pulse_permission_operation_prompt_ui_test
         src/bench/permission_operation_prompt_ui_test.cpp ${architecture_sources})
     add_executable(pulse_pane_animation_application_test
-        src/bench/pane_animation_application_test.cpp src/bench/content_reveal_ui_test.cpp ${architecture_sources})
+        src/bench/pane_animation_application_test.cpp src/bench/content_reveal_ui_test.cpp)
     add_executable(pulse_file_selection_ui_test
         src/bench/file_selection_ui_test.cpp src/bench/sidebar_starred_ui_test.cpp
         src/bench/window_size_lock_ui_test.cpp src/bench/tab_indicator_ui_test.cpp
@@ -1362,7 +1376,7 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
         src/bench/recycle_toolbar_ui_test.cpp
         src/bench/operation_center_application_test.cpp ${architecture_sources})
     add_executable(pulse_group_toolbar_ui_test
-        src/bench/group_toolbar_ui_test.cpp ${architecture_sources})
+        src/bench/group_toolbar_ui_test.cpp)
     # These regressions share one production object set and need no private rsp files.
     add_library(pulse_quality_application_objects OBJECT ${architecture_sources})
     target_link_libraries(pulse_quality_application_objects PRIVATE ${architecture_libraries})
@@ -1381,11 +1395,12 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     add_executable(pulse_takeover_delivery_fixture_test src/bench/takeover_delivery_fixture_test.cpp)
     add_executable(pulse_empty_state_render_test src/bench/empty_state_render_test.cpp)
     add_executable(pulse_virtual_location_navigation_test src/bench/virtual_location_navigation_test.cpp)
+    add_executable(pulse_file_dialog_takeover_test src/bench/file_dialog_takeover_test.cpp)
     add_executable(pulse_upstream_adaptation_test src/bench/upstream_adaptation_test.cpp
         src/bench/window_transfer_regression_test.cpp src/bench/network_access_application_test.cpp)
     target_compile_definitions(pulse_quality_application_objects PRIVATE PULSE_FOLDER_SIZES_TESTING=1)
     target_compile_definitions(pulse_folder_sizes_ui_cache_test PRIVATE PULSE_FOLDER_SIZES_TESTING=1)
-    foreach(quality_target pulse_hosted_edit_stability_test pulse_address_edit_stability_test pulse_removable_search_routing_test pulse_folder_sizes_ui_cache_test pulse_text_render_settings_test pulse_upstream_adaptation_test pulse_context_menu_settings_ui_test pulse_takeover_delivery_fixture_test pulse_empty_state_render_test pulse_virtual_location_navigation_test)
+    foreach(quality_target pulse_hosted_edit_stability_test pulse_address_edit_stability_test pulse_removable_search_routing_test pulse_folder_sizes_ui_cache_test pulse_text_render_settings_test pulse_upstream_adaptation_test pulse_context_menu_settings_ui_test pulse_takeover_delivery_fixture_test pulse_empty_state_render_test pulse_virtual_location_navigation_test pulse_pane_animation_application_test pulse_group_toolbar_ui_test pulse_file_dialog_takeover_test)
         target_link_libraries(${quality_target} PRIVATE pulse_quality_application_objects ${architecture_libraries})
         target_include_directories(${quality_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         foreach(quality_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
@@ -1413,7 +1428,7 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     target_link_libraries(pulse_playback_ui_test PRIVATE ${architecture_libraries})
     pulse_enable_lumatext(pulse_playback_ui_test)
     add_dependencies(pulse_playback_ui_test pulse_preview)
-    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_content_refresh_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_pane_animation_application_test pulse_file_selection_ui_test pulse_group_toolbar_ui_test)
+    foreach(architecture_target pulse_entry_order_application_test pulse_directory_contract_application_test pulse_notify_patch_application_test pulse_global_search_window_test pulse_filename_search_application_test pulse_rename_enter_test pulse_archive_navigation_test pulse_multiwindow_application_test pulse_content_refresh_test pulse_titlebar_layout_test pulse_permission_operation_prompt_ui_test pulse_file_selection_ui_test)
         target_link_libraries(${architecture_target} PRIVATE ${architecture_libraries})
         foreach(architecture_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
             get_target_property(architecture_value pulse ${architecture_property})
@@ -1492,6 +1507,12 @@ target_link_libraries(pulse_drop_shortcuts_test PRIVATE ole32 shell32 uuid)
 add_executable(pulse_device_source_test src/bench/device_source_test.cpp
     src/fs/device_path.cpp src/fs/device_fake.cpp src/fs/device_shell.cpp src/fs/device_worker.cpp)
 target_link_libraries(pulse_device_source_test PRIVATE shell32 ole32 uuid propsys cfgmgr32 shlwapi advapi32)
+
+# Directory worker fixtures share the same library and namespace provider.
+foreach(namespace_worker_target pulse_worker_lifecycle_test pulse_fs_worker_cancel_test pulse_staging_tray_test)
+    target_sources(${namespace_worker_target} PRIVATE src/fs/shell_namespace.cpp src/fs/device_worker.cpp)
+    target_link_libraries(${namespace_worker_target} PRIVATE propsys)
+endforeach()
 
 add_executable(pulse_settings_transfer_test src/bench/settings_transfer_test.cpp
     src/app/settings_transfer.cpp)
@@ -1667,5 +1688,12 @@ foreach(folder_operation_target IN LISTS folder_operation_targets)
     endif()
     if("${folder_operation_sources}" MATCHES "(recycle_fileop|operation_elevation_adapter|audit_ops_followup_test|ops_test_main)\\.cpp")
         target_link_libraries(${folder_operation_target} PRIVATE pulse_shell_file_operations)
+    endif()
+endforeach()
+
+foreach(home_quick_access_target IN ITEMS pulse_home_layout_test pulse_app_controllers_test
+        pulse_json_persistence_test pulse_app_core_remaining_test)
+    if(TARGET ${home_quick_access_target})
+        target_sources(${home_quick_access_target} PRIVATE src/model/home_quick_access.cpp)
     endif()
 endforeach()

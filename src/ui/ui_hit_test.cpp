@@ -205,6 +205,11 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             }
         }
         if (ContainsPt(lay.content, x, y)) {
+            if (vm.settings_page == 10 || vm.settings_page == 11) {
+                for (const auto& control : SettingsControls(vm, rect))
+                    if (control.region != HitTestResult::SettingsNav && ContainsPt(control.control_bounds, x, y)) return control;
+                return r;
+            }
             for(int i=0;i<2;++i) if(ContainsPt(lay.disclosure[i],x,y)) {
                 r.region=HitTestResult::SettingsDisclosure;r.index=i;return r;
             }
@@ -228,6 +233,8 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             if (IsSettingsCategory(vm.settings_page)) {
                 if(ContainsPt(lay.startup_tray_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=31;return r;}
                 if(ContainsPt(lay.explorer_takeover_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=24;return r;}
+                if(!vm.settings_system_pending && ContainsPt(lay.file_dialog_bridge_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=38;return r;}
+                if(ContainsPt(lay.file_dialog_takeover_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=37;return r;}
                 if(ContainsPt(lay.last_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=32;return r;}
                 if(!vm.settings_system_pending) {
                     if(ContainsPt(lay.startup_row[2],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=21;return r;}
@@ -347,9 +354,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             } else if (vm.settings_page == 1) {
                 if (ContainsPt(lay.global_search_row, x, y)) {
                     r.region = HitTestResult::SettingsToggle; r.index = 15; return r;
-                }
-                if (ContainsPt(lay.global_search_hotkey_button, x, y)) {
-                    r.region = HitTestResult::SettingsGlobalSearchHotkey; return r;
                 }
                 if (ContainsPt(lay.search_pinyin_row, x, y)) {
                     r.region = HitTestResult::SettingsToggle; r.index = 9; return r;
@@ -518,7 +522,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
     // Drawing and hit testing share both toolbar rows.
     if (x >= EffectiveSidebarWidth(rect.right) && y < title_bar_height_ + toolbar_height_) {
         const auto toolbar = MakeToolbarLayout(rect.right, scale_, title_bar_height_, margin_,
-            NewButtonWidthPx(rect.right-EffectiveSidebarWidth(rect.right) < 600 * scale_), EffectiveSidebarWidth(rect.right), vm.pane.filter_expand, vm.archive_view, vm.pane.is_recycle);
+            NewButtonWidthPx(rect.right-EffectiveSidebarWidth(rect.right) < 600 * scale_), EffectiveSidebarWidth(rect.right), vm.pane.filter_expand, vm.archive_view, vm.pane.is_recycle, vm.toolbar_order);
         const HitTestResult::Region nav[] = {HitTestResult::NavBack, HitTestResult::NavForward,
             HitTestResult::NavUp, HitTestResult::NavRefresh};
         const bool searchOverlay=vm.address_searching && rect.right-EffectiveSidebarWidth(rect.right)<480*scale_;
@@ -565,7 +569,11 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             if (vm.can_group) r.region=HitTestResult::ToolbarGroup;
             return r;
         }
-        if (RectContains(toolbar.overflow,x,y)) {r.region=HitTestResult::ToolbarMore; return r;}
+        if (RectContains(toolbar.overflow,x,y)) {
+            r.region=HitTestResult::ToolbarMore;
+            r.label=l10n::Get(toolbar.has_overflow ? l10n::StringId::More : l10n::StringId::CustomizeCommands);
+            return r;
+        }
         if (RectContains(toolbar.filter,x,y)) {
             r.region = !vm.pane.filter_text.empty() && vm.pane.filter_expand >= 0.985f &&
                 RectContains(FilterClearRect(rect,vm.pane.filter_expand),x,y)
@@ -573,7 +581,10 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             return r;
         }
         if (RectContains(toolbar.create,x,y)) {
-            if (!vm.archive_view) r.region=HitTestResult::NewButton;
+            if (!vm.archive_view && (vm.toolbar_commands.empty() ||
+                std::any_of(vm.toolbar_commands.begin(), vm.toolbar_commands.end(), [](const auto& command) {
+                    return command.command == 186 && command.enabled;
+                }))) r.region=HitTestResult::NewButton;
             return r;
         }
         const HitTestResult::Region commands[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
@@ -583,6 +594,15 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             vm.selection_has_drive_root, vm.can_paste};
         for(int i=0;i<9;++i) if(RectContains(toolbar.commands[i],x,y)) {
             if (i < 6 && vm.toolbar_commands_enabled ? (*vm.toolbar_commands_enabled)[i] : command_state.Enabled(i)) r.region=commands[i];
+            return r;
+        }
+        for (const auto& placed : toolbar.placed_commands) if (RectContains(placed.bounds, x, y)) {
+            const auto item = std::find_if(vm.toolbar_commands.begin(), vm.toolbar_commands.end(),
+                [&](const auto& command) { return command.command == placed.command; });
+            if (item != vm.toolbar_commands.end() && item->enabled) {
+                r.region = HitTestResult::CustomToolbarCommand;
+                r.index = placed.command; r.label = item->text;
+            }
             return r;
         }
         return r;
@@ -813,6 +833,10 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             return out;
         if (paneVm.is_home) {
             out.region = HitTestResult::Pane;
+            if (RectContains(MakeHomeLayout(paneVm, paneRect, scale_).customize, x, y)) {
+                out.region = HitTestResult::HomeCustomize;
+                return out;
+            }
             D2D1_RECT_F track{}, thumb{}; float max_scroll = 0;
             if (PaneScrollbarGeometry(paneVm, paneRect, track, thumb, max_scroll) && RectContains(track, x, y)) {
                 out.region = HitTestResult::Scrollbar;
@@ -839,13 +863,13 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             return out;
         }
         const D2D1_RECT_F detailsRc = PaneDetailsRect(paneRc);
-        if (compositor_ && ContainsPt(ChangeTitleRect(paneRc, detailsRc.left - 8 * scale_, pane_header_height_, paneVm.title_change_badge, scale_, compositor_, paneVm.header_text), x, y)) {
+        if (compositor_ && ContainsPt(ChangeTitleRect(paneRc, PaneHeaderTextRect(paneRc).right, pane_header_height_, paneVm.title_change_badge, scale_, compositor_, paneVm.header_text), x, y)) {
             out.region = HitTestResult::ChangeBadge; out.index = -1; return out;
         }
         if (focused && paneVm.header_controls_opacity > 0.05f) {
-            const D2D1_RECT_F buttons[] = {detailsRc, PaneMediumIconsRect(paneRc), PaneViewButtonRect(paneRc)};
-            const HitTestResult::Region actions[] = {HitTestResult::PaneDetails, HitTestResult::PaneMediumIcons, HitTestResult::PaneViewButton};
-            for (int i=0;i<3;++i) if (RectContains(buttons[i],x,y)) {
+            const D2D1_RECT_F buttons[] = {detailsRc, PaneMediumIconsRect(paneRc), PaneSplitButtonRect(paneRc), PaneViewButtonRect(paneRc)};
+            const HitTestResult::Region actions[] = {HitTestResult::PaneDetails, HitTestResult::PaneMediumIcons, HitTestResult::SplitButton, HitTestResult::PaneViewButton};
+            for (int i=0;i<4;++i) if (RectContains(buttons[i],x,y)) {
                 out.region=actions[i]; out.index=paneIndex; return out;
             }
         }
@@ -945,7 +969,10 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             case ColumnKind::Date: out.column = SortColumn::Mtime; break;
             case ColumnKind::Type: out.column = SortColumn::Type; break;
             case ColumnKind::Size: out.column = SortColumn::Size; break;
-            case ColumnKind::Cloud: out.region = HitTestResult::Pane; break;
+            case ColumnKind::Cloud:
+            case ColumnKind::Dimensions:
+            case ColumnKind::Duration:
+            case ColumnKind::DateTaken: out.column = SortColumn::Name; out.index = -2; break;
             }
             return out;
         }

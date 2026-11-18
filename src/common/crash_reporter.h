@@ -35,7 +35,5 @@ LONG ReportFatal(EXCEPTION_POINTERS* exception, const char* context) noexcept;
 LONG ReportRecoverable(EXCEPTION_POINTERS* exception, const char* context) noexcept;
 [[noreturn]] void ReportTerminate(const char* context = "terminate") noexcept;
 bool SafeModeRequested() noexcept;
-const std::wstring& DiagnosticsRoot() noexcept;
-const wchar_t* RoleName(ProcessRole role) noexcept;
 
 } // namespace pulse::crash

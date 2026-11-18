@@ -51,6 +51,16 @@ The installer requires admin, optionally registers and starts the `PulseIndex` s
 
 Use four-space indentation, same-line braces, and comments only for non-obvious behavior. Use `PascalCase` for types/functions, `snake_case` for data, and lowercase namespaces. Prefer RAII, immutable values, generation cancellation, and existing helpers. `/W4`, `/permissive-`, `/utf-8`, and C++20 are enabled; new warnings are defects.
 
+## UI 动效与滚动规则
+
+- 文字按钮与菜单项需要后续选择、输入或确认才能完成操作时，以 Unicode `…` 结尾；立即执行、导航、打开设置/属性/帮助等窗口的命令不因打开窗口而加省略号。文案、测量和绘制保持一致，不把主动省略号当作截断，也不重复追加；详细边界见 [UI 规范](docs/ui-style-guide.md)。
+- 新增或修改 UI 前，阅读并遵守 [UI 规范](docs/ui-style-guide.md)，尤其第 8 节；[动画与性能记录](docs/animation-transitions.md)用于实现背景和验证边界，历史参数不能覆盖当前公共实现。
+- 同类交互复用同一套运动模型、控件及调度：普通列表滚动使用 `ui::SmoothScroll`，主窗口接入现有帧循环，独立窗口复用 `ui::EditFrameScheduler`；下拉、右键及子菜单复用 `FluentMenu`，模态弹窗复用 `dialog_lifecycle`，不要在业务窗口另写插值、缓动曲线或固定帧率循环。
+- 滚轮（含高精度、多刻度）、方向键、PageUp/PageDown、Home/End 和焦点显露导致的滚动都必须覆盖；连续输入和反向输入从当前可见状态重新定向。直接拖动滚动条、定位或恢复状态跟手落位，并取消旧惯性；内容或视口变化后重新限制范围。
+- 动画使用实际经过时间推进，时长与曲线沿用所属交互的公共规格，不把所有交互强行设为同一时长。仅在活动期间请求下一帧；结束、关闭、隐藏或失去所属内容时取消调度，保留已有调度失败回退；禁止 `Sleep` 阻塞消息分发。
+- 遵守系统减少动画及高对比度策略；禁用时直接显示最终状态。文字、图标、底框、原生 EDIT 和子窗口必须共享所属表面的进退场进度，避免文字提前出现、关闭时残留或两层文字叠影。
+- 绘制、裁剪、命中和拖放位置使用同一当前几何，逻辑选择及命令响应不等待动画结束。按本次影响范围检查中间态、快速连续/反向输入、边界和收敛停止；截图或编译成功不能单独证明连续滚动流畅，不默认扩大成完整回归。
+
 ## Testing Guidelines
 
 Tests are custom `[PASS]/[FAIL]` executables. Put preview cases in `src/bench/preview_test_main.cpp`, operation cases in `src/bench/ops_test_main.cpp`, and model cases in `src/app/selftest_1b2.cpp`. Cover success, cancellation, stale results, UNC/long paths, and cleanup only as relevant to the change. Keep fixtures in `bench_data/`; use isolated fixtures and do not modify the user's files or preferences for testing.

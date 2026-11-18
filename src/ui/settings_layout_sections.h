@@ -7,6 +7,116 @@
 constexpr float kSettingsRowMinDip = 64.0f;
 constexpr float kSettingsRowPaddingDip = 10.0f;
 constexpr float kSettingsTextGapDip = 2.0f;
+float LayoutSettingsActions(float left, float right, float top, float scale,
+                            const std::wstring_view* labels, int count, D2D1_RECT_F* output,
+                            const fluent::Painter* painter, bool wrap_text);
+float SettingsCaptionHeight(std::wstring_view description, float width, float scale,
+                            const fluent::Painter* painter);
+
+float LayoutSettingsHomeQuickAccess(SettingsLayout& l, const WindowViewModel& vm, float scale,
+                                    float y, const fluent::Painter* painter) {
+    const float left = l.content.left + 20 * scale, right = l.content.right - 20 * scale;
+    const float width = std::max(1.0f, right - left);
+    y += 20 * scale;
+    const std::wstring_view actions[] = {l10n::Pick(L"添加文件夹…", L"Add folder…"),
+        l10n::Get(l10n::StringId::RestoreDefaults)};
+    D2D1_RECT_F buttons[2]{};
+    y = LayoutSettingsActions(left, right, y, scale, actions, 2, buttons, painter, false) + 8 * scale;
+    l.home_access_add = buttons[0]; l.home_access_reset = buttons[1];
+    const auto section = [&](int index) {
+        y += 16 * scale;
+        l.home_access_sections[index] = D2D1::RectF(left, y, right, y + 28 * scale);
+        y += 32 * scale;
+    };
+    const auto builtin = [&](int bit) {
+        l.home_access_builtin[bit] = D2D1::RectF(left, y, right, y + 64 * scale);
+        y += 68 * scale;
+    };
+    section(0);
+    for (const int bit : model::kHomeQuickAccessFolderBits) builtin(bit);
+    section(1);
+    const bool stacked = width < 560 * scale;
+    for (const auto& folder : vm.settings_home_access_folders) {
+        SettingsLayout::HomeAccessFolder row;
+        const float text_right = stacked ? right - 16 * scale : right - 144 * scale;
+        const float caption = SettingsCaptionHeight(folder.path, text_right - left - 16 * scale, scale, painter);
+        row.title = D2D1::RectF(left + 16 * scale, y + 10 * scale, text_right, y + 34 * scale);
+        row.path = D2D1::RectF(left + 16 * scale, y + 36 * scale, text_right, y + 36 * scale + caption);
+        const float text_bottom = row.path.bottom + 12 * scale;
+        row.card = D2D1::RectF(left, y, right, std::max(y + 76 * scale, text_bottom) + (stacked ? 40 * scale : 0.0f));
+        const float controls_top = stacked ? row.card.bottom - 44 * scale : (row.card.top + row.card.bottom - 32 * scale) * 0.5f;
+        row.remove = D2D1::RectF(right - 48 * scale, controls_top, right - 16 * scale, controls_top + 32 * scale);
+        row.down = D2D1::RectF(row.remove.left - 40 * scale, controls_top, row.remove.left - 8 * scale, controls_top + 32 * scale);
+        row.up = D2D1::RectF(row.down.left - 40 * scale, controls_top, row.down.left - 8 * scale, controls_top + 32 * scale);
+        l.home_access_folders.push_back(row);
+        y = row.card.bottom + 4 * scale;
+    }
+    if (vm.settings_home_access_folders.empty()) {
+        l.home_access_empty = D2D1::RectF(left + 16 * scale, y + 8 * scale, right - 16 * scale, y + 36 * scale);
+        y = l.home_access_empty.bottom + 8 * scale;
+    }
+    section(2);
+    for (const int bit : model::kHomeQuickAccessSystemBits) builtin(bit);
+    return y + 20 * scale;
+}
+
+float LayoutSettingsShortcuts(SettingsLayout& l, const WindowViewModel& vm, float scale,
+                              float y, const fluent::Painter* painter) {
+    const float left = l.content.left + 20 * scale, right = l.content.right - 20 * scale;
+    const float width = std::max(1.0f, right - left);
+    y += 20 * scale;
+    const std::wstring_view actions[] = {l10n::Pick(L"搜索快捷键…", L"Find shortcuts…"),
+        l10n::Pick(L"清除搜索", L"Clear search"), l10n::Pick(L"恢复全部快捷键", L"Reset all shortcuts")};
+    D2D1_RECT_F buttons[3]{};
+    y = LayoutSettingsActions(left, right, y, scale, actions, 3, buttons, painter, false);
+    l.shortcut_search = buttons[0]; l.shortcut_clear = buttons[1]; l.shortcut_reset_all = buttons[2];
+    if (!vm.settings_shortcut_filter.empty()) y += 30 * scale;
+    y += 12 * scale;
+    // Reuse global-search capture and its existing action IDs on this page.
+    l.global_search_row = D2D1::RectF(left, y, right, y + 64 * scale);
+    const auto& hotkey_text = vm.settings_global_search_capturing ? l10n::Get(l10n::StringId::GlobalSearchRecording)
+                                                                : vm.settings_global_search_hotkey;
+    const float hotkey_width = std::min(width - 32 * scale, std::max(176 * scale,
+        painter ? painter->MeasureButtonWidth(hotkey_text) : 176 * scale));
+    const bool stacked_global = width < 430 * scale || width < hotkey_width + 240 * scale;
+    l.global_search_hotkey_button = D2D1::RectF(stacked_global ? left + 16 * scale : right - 16 * scale - hotkey_width,
+        y + (stacked_global ? 44 : 16) * scale, right - 16 * scale, y + (stacked_global ? 76 : 48) * scale);
+    if (stacked_global) l.global_search_row.bottom = y + 88 * scale;
+    l.global_search_hotkey_row = l.global_search_row;
+    y = l.global_search_row.bottom + 16 * scale;
+    if (!vm.settings_global_search_error.empty()) {
+        l.shortcut_global_error = D2D1::RectF(left, y, right,
+            y + SettingsCaptionHeight(vm.settings_global_search_error, width, scale, painter));
+        y = l.shortcut_global_error.bottom + 12 * scale;
+    }
+    std::wstring previous_group;
+    for (const auto& row : vm.settings_shortcuts) {
+        SettingsLayout::ShortcutRow geometry;
+        if (row.group != previous_group) {
+            y += 12 * scale;
+            geometry.group = D2D1::RectF(left, y, right, y + 28 * scale);
+            y += 32 * scale;
+            previous_group = row.group;
+        }
+        const bool stacked = width < 560 * scale;
+        geometry.card = D2D1::RectF(left, y, right, y + (stacked ? 92 : 56) * scale);
+        const float controls_top = y + (stacked ? 48 : 12) * scale;
+        geometry.reset = D2D1::RectF(right - 44 * scale, controls_top, right - 12 * scale, controls_top + 32 * scale);
+        geometry.remove = D2D1::RectF(geometry.reset.left - 40 * scale, controls_top,
+            geometry.reset.left - 8 * scale, controls_top + 32 * scale);
+        geometry.binding = D2D1::RectF(stacked ? left + 16 * scale : std::max(left + width * 0.4f, geometry.remove.left - 198 * scale),
+            controls_top, geometry.remove.left - 8 * scale, controls_top + 32 * scale);
+        geometry.title = D2D1::RectF(left + 16 * scale, y + 12 * scale,
+            stacked ? right - 16 * scale : geometry.binding.left - 12 * scale, y + 40 * scale);
+        l.shortcut_rows.push_back(geometry);
+        y = geometry.card.bottom + 4 * scale;
+    }
+    if (vm.settings_shortcuts.empty()) {
+        l.shortcut_empty = D2D1::RectF(left, y + 12 * scale, right, y + 44 * scale);
+        y = l.shortcut_empty.bottom;
+    }
+    return y + 20 * scale;
+}
 
 struct SettingsToggleGeometry {
     D2D1_RECT_F title{}, description{}, control{}, icon{};
@@ -366,6 +476,8 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         section(I::SettingsSecIntegration);
         l.startup_row[2]=toggle_row(I::SettingsDefaultManagerDesc);
         l.explorer_takeover_row=toggle_row(I::SettingsExplorerTakeoverDesc);
+        l.file_dialog_bridge_row=toggle_row(I::SettingsFileDialogBridgeDesc);
+        l.file_dialog_takeover_row=toggle_row(I::SettingsFileDialogTakeoverDesc);
         if(!vm.settings_system_pending && !vm.settings_system_status.empty())
             l.system_status=row((SettingsCaptionHeight(vm.settings_system_status, right-left-70*scale,
                 scale, painter)+2*kSettingsRowPaddingDip*scale)/scale);
@@ -390,8 +502,9 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
             transfer_right - transfer_left, scale, painter);
         l.transfer_description = D2D1::RectF(transfer_left, y + 12.0f * scale,
             transfer_right, y + 12.0f * scale + transfer_caption);
-        const l10n::StringId transfer_labels[] = {l10n::StringId::ExportSettingsTitle,
-            l10n::StringId::ImportSettingsTitle, l10n::StringId::RestartNow};
+        const auto export_text = l10n::Get(I::ExportSettingsTitle) + L"…";
+        const auto import_text = l10n::Get(I::ImportSettingsTitle) + L"…";
+        const std::wstring_view transfer_labels[] = {export_text, import_text, l10n::Get(I::RestartNow)};
         const float transfer_bottom = LayoutSettingsActions(transfer_left, transfer_right,
             l.transfer_description.bottom + 16*scale, scale, transfer_labels, 2 + static_cast<int>(vm.settings_transfer_pending), l.transfer_action, painter);
         l.transfer_card = D2D1::RectF(left, y, right, transfer_bottom + 8*scale);

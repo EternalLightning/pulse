@@ -78,7 +78,7 @@ public:
     bool Properties(const std::wstring& path, DWORD attrs, uint64_t generation,
                     uint64_t modified, uint64_t size,
                     std::vector<PreviewProperty>& properties,
-                    Consumer consumer = Consumer::Main);
+                    Consumer consumer = Consumer::Main, bool details = true);
     bool CachedProperties(const std::wstring& path, uint64_t modified, uint64_t size,
                           std::vector<PreviewProperty>& properties);
 private:

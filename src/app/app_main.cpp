@@ -7,6 +7,8 @@
 #include "context_menu_settings_drag.h"
 #include "system_ctx_preview_drag.h"
 #include "app_exit.h"
+#include "file_dialog_bridge_host.h"
+#include "../common/file_dialog_registration.h"
 #include "../ops/operation_journal_paths.h"
 #include "drive_label_rename.h"
 #include "drive_change.h"
@@ -46,6 +48,7 @@
 #include "pulse_version.h"
 #include "../fs/fs_enum.h"
 #include "../fs/fs_recycle.h"
+#include "path_aliases_ui.h"
 #include "../fs/fs_snapshot.h"
 #include "../fs/fs_watch.h"
 #include "../fs/fs_net_cache.h"
@@ -483,10 +486,12 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             s->appPrefs.persist = false;
         }
         if (!s->core.shared_preferences_loaded) s->appPrefs.Load();
+        app::ConfigureCommandShortcuts(s->appPrefs.command_shortcuts);
         if (s->shot.active && l10n::IsLanguageId(s->shot.language) &&
             s->shot.language != L"system")
             s->appPrefs.language = s->shot.language;
         l10n::Initialize(cs->hInstance, s->appPrefs.language);
+        InitializePathAliases(*s);
         if (!s->core.shared_preferences_loaded) {
             s->savedSearches.Load();
             s->places.Load();
@@ -1110,6 +1115,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s && !wParam) s->renderer.NotifyPreviewOwnerHidden();
         // Sent before the window becomes visible; restore full rate right away.
         if (s && wParam && !IsIconic(hwnd)) SyncUiScheduling(*s);
+        break;
+
+    case WM_PATH_ALIASES_CHANGED:
+        if (s) HandlePathAliasesChanged(*s);
+        return 0;
+
+    case WM_KILLFOCUS:
+        if (s) s->nameSelectionCycle = {};
         break;
 
     case WM_ACTIVATE:
@@ -2318,6 +2331,14 @@ bool SkipSingletonFromArgv() {
 }
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
+    if (__argc >= 2 && wcscmp(__wargv[1], L"--picker-host") == 0) {
+        pulse::compat::EnableDpiAwareness();
+        return __argc == 4 || __argc == 5
+            ? app::RunFileDialogBridgeHost(__wargv[2], __wargv[3], __argc == 5 ? __wargv[4] : nullptr)
+            : 2;
+    }
+    if (__argc == 2 && wcscmp(__wargv[1], L"--unregister-file-dialog-bridge") == 0)
+        return static_cast<int>(pulse::dialog_bridge::DisableFor(app::SystemFileDialogBridgePath(app::SystemExecutablePath())));
     pulse::crash::Initialize({pulse::crash::ProcessRole::App, false, {}});
     if (__argc > 1 && wcscmp(__wargv[1], L"--file-operation-worker") == 0)
         return ERROR_NOT_SUPPORTED;

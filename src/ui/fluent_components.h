@@ -79,6 +79,7 @@ struct ButtonSpec {
     bool bordered = true;
     bool skip_glyph = false;
     bool wrap_text = false;
+    bool center_content = false;
 };
 
 struct TextFieldSpec {
@@ -398,6 +399,8 @@ public:
                         HorizontalAlignment alignment = HorizontalAlignment::Left);
     void DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                    const D2D1_COLOR_F& color);
+    void DrawPaneLayoutIcon(const D2D1_RECT_F& bounds, MenuPictogram kind,
+                            const D2D1_COLOR_F& color);
     void DrawFocusRing(const D2D1_RECT_F& bounds, float radius);
 
     void DrawButton(const ButtonSpec& spec);
@@ -511,8 +514,6 @@ private:
     void DrawGlyphWithFormat(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                              const D2D1_COLOR_F& color, IDWriteTextFormat* format);
     void DrawCheckMark(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color);
-    void DrawPaneLayoutIcon(const D2D1_RECT_F& bounds, MenuPictogram kind,
-                            const D2D1_COLOR_F& color);
     void DrawArc(D2D1_POINT_2F center, float radius, float start_degrees,
                  float span_degrees, float stroke_width, const D2D1_COLOR_F& color);
     void EnsureTextFormats();

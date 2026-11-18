@@ -54,7 +54,7 @@ void ShowItemContextMenu(AppState& s, POINT screen_pt);
 void ShowBackgroundContextMenu(AppState& s, POINT screen_pt);
 void ShowBreadcrumbMenu(AppState& s, std::wstring path, POINT screen_pt);
 void ShowNewDropdown(AppState& s);
-void ShowSplitDropdown(AppState& s);
+void ShowSplitDropdown(AppState& s, int pane_index = -1);
 app::SidebarEntry* QuickAccessEntryForPath(AppState& s,
                                                    const std::wstring& path);
 void ShowStarredBadgeEditor(AppState& s, const std::wstring& path,
@@ -66,6 +66,7 @@ void ShowViewDropdown(AppState& s, int pane_index);
 void ShowSortDropdown(AppState& s);
 void ShowGroupDropdown(AppState& s);
 void ShowToolbarMore(AppState& s);
+void ShowToolbarContextMenu(AppState& s, POINT screen_pt, int command);
 void ShowOmnibar(AppState& s, OmnibarMode mode);
 void ShowAdvancedSearch(AppState& s, bool require_scope = false);
 void ShowSearchFilterMenu(AppState& s, int chip, RECT control_rect);

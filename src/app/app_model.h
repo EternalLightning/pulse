@@ -84,6 +84,7 @@ struct Tab {
     ui::SortDirection direction_before_downloads = ui::SortDirection::Asc;
     // Stored widths: Date, Type, Size, Cloud; search prepends Name.
     std::array<float, 4> details_column_dividers{};
+    model::DetailsColumnPrefs details_columns;
     std::array<float, 5> search_column_dividers{};
     std::wstring filter_text;
     bool show_hidden_files = false;

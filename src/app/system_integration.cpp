@@ -6,10 +6,12 @@
 #include "system_integration.h"
 #include "shell_window_registry.h"
 #include "explorer_window_takeover.h"
+#include "native_dialog_takeover.h"
 #include "shell_selection.h"
 #include "app_internal.h"
 #include "app_runtime.h"
 #include "app_navigation.h"
+#include "../common/file_dialog_registration.h"
 #include "../common/localization.h"
 #include <shlobj.h>
 #include <condition_variable>
@@ -26,18 +28,30 @@ std::wstring SystemExecutablePath() {
     if (!n || n == path.size()) return {};
     path.resize(n); return path;
 }
+std::wstring SystemFileDialogBridgePath(std::wstring executable) {
+    const auto slash = executable.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) return {};
+    executable.resize(slash + 1);
+    executable += dialog_bridge::DllName;
+    return executable;
+}
 struct SystemIntegration::Shared {
     struct Task {
         DefaultManagerOptions wanted;
         bool apply = false;
         bool experimental = false;
         bool repair_legacy = false;
+        std::optional<bool> register_dialog_bridge;
     };
     struct Result {
         DefaultManagerOptions actual;
         DefaultManagerResult result;
         bool save = false;
         HRESULT service_error = S_OK;
+        bool dialog_bridge_registered = false;
+        bool dialog_bridge_inspected = false;
+        bool dialog_bridge_conflict = false;
+        DWORD dialog_bridge_error = ERROR_SUCCESS;
     };
     HWND hwnd = nullptr;
     std::wstring executable;
@@ -51,6 +65,7 @@ struct SystemIntegration::Shared {
     bool pending = false;
     ShellWindowRegistry registry;
     ExplorerWindowTakeover takeover;
+    NativeDialogTakeover file_dialog_takeover;
     SystemTakeoverTestCallbacks test_takeover;
     bool registry_started = false;
     bool takeover_started = false;
@@ -83,6 +98,7 @@ struct SystemIntegration::UiState {
     uint64_t next_key = 1;
     ULONGLONG next_publish = 0;
     HRESULT reported_service_error = S_OK;
+    bool picker_unavailable = false;
     std::wstring error;
 };
 namespace {
@@ -97,6 +113,16 @@ void AcknowledgeTakeover(const std::shared_ptr<SystemIntegration::Shared>& share
 }
 DefaultManagerOptions Options(const AppPrefs& prefs) {
     return {prefs.open_folders_in_pulse, prefs.take_over_win_e, prefs.take_over_this_pc};
+}
+bool ConfigureFileDialogs(SystemIntegration::Shared& shared, AppState& state) {
+    if (!shared.services_enabled) return true;
+    std::wstring folder;
+    if (auto* active = state.core.windows.Lookup(GetForegroundWindow())) {
+        if (const auto* tab = ActiveTab(*active); tab && !fs::IsVirtualPath(tab->current_path))
+            folder = ShellPathText(tab->current_path);
+    }
+    return shared.file_dialog_takeover.Configure(state.appPrefs.experimental_file_dialog_takeover,
+        state.darkMode, state.accentColor, state.appPrefs.show_hidden_files, std::move(folder));
 }
 void Submit(const std::shared_ptr<SystemIntegration::Shared>& shared,
             SystemIntegration::Shared::Task task) {
@@ -131,6 +157,20 @@ void SystemWorker(const std::shared_ptr<SystemIntegration::Shared>& shared) {
         }
         const bool shell_enabled = result.actual.folders || result.actual.this_pc;
         if (shared->services_enabled) {
+            if (task.repair_legacy || task.register_dialog_bridge.has_value()) {
+                result.dialog_bridge_inspected = true;
+                const auto path = SystemFileDialogBridgePath(shared->executable);
+                if (task.register_dialog_bridge.has_value()) {
+                    result.dialog_bridge_error = *task.register_dialog_bridge
+                        ? dialog_bridge::Enable(path) : dialog_bridge::DisableFor(path);
+                }
+                const auto registration = dialog_bridge::Inspect();
+                result.dialog_bridge_registered = registration.enabled &&
+                    _wcsicmp(path.c_str(), registration.dll_path.c_str()) == 0;
+                result.dialog_bridge_conflict = registration.conflict ||
+                    (registration.enabled && !result.dialog_bridge_registered);
+                if (!result.dialog_bridge_error) result.dialog_bridge_error = registration.error;
+            }
             if (shell_enabled && !shared->registry_started)
                 shared->registry_started = shared->registry.Start(shared->hwnd, kShellSelectionMessage);
             else if (!shell_enabled && shared->registry_started) {
@@ -225,6 +265,7 @@ void SystemIntegration::Start(AppState& s) {
     try { shared_->worker = std::thread(SystemWorker, shared_); }
     catch (...) { shared_.reset(); ui_->error = l10n::Get(l10n::StringId::DefaultFileManagerError); return; }
     Submit(shared_, {Options(s.appPrefs), false, s.appPrefs.experimental_explorer_takeover, true});
+    ConfigureFileDialogs(*shared_, s);
 }
 bool SystemIntegration::StartForTesting(AppState& s, DefaultManagerRegistry registry,
                                          SystemTakeoverTestCallbacks takeover) {
@@ -254,8 +295,23 @@ void SystemIntegration::Toggle(AppState& s, int control) {
             ui_->error = l10n::Get(l10n::StringId::DefaultFileManagerError);
         return;
     }
+    if (control == 37) {
+        auto& enabled = s.appPrefs.experimental_file_dialog_takeover;
+        enabled = !enabled;
+        if (!s.appPrefs.Save()) {
+            enabled = !enabled;
+            ui_->error = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+            return;
+        }
+        ui_->error.clear();
+        ConfigureFileDialogs(*shared_, s);
+        return;
+    }
     if (pending()) return;
-    if (control == 24) {
+    if (control == 38) {
+        Submit(shared_, {Options(s.appPrefs), false, s.appPrefs.experimental_explorer_takeover, false,
+            !s.appPrefs.file_dialog_bridge_registered});
+    } else if (control == 24) {
         s.appPrefs.experimental_explorer_takeover = !s.appPrefs.experimental_explorer_takeover;
         if (!s.appPrefs.Save()) {
             s.appPrefs.experimental_explorer_takeover = !s.appPrefs.experimental_explorer_takeover;
@@ -335,6 +391,13 @@ bool SystemIntegration::Tick(AppState& s) {
         else if (FAILED(result->service_error)) ui_->error = l10n::Get(l10n::StringId::DefaultFileManagerError);
         if (result->save && !s.appPrefs.Save())
             ui_->error = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
+        if (result->dialog_bridge_inspected) {
+            s.appPrefs.file_dialog_bridge_registered = result->dialog_bridge_registered;
+            if (result->dialog_bridge_conflict)
+                ui_->error = l10n::Get(l10n::StringId::PickerBridgeConflict);
+            else if (result->dialog_bridge_error)
+                ui_->error = l10n::Get(l10n::StringId::PickerBridgeFailed);
+        }
         Publish(s); changed = true;
     }
     const auto now = GetTickCount64();
@@ -353,7 +416,18 @@ bool SystemIntegration::Tick(AppState& s) {
     }
     for (const uint64_t token : expired_takeovers)
         AcknowledgeTakeover(shared_, token, false);
-    if (now >= ui_->next_publish) { Publish(s); ui_->next_publish = now + 250; }
+    if (now >= ui_->next_publish) {
+        Publish(s);
+        const bool picker_unavailable = !ConfigureFileDialogs(*shared_, s);
+        if (picker_unavailable != ui_->picker_unavailable) {
+            ui_->picker_unavailable = picker_unavailable;
+            const auto& error_text = l10n::Get(l10n::StringId::PickerUnavailable);
+            if (picker_unavailable) ui_->error = error_text;
+            else if (ui_->error == error_text) ui_->error.clear();
+            changed = true;
+        }
+        ui_->next_publish = now + 250;
+    }
     for (auto& request : shared_->registry.DrainSelections()) {
         QueueSelection(s, *ui_, request.key, 0, request.folder, {request.path}, request.flags);
         changed = true;
@@ -457,6 +531,7 @@ bool SystemIntegration::Tick(AppState& s) {
 }
 void SystemIntegration::Stop() {
     if (!shared_) return;
+    shared_->file_dialog_takeover.Stop();
     {
         std::lock_guard lock(shared_->mutex);
         for (const auto& [token, deadline] : shared_->pending_takeover_tokens) {

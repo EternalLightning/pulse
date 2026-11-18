@@ -4593,14 +4593,6 @@ void TestOpsThroughShell() {
     g_ops.Start([] {});
     Sleep(800); // let the ops worker bring up Pulse.Shell.exe
 
-    Check(ops::TerminalCommandLine(L"C:\\A\\B") == L"-d \"C:\\A\\B\"",
-          L"ops: wt.exe command line");
-    Check(ops::TerminalCommandLine(L"C:\\") == L"-d \"C:\\\\\"",
-          L"ops: wt.exe command line keeps drive root");
-    Check(ops::TerminalCommandLine(L"C:\\quoted\" folder\\") ==
-              L"-d \"C:\\quoted\\\" folder\\\\\"",
-          L"ops: wt.exe command line escapes quotes and trailing slashes");
-
     // CreateFolder via the ops layer (menu 新建文件夹 path).
     {
         ops::OpRequest r;

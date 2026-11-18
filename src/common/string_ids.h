@@ -1195,8 +1195,32 @@
 #define IDS_TAG_DEFAULT_IN_PROGRESS                                    3251
 #define IDS_INDEX_SERVICE_DESCRIPTION                                  3252
 #define IDS_TYPE_AUTOCAD_FILE                                          3253
+#define IDS_CUSTOMIZE_COMMANDS                                         3254
+#define IDS_PATH_ALIASES                                               3255
+#define IDS_PATH_ALIAS_SET                                             3256
+#define IDS_SHELL_LIBRARIES                                            3257
+#define IDS_SHELL_CONTROL_PANEL                                        3258
+#define IDS_SHELL_APPLICATIONS                                         3259
 
-#define IDS_LOCALIZATION_LAST 3253
+#define IDS_SETTINGS_FILE_DIALOG_TAKEOVER 3260
+#define IDS_SETTINGS_FILE_DIALOG_TAKEOVER_DESC 3261
+#define IDS_PICKER_SAVE 3262
+#define IDS_PICKER_SELECT_FOLDER 3263
+#define IDS_PICKER_FILE_NAME 3264
+#define IDS_PICKER_WINDOWS_DIALOG 3265
+#define IDS_PICKER_PULSE_FOLDER 3266
+#define IDS_PICKER_SUBMIT_FAILED 3267
+#define IDS_PICKER_NO_SELECTION 3268
+#define IDS_PICKER_CONFIRMATION_PENDING 3269
+#define IDS_PICKER_UNAVAILABLE 3270
+#define IDS_SETTINGS_FILE_DIALOG_BRIDGE 3271
+#define IDS_SETTINGS_FILE_DIALOG_BRIDGE_DESC 3272
+#define IDS_PICKER_BRIDGE_FAILED 3273
+#define IDS_PICKER_BRIDGE_CONFLICT 3274
+#define IDS_PICKER_OVERWRITE_TITLE 3275
+#define IDS_PICKER_OVERWRITE_MESSAGE 3276
+
+#define IDS_LOCALIZATION_LAST 3276
 
 #endif
 

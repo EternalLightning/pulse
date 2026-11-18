@@ -122,6 +122,8 @@ public:
 
     void SelectPage(int page) noexcept;
     int page() const noexcept { return page_; }
+    const std::wstring& shortcut_filter() const noexcept { return shortcut_filter_; }
+    void SetShortcutFilter(std::wstring value) { shortcut_filter_ = std::move(value); scroll_ = 0.0f; }
     float scroll() const noexcept { return scroll_; }
     void SetScroll(float value, float maximum) noexcept;
     void ScrollBy(float delta, float scale, float maximum) noexcept;
@@ -208,6 +210,7 @@ private:
     bool global_search_capturing_ = false;
     std::wstring global_search_error_;
     int page_ = 0;
+    std::wstring shortcut_filter_;
     int context_tab_ = 0;
     int menu_drag_item_ = -1;
     bool menu_drag_live_ = false;

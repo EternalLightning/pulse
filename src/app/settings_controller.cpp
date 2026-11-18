@@ -46,6 +46,8 @@ int SettingsController::PageFromName(std::wstring_view name) noexcept {
     if (name == L"tabs") return 7;
     if (name == L"startup") return 8;
     if (name == L"operations") return 9;
+    if (name == L"shortcuts") return 10;
+    if (name == L"quick-access") return 11;
     return 0;
 }
 
@@ -59,6 +61,8 @@ const wchar_t* SettingsController::PageName(int page) noexcept {
     if (page == 7) return L"tabs";
     if (page == 8) return L"startup";
     if (page == 9) return L"operations";
+    if (page == 10) return L"shortcuts";
+    if (page == 11) return L"quick-access";
     return L"general";
 }
 
@@ -66,7 +70,7 @@ void SettingsController::SelectPage(int page) noexcept {
     CancelGlobalSearchHotkeyCapture();
     EndMenuDrag();
     if (system_context_) system_context_->EndPreviewDrag();
-    page_ = std::clamp(page, 0, 9);
+    page_ = std::clamp(page, 0, 11);
     scroll_ = 0.0f;
 }
 
@@ -528,7 +532,7 @@ void SettingsController::ToggleUi(int index) {
     } else if (index == 2) {
         prefs_->keep_running_on_close = !prefs_->keep_running_on_close;
         SaveAndApply(SettingsEffect::TrayVisibility);
-    } else if (index == 21 || index == 24) {
+    } else if (index == 21 || index == 24 || index == 37 || index == 38) {
         if (ui_.toggle_system_integration) ui_.toggle_system_integration(index);
     } else if (index == 4) {
         prefs_->show_status_performance = !prefs_->show_status_performance;

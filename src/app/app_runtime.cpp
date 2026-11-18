@@ -18,6 +18,8 @@
 #include "folder_sizes_ui.h"
 #include "index_volume_badge.h"
 #include "about_info.h"
+#include "shortcut_settings_ui.h"
+#include "home_quick_access_ui.h"
 #include "settings_transfer_ui.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
@@ -460,6 +462,8 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
         if (app::ParsePulsePath(tab->current_path, &kind, &rest) && kind == L"settings") {
             vm.settings_open = true;
             vm.settings_page = app::SettingsController::PageFromName(rest);
+            if (vm.settings_page == 10) app::PopulateShortcutSettings(vm, s.appPrefs, s.settings.shortcut_filter());
+            if (vm.settings_page == 11) app::PopulateHomeQuickAccessSettings(vm, s.appPrefs);
             vm.settings_scroll = s.settings.scroll();
             vm.settings_launch_on_startup = s.appPrefs.launch_on_startup;
             vm.settings_start_to_tray = s.appPrefs.start_to_tray;
@@ -506,6 +510,8 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_take_over_win_e = s.appPrefs.take_over_win_e;
             vm.settings_take_over_this_pc = s.appPrefs.take_over_this_pc;
             vm.settings_explorer_takeover = s.appPrefs.experimental_explorer_takeover;
+            vm.settings_file_dialog_takeover = s.appPrefs.experimental_file_dialog_takeover;
+            vm.settings_file_dialog_bridge = s.appPrefs.file_dialog_bridge_registered;
             vm.settings_system_pending = s.systemIntegration.pending();
             vm.settings_system_status = vm.settings_system_pending
                 ? l10n::Get(l10n::StringId::SettingsSystemApplying) : s.systemIntegration.error();
@@ -1673,6 +1679,14 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden,
         s.ctxMenuPrefs.BuiltinOrder(app::BuiltinMenuSurface::RowButtons));
     const auto command_context = BuildCommandContext(s);
+    vm.toolbar_order.clear();
+    for (const int command : s.appPrefs.toolbar_order)
+        if (app::FindCommandDescriptor(command)) vm.toolbar_order.push_back(command);
+    s.renderer.SetToolbarOrder(vm.toolbar_order);
+    for (const int command : vm.toolbar_order) {
+        const auto item = app::BuildCommandMenuItem(command, command_context);
+        vm.toolbar_commands.push_back({command, item.text, item.glyph, item.enabled, item.pictogram});
+    }
     vm.can_paste = command_context.can_paste;
     vm.selection_has_drive_root = command_context.selection_has_drive_root;
     constexpr int toolbar_commands[] = {app::CmdCut, app::CmdCopy, app::CmdPaste,
@@ -2166,11 +2180,23 @@ std::wstring TooltipForHover(AppState& s) {
     case R::SettingsButton: return text(I::Settings);
     case R::HomeButton: return text(I::Home);
     case R::HomeCard: return s.hoverLabel + L"  " + s.hoverPath;
+    case R::HomeCustomize: return l10n::Pick(L"自定义快捷访问", L"Customize quick access");
     case R::SettingsFind: return text(I::SettingsFind);
     case R::SettingsNav: {
+        if (s.hoverControlIndex == 10) return l10n::Pick(L"快捷键", L"Shortcuts");
+        if (s.hoverControlIndex == 11) return l10n::Pick(L"快捷访问", L"Quick access");
         const I names[]={I::SettingsGeneral,I::SettingsSearchIndex,I::SettingsContextMenu,I::SettingsAboutDiagnostics,I::SettingsDuplicates};
         return s.hoverControlIndex>=0 && s.hoverControlIndex<static_cast<int>(std::size(names)) ? text(names[s.hoverControlIndex]) : L"";
     }
+    case R::SettingsShortcut:
+        if (s.hoverControlIndex == ui::ShortcutRemove) return l10n::Pick(L"移除快捷键", L"Remove shortcut");
+        if (s.hoverControlIndex == ui::ShortcutReset) return l10n::Pick(L"恢复默认快捷键", L"Reset shortcut");
+        return {};
+    case R::SettingsHomeQuickAccess:
+        if (s.hoverControlIndex == ui::HomeAccessRemove) return l10n::Pick(L"移除文件夹", L"Remove folder");
+        if (s.hoverControlIndex == ui::HomeAccessMoveUp) return l10n::Get(l10n::StringId::MoveUp);
+        if (s.hoverControlIndex == ui::HomeAccessMoveDown) return l10n::Get(l10n::StringId::MoveDown);
+        return {};
     case R::SettingsEffect: {
         if (s.hoverControlIndex >= 0 && s.hoverControlIndex < ui::kWindowEffectCount) {
             static constexpr I effects[] = {
@@ -2218,12 +2244,35 @@ std::wstring TooltipForHover(AppState& s) {
     case R::NavUp: return text(I::Up);
     case R::NavRefresh: return text(I::Refresh);
     case R::BreadcrumbSegment: return s.hoverLabel;
+    case R::CustomToolbarCommand: {
+        const auto* descriptor = app::FindCommandDescriptor(s.hoverControlIndex);
+        if (!descriptor) return L"";
+        auto label = l10n::Get(descriptor->label);
+        const auto keys = app::CommandShortcutText(app::EffectiveCommandShortcut(descriptor->command));
+        if (!keys.empty()) label += L"  " + keys;
+        return label;
+    }
     case R::NewButton: return text(I::New);
-    case R::Cut: return text(I::CutShortcut);
-    case R::Copy: return text(I::CopyShortcut);
-    case R::Paste: return text(I::PasteShortcut);
-    case R::Rename: return text(I::RenameShortcut);
-    case R::Delete: return text(I::DeleteShortcut);
+    case R::Cut: {
+        const auto keys = app::CommandShortcutText(app::EffectiveCommandShortcut(app::CmdCut));
+        return text(I::Cut) + (keys.empty() ? L"" : L"  " + keys);
+    }
+    case R::Copy: {
+        const auto keys = app::CommandShortcutText(app::EffectiveCommandShortcut(app::CmdCopy));
+        return text(I::Copy) + (keys.empty() ? L"" : L"  " + keys);
+    }
+    case R::Paste: {
+        const auto keys = app::CommandShortcutText(app::EffectiveCommandShortcut(app::CmdPaste));
+        return text(I::Paste) + (keys.empty() ? L"" : L"  " + keys);
+    }
+    case R::Rename: {
+        const auto keys = app::CommandShortcutText(app::EffectiveCommandShortcut(app::CmdRename));
+        return text(I::Rename) + (keys.empty() ? L"" : L"  " + keys);
+    }
+    case R::Delete: {
+        const auto keys = app::CommandShortcutText(app::EffectiveCommandShortcut(app::CmdDelete));
+        return text(I::Delete) + (keys.empty() ? L"" : L"  " + keys);
+    }
     case R::EmptyRecycle: return text(I::EmptyRecycleBin);
     case R::Properties: return text(I::Properties);
     case R::SplitButton: return text(I::SplitLayout);
@@ -2232,10 +2281,10 @@ std::wstring TooltipForHover(AppState& s) {
     case R::PaneDetails: return text(I::ViewDetails);
     case R::ToolbarSort: return text(I::SortBy);
     case R::ToolbarGroup: return text(I::GroupBy);
-    case R::ToolbarMore: return text(I::More);
+    case R::ToolbarMore: return s.hoverLabel.empty() ? text(I::More) : s.hoverLabel;
     case R::OperationCenter: return text(I::OperationCenter);
     case R::PaneColumnLayout: return text(I::ColumnLayout);
-    case R::PaneViewButton: return text(I::More);
+    case R::PaneViewButton: return text(I::View);
     case R::FilterBox: return text(I::FilterCurrent);
     case R::FilterClear: return text(I::Clear);
     case R::Splitter: return text(I::ResizeSplit);

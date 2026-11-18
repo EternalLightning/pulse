@@ -196,6 +196,7 @@ void PasteIntoCurrent(AppState& s) {
 }
 
 void DeleteSelected(AppState& s, bool permanent) {
+    if (BuildCommandContext(s).shell_selection) return;
     if(DeferContentSelection(s,[=](AppState& v){DeleteSelected(v,permanent);})) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab || tab->net_readonly || app::HasDeviceSelection(*tab)) return;
@@ -249,6 +250,7 @@ void EmptyRecycleBin(AppState& s) {
     s.ops.Submit(std::move(req));
 }
 void CollectToTray(AppState& s, bool move_intent) {
+    if (BuildCommandContext(s).shell_selection) return;
     if(DeferContentSelection(s,[=](AppState& v){CollectToTray(v,move_intent);})) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot || IsRecycleTab(tab)) return;

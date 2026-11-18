@@ -79,6 +79,8 @@ std::vector<HitTestResult> MainRenderer::SettingsControls(const WindowViewModel&
         segments(l.change_days, H::SettingsChangeDays);
         toggle(l.startup_tray_row, 31);
         toggle(l.explorer_takeover_row, 24);
+        toggle(l.file_dialog_bridge_row, 38, !vm.settings_system_pending);
+        toggle(l.file_dialog_takeover_row, 37);
         toggle(l.last_tab_row, 32);
         toggle(l.startup_row[2], 21, !vm.settings_system_pending);
         for (int i = 0; i < 2; ++i) toggle(l.startup_row[i], i + 1);
@@ -86,9 +88,32 @@ std::vector<HitTestResult> MainRenderer::SettingsControls(const WindowViewModel&
             i, -1, i == 0 || !vm.settings_storage_pending);
         for (int i = 0; i < 2 + static_cast<int>(vm.settings_transfer_pending); ++i)
             add(l.transfer_action[i], H::SettingsDiagnosticsAction, i + 3, -1, !vm.settings_transfer_busy);
+    } else if (vm.settings_page == 11) {
+        add(l.home_access_add, H::SettingsHomeQuickAccess, HomeAccessAddFolder);
+        add(l.home_access_reset, H::SettingsHomeQuickAccess, HomeAccessReset);
+        for (int bit = 0; bit < model::kHomeQuickAccessItemCount; ++bit)
+            add(l.home_access_builtin[bit], H::SettingsHomeQuickAccess, HomeAccessToggle, bit);
+        for (size_t i = 0; i < l.home_access_folders.size() && i < vm.settings_home_access_folders.size(); ++i) {
+            const auto& row = l.home_access_folders[i];
+            const auto& path = vm.settings_home_access_folders[i].path;
+            add(row.up, H::SettingsHomeQuickAccess, HomeAccessMoveUp, static_cast<int>(i), i > 0, path);
+            add(row.down, H::SettingsHomeQuickAccess, HomeAccessMoveDown, static_cast<int>(i), i + 1 < vm.settings_home_access_folders.size(), path);
+            add(row.remove, H::SettingsHomeQuickAccess, HomeAccessRemove, static_cast<int>(i), true, path);
+        }
+    } else if (vm.settings_page == 10) {
+        add(l.shortcut_search, H::SettingsShortcut, ShortcutFilter);
+        add(l.shortcut_clear, H::SettingsShortcut, ShortcutClearFilter, -1, !vm.settings_shortcut_filter.empty());
+        add(l.shortcut_reset_all, H::SettingsShortcut, ShortcutResetAll);
+        add(l.global_search_hotkey_button, H::SettingsGlobalSearchHotkey);
+        for (size_t i = 0; i < l.shortcut_rows.size() && i < vm.settings_shortcuts.size(); ++i) {
+            const auto& row = vm.settings_shortcuts[i];
+            const auto& geometry = l.shortcut_rows[i];
+            add(geometry.binding, H::SettingsShortcut, ShortcutEdit, row.command);
+            add(geometry.remove, H::SettingsShortcut, ShortcutRemove, row.command, !row.binding.empty());
+            add(geometry.reset, H::SettingsShortcut, ShortcutReset, row.command, row.customized);
+        }
     } else if (vm.settings_page == 1) {
         toggle(l.global_search_row, 15);
-        add(l.global_search_hotkey_button, H::SettingsGlobalSearchHotkey);
         toggle(l.search_pinyin_row, 9);
         add(l.content_index_row, H::SettingsContentIndex);
         for (int i = 0; i < 2; ++i) add(l.disclosure[i], H::SettingsDisclosure, i);

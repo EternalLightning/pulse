@@ -446,13 +446,13 @@ PreviewDrawResult ThumbnailCache::Draw(ID2D1DeviceContext* dc, const D2D1_RECT_F
 
 bool ThumbnailCache::Properties(const std::wstring& path, DWORD attrs, uint64_t generation,
                                 uint64_t modified, uint64_t size,
-                                std::vector<PreviewProperty>& properties, Consumer consumer) {
+                                std::vector<PreviewProperty>& properties, Consumer consumer, bool details) {
     if (path.empty() || fs::IsCloudPlaceholder(attrs)) return false;
     const std::wstring identity = Key(path, 0, modified, size);
     const std::wstring key = identity + L":properties";
     std::lock_guard lock(mutex_);
     KeepVisible(consumer, key);
-    SelectDetails(consumer, identity, generation);
+    if (details) SelectDetails(consumer, identity, generation);
     if (auto it = items_.find(key); it != items_.end()) {
         Touch(it->second);
         properties = it->second.properties;
@@ -461,7 +461,7 @@ bool ThumbnailCache::Properties(const std::wstring& path, DWORD attrs, uint64_t 
     Request request;
     request.generation = generation; request.attrs = attrs;
     request.kind = ipc::PreviewRequestKind::Properties;
-    request.details = true; request.path = path; request.key = key; request.identity = identity;
+    request.details = details; request.path = path; request.key = key; request.identity = identity;
     QueueRequest(std::move(request), consumer);
     return false;
 }

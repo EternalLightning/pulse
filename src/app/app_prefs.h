@@ -6,6 +6,8 @@
 // app_prefs.h — General app settings (startup, close-to-tray).
 #pragma once
 #include "folder_view_prefs.h"
+#include "command_shortcut.h"
+#include "../model/home_quick_access.h"
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -25,11 +27,14 @@ struct AppPrefs {
     bool take_over_win_e = false;
     bool take_over_this_pc = false;
     bool experimental_explorer_takeover = false;
+    bool experimental_file_dialog_takeover = false;
+    bool file_dialog_bridge_registered = false; // Read from this user's Shell registration.
     bool verify_copies = false;
     bool show_status_performance = false;
     bool text_compare_enabled = true;
     bool show_pinned_tab_names = true;
     bool new_tab_home = false;
+    model::HomeQuickAccessPrefs home_quick_access;
     ExternalOpenMode external_open_mode = ExternalOpenMode::ReuseOpenedLocation;
     // Details list presentation.
     bool list_smart_date = true;
@@ -43,6 +48,9 @@ struct AppPrefs {
     bool global_search_enabled = false;
     uint32_t global_search_modifiers = 1; // MOD_ALT
     uint32_t global_search_key = 32; // VK_SPACE
+    std::vector<CommandShortcutOverride> command_shortcuts;
+    // Stable command IDs: New menu, Cut, Copy, Paste, Rename, Delete, Properties.
+    std::vector<int> toolbar_order{186, 2, 3, 4, 6, 5, 7, 306};
     bool show_hidden_files = false;
     // Hidden + system attributes; File Explorer keeps these behind a separate option.
     bool show_protected_os_files = false;

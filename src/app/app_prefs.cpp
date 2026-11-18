@@ -81,11 +81,14 @@ void AppPrefs::ResetToDefaults() {
     take_over_win_e = false;
     take_over_this_pc = false;
     experimental_explorer_takeover = false;
+    experimental_file_dialog_takeover = false;
+    file_dialog_bridge_registered = false;
     verify_copies = false;
     show_status_performance = false;
     text_compare_enabled = true;
     show_pinned_tab_names = true;
     new_tab_home = false;
+    home_quick_access = {};
     external_open_mode = ExternalOpenMode::ReuseOpenedLocation;
     list_smart_date = true;
     list_zebra_rows = true;
@@ -97,6 +100,8 @@ void AppPrefs::ResetToDefaults() {
     global_search_enabled = false;
     global_search_modifiers = 1;
     global_search_key = 32;
+    command_shortcuts.clear();
+    toolbar_order = {186, 2, 3, 4, 6, 5, 7, 306};
     show_hidden_files = false;
     show_protected_os_files = false;
     blank_click_go_back = false;
@@ -146,6 +151,8 @@ std::wstring AppPrefs::ToJson() const {
     out += take_over_this_pc ? L"true" : L"false";
     out += L",\n  \"experimental_explorer_takeover\":";
     out += experimental_explorer_takeover ? L"true" : L"false";
+    out += L",\n  \"experimental_file_dialog_takeover\":";
+    out += experimental_file_dialog_takeover ? L"true" : L"false";
     out += L",\n  \"verify_copies\":";
     out += verify_copies ? L"true" : L"false";
     out += L",\n  \"show_status_performance\":";
@@ -177,6 +184,22 @@ std::wstring AppPrefs::ToJson() const {
     out += global_search_enabled ? L"true" : L"false";
     out += L",\n  \"global_search_modifiers\":" + std::to_wstring(global_search_modifiers);
     out += L",\n  \"global_search_key\":" + std::to_wstring(global_search_key);
+    out += L",\n  \"command_shortcuts\":[";
+    for (size_t i = 0; i < command_shortcuts.size(); ++i) {
+        const auto& entry = command_shortcuts[i];
+        if (i) out += L",";
+        out += L"{\"command\":" + std::to_wstring(entry.command) +
+            L",\"key\":" + std::to_wstring(entry.shortcut.key) +
+            L",\"ctrl\":" + (entry.shortcut.ctrl ? std::wstring(L"true") : std::wstring(L"false")) +
+            L",\"shift\":" + (entry.shortcut.shift ? std::wstring(L"true") : std::wstring(L"false")) +
+            L",\"alt\":" + (entry.shortcut.alt ? std::wstring(L"true") : std::wstring(L"false")) + L"}";
+    }
+    out += L"],\n  \"toolbar_order\":[";
+    for (size_t i = 0; i < toolbar_order.size(); ++i) {
+        if (i) out += L",";
+        out += std::to_wstring(toolbar_order[i]);
+    }
+    out += L"]";
     out += L",\n  \"blank_click_go_back\":";
     out += blank_click_go_back ? L"true" : L"false";
     out += L",\n  \"change_tracking_enabled\":";
@@ -238,6 +261,15 @@ std::wstring AppPrefs::ToJson() const {
         out += escaped;
     }
     out += L"\"";
+    out += L",\n  \"home_quick_access\":{\"hidden\":" +
+        std::to_wstring(home_quick_access.hidden & model::kHomeQuickAccessHiddenMask) + L",\"folders\":[";
+    for (size_t i = 0; i < home_quick_access.folders.size(); ++i) {
+        std::wstring escaped;
+        pulse::json::Escape(home_quick_access.folders[i], escaped);
+        if (i) out += L",";
+        out += L"\"" + escaped + L"\"";
+    }
+    out += L"]}";
     folder_views.AppendJson(out);
     out += L"\n}\n";
     return out;
@@ -256,11 +288,21 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     take_over_win_e = pulse::json::ExtractBool(doc, L"take_over_win_e", false);
     take_over_this_pc = pulse::json::ExtractBool(doc, L"take_over_this_pc", false);
     experimental_explorer_takeover = pulse::json::ExtractBool(doc, L"experimental_explorer_takeover", false);
+    experimental_file_dialog_takeover = pulse::json::ExtractBool(doc, L"experimental_file_dialog_takeover", false);
     verify_copies = pulse::json::ExtractBool(doc, L"verify_copies", false);
     show_status_performance = pulse::json::ExtractBool(doc, L"show_status_performance", false);
     text_compare_enabled = pulse::json::ExtractBool(doc, L"text_compare_enabled", true);
     show_pinned_tab_names = pulse::json::ExtractBool(doc, L"show_pinned_tab_names", true);
     new_tab_home = pulse::json::ExtractBool(doc, L"new_tab_home", false);
+    home_quick_access = {};
+    if (const auto* home = doc.Find(L"home_quick_access"); home && home->kind == pulse::json::Kind::Object) {
+        const int hidden = pulse::json::Int(home->Find(L"hidden"));
+        home_quick_access.hidden = hidden >= 0 ? static_cast<uint32_t>(hidden) & model::kHomeQuickAccessHiddenMask : 0;
+        if (const auto* folders = home->Find(L"folders"); folders && folders->kind == pulse::json::Kind::Array) {
+            for (const auto& folder : folders->children)
+                if (folder.kind == pulse::json::Kind::String) home_quick_access.AddFolder(folder.text);
+        }
+    }
     const int external_mode = pulse::json::ExtractInt(doc, L"external_open_mode", 0);
     external_open_mode = external_mode >= 0 && external_mode <= 2
         ? static_cast<ExternalOpenMode>(external_mode) : ExternalOpenMode::ReuseOpenedLocation;
@@ -276,6 +318,32 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     const int key = pulse::json::ExtractInt(doc, L"global_search_key", 32);
     global_search_modifiers = modifiers > 0 && modifiers <= 15 ? static_cast<uint32_t>(modifiers) : 1;
     global_search_key = key > 0 && key <= 254 ? static_cast<uint32_t>(key) : 32;
+    command_shortcuts.clear();
+    if (const auto* entries = doc.Find(L"command_shortcuts"); entries && entries->kind == pulse::json::Kind::Array) {
+        for (const auto& entry : entries->children) {
+            if (entry.kind != pulse::json::Kind::Object) continue;
+            const int command = pulse::json::Int(entry.Find(L"command"));
+            const int shortcut_key = pulse::json::Int(entry.Find(L"key"), -1);
+            if (command <= 0 || command >= 6000 || shortcut_key < 0 || shortcut_key > 254 ||
+                std::any_of(command_shortcuts.begin(), command_shortcuts.end(),
+                    [=](const auto& existing) { return existing.command == command; })) continue;
+            command_shortcuts.push_back({command, {static_cast<unsigned>(shortcut_key),
+                pulse::json::Bool(entry.Find(L"ctrl")), pulse::json::Bool(entry.Find(L"shift")),
+                pulse::json::Bool(entry.Find(L"alt"))}});
+            if (command_shortcuts.size() >= 256) break;
+        }
+    }
+    toolbar_order = {186, 2, 3, 4, 6, 5, 7, 306};
+    if (const auto* entries = doc.Find(L"toolbar_order"); entries && entries->kind == pulse::json::Kind::Array) {
+        toolbar_order.clear();
+        for (const auto& entry : entries->children) {
+            const int command = pulse::json::Int(&entry);
+            if (command > 0 && command < 6000 &&
+                std::find(toolbar_order.begin(), toolbar_order.end(), command) == toolbar_order.end())
+                toolbar_order.push_back(command);
+            if (toolbar_order.size() >= 64) break;
+        }
+    }
     show_hidden_files = pulse::json::ExtractBool(doc, L"show_hidden_files", false);
     show_protected_os_files = pulse::json::ExtractBool(doc, L"show_protected_os_files", false);
     blank_click_go_back = pulse::json::ExtractBool(doc, L"blank_click_go_back", false);

@@ -331,7 +331,7 @@ bool MainRenderer::DrawFluentSvg(int resource_id, const D2D1_RECT_F& bounds, flo
     if (root.get()) root->SetAttributeValue(L"opacity", opacity);
     if (root.get() && foreground && ((resource_id >= IDR_FILES_NEW_SVG &&
         resource_id <= IDR_FILES_FILTER_SVG) || resource_id == IDR_FILES_STATUS_CENTER_SVG ||
-        resource_id == IDR_FILES_GROUP_SVG)) {
+        resource_id == IDR_FILES_GROUP_SVG || resource_id == IDR_TOOLBAR_CUSTOMIZE_SVG)) {
         ComPtr<ID2D1SvgPaint> fill;
         if (SUCCEEDED(root->GetAttributeValue(L"fill", IID_PPV_ARGS(&fill))) && fill.get())
             fill->SetColor(foreground);

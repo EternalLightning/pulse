@@ -11,6 +11,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <cstring>
+#include <memory>
 #include <wrl/client.h>
 
 namespace pulse::ops {
@@ -259,20 +260,52 @@ bool HasShellFileData(IDataObject* data) {
     return false;
 }
 
-HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferred_effect,
-                      const std::atomic_bool* cancelled) {
-    if (!data || (preferred_effect != DROPEFFECT_COPY && preferred_effect != DROPEFFECT_MOVE)) return E_INVALIDARG;
+namespace {
+HRESULT ResolveShellClipboardItems(IDataObject* data, IShellItemArray** out) {
+    const HRESULT hr = SHCreateShellItemArrayFromDataObject(data, IID_PPV_ARGS(out));
+    if (SUCCEEDED(hr)) return hr;
+
+    // Pulse publishes filesystem copies as CF_HDROP without a Shell ID list.
+    FORMATETC format{CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM medium{};
+    HRESULT result = data->GetData(&format, &medium);
+    if (FAILED(result)) return DV_E_FORMATETC;
+    const std::unique_ptr<STGMEDIUM, decltype(&ReleaseStgMedium)> release(&medium, ReleaseStgMedium);
+    if (medium.tymed != TYMED_HGLOBAL || !medium.hGlobal) return E_INVALIDARG;
+    const HDROP drop = static_cast<HDROP>(medium.hGlobal);
+    const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+    if (!count) return E_INVALIDARG;
+    std::vector<PIDLIST_ABSOLUTE> ids(count);
+    struct FreeIds {
+        const std::vector<PIDLIST_ABSOLUTE>& ids;
+        ~FreeIds() { for (auto id : ids) CoTaskMemFree(id); }
+    } free_ids{ids};
+    for (UINT i = 0; i < count; ++i) {
+        const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+        std::wstring source(static_cast<size_t>(length) + 1, L'\0');
+        if (!length || DragQueryFileW(drop, i, source.data(), length + 1) != length) return E_INVALIDARG;
+        source.resize(length);
+        const auto shell_path = path::StripExtendedPathPrefix(source);
+        result = SHParseDisplayName(shell_path.c_str(), nullptr, &ids[i], 0, nullptr);
+        if (FAILED(result)) return result;
+        if (!ids[i]) return E_FAIL;
+    }
+    return SHCreateShellItemArrayFromIDLists(count, const_cast<PCIDLIST_ABSOLUTE_ARRAY>(ids.data()), out);
+}
+
+HRESULT PasteShellDataToFolder(IDataObject* data, IShellItem* destination, DWORD preferred_effect,
+                               const std::atomic_bool* cancelled, HWND owner) {
     if (cancelled && cancelled->load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     Microsoft::WRL::ComPtr<IDataObject> synchronous;
     synchronous.Attach(new SynchronousShellData(data, cancelled));
     data = synchronous.Get();
     Microsoft::WRL::ComPtr<IShellItemArray> items;
-    if (SUCCEEDED(SHCreateShellItemArrayFromDataObject(data, IID_PPV_ARGS(&items)))) {
-        Microsoft::WRL::ComPtr<IShellItem> destination;
-        HRESULT hr = shell_id::CreateItem(path::StripExtendedPathPrefix(dir), IID_PPV_ARGS(&destination));
+    const HRESULT resolved = ResolveShellClipboardItems(data, &items);
+    if (SUCCEEDED(resolved)) {
         Microsoft::WRL::ComPtr<IFileOperation> operation;
-        if (SUCCEEDED(hr)) hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
+        HRESULT hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
             IID_PPV_ARGS(&operation));
+        if (SUCCEEDED(hr) && owner) hr = operation->SetOwnerWindow(owner);
         DWORD flags = FOF_NOCONFIRMMKDIR;
         DWORD count = 0;
         bool same_folder = SUCCEEDED(hr) && SUCCEEDED(items->GetCount(&count)) && count != 0;
@@ -280,7 +313,7 @@ HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferr
             Microsoft::WRL::ComPtr<IShellItem> item, parent;
             int order = 1;
             same_folder = SUCCEEDED(items->GetItemAt(i, &item)) && SUCCEEDED(item->GetParent(&parent)) &&
-                SUCCEEDED(parent->Compare(destination.Get(), SICHINT_CANONICAL, &order)) && order == 0;
+                SUCCEEDED(parent->Compare(destination, SICHINT_CANONICAL, &order)) && order == 0;
         }
         if (same_folder && !PreferredEffectIsCut(preferred_effect)) flags |= FOF_RENAMEONCOLLISION;
         if (SUCCEEDED(hr)) hr = operation->SetOperationFlags(flags);
@@ -289,8 +322,8 @@ HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferr
         DWORD cookie = 0;
         if (SUCCEEDED(hr)) hr = operation->Advise(progress.Get(), &cookie);
         if (SUCCEEDED(hr)) hr = PreferredEffectIsCut(preferred_effect)
-            ? operation->MoveItems(items.Get(), destination.Get())
-            : operation->CopyItems(items.Get(), destination.Get());
+            ? operation->MoveItems(items.Get(), destination)
+            : operation->CopyItems(items.Get(), destination);
         // A drop target may return while a provider is still transferring data.
         // Keep the source alive and report only the file operation's terminal result.
         if (SUCCEEDED(hr)) hr = operation->PerformOperations();
@@ -301,13 +334,10 @@ HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferr
         if (aborted || (cancelled && cancelled->load())) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
         return hr;
     }
+    if (resolved != DV_E_FORMATETC) return resolved;
     IDropTarget* drop = nullptr;
-    IShellItem* folder = nullptr;
-    const std::wstring shell_path = path::StripExtendedPathPrefix(dir);
-    if (SUCCEEDED(shell_id::CreateItem(shell_path, IID_PPV_ARGS(&folder)))) {
-        folder->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&drop));
-        folder->Release();
-    }
+    const HRESULT bound = destination->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&drop));
+    if (FAILED(bound)) return bound;
 
     HRESULT result = E_NOINTERFACE;
     if (drop) {
@@ -329,19 +359,7 @@ HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferr
     return cancelled && cancelled->load() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : result;
 }
 
-bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
-    const HRESULT ole = OleInitialize(nullptr);
-    if (FAILED(ole)) return false;
-    struct OleDone { ~OleDone() { OleUninitialize(); } } ole_done;
-
-    if (GetClipboardSequenceNumber() != expected_sequence) return false;
-    IDataObject* data = nullptr;
-    if (FAILED(OleGetClipboard(&data)) || !data) return false;
-    if (GetClipboardSequenceNumber() != expected_sequence) {
-        data->Release();
-        return false;
-    }
-
+DWORD ShellClipboardEffect(IDataObject* data) {
     DWORD preferred_effect = DROPEFFECT_COPY;
     const UINT preferred_format = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
     FORMATETC format{ static_cast<CLIPFORMAT>(preferred_format), nullptr,
@@ -357,13 +375,44 @@ bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
         }
         ReleaseStgMedium(&medium);
     }
-    const bool ok = SUCCEEDED(PasteShellData(data, dir,
-        PreferredEffectIsCut(preferred_effect) ? DROPEFFECT_MOVE : DROPEFFECT_COPY));
-    data->Release();
-    return ok;
+    return PreferredEffectIsCut(preferred_effect) ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
+}
+} // namespace
+
+HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferred_effect,
+                       const std::atomic_bool* cancelled) {
+    if (!data || (preferred_effect != DROPEFFECT_COPY && preferred_effect != DROPEFFECT_MOVE)) return E_INVALIDARG;
+    if (cancelled && cancelled->load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    Microsoft::WRL::ComPtr<IShellItem> destination;
+    const HRESULT hr = shell_id::CreateItem(path::StripExtendedPathPrefix(dir), IID_PPV_ARGS(&destination));
+    if (FAILED(hr)) return hr;
+    return PasteShellDataToFolder(data, destination.Get(), preferred_effect, cancelled, nullptr);
+}
+
+bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
+    const HRESULT ole = OleInitialize(nullptr);
+    if (FAILED(ole)) return false;
+    struct OleDone { ~OleDone() { OleUninitialize(); } } ole_done;
+
+    if (GetClipboardSequenceNumber() != expected_sequence) return false;
+    Microsoft::WRL::ComPtr<IDataObject> data;
+    if (FAILED(OleGetClipboard(&data)) || !data || GetClipboardSequenceNumber() != expected_sequence) return false;
+    return SUCCEEDED(PasteShellData(data.Get(), dir, ShellClipboardEffect(data.Get())));
+}
+
+HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner) {
+    Microsoft::WRL::ComPtr<IDataObject> data;
+    const HRESULT hr = OleGetClipboard(&data);
+    if (FAILED(hr)) return hr;
+    if (!data) return DV_E_FORMATETC;
+    return PasteShellDataToFolder(data.Get(), folder, ShellClipboardEffect(data.Get()), nullptr, owner);
 }
 
 #ifdef PULSE_CLIPBOARD_TESTING
+HRESULT ResolveShellClipboardItemsForTest(IDataObject* data, IShellItemArray** out) {
+    return ResolveShellClipboardItems(data, out);
+}
+
 bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t preferred_effect) {
     const HRESULT ole = OleInitialize(nullptr);
     if (FAILED(ole)) return false;

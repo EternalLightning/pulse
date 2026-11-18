@@ -17,15 +17,6 @@
 namespace pulse::model {
 namespace {
 
-std::wstring FileNameOf(const std::wstring& path) {
-    std::wstring_view view = path;
-    while (view.size() > 1 && (view.back() == L'\\' || view.back() == L'/'))
-        view.remove_suffix(1);
-    const size_t slash = view.find_last_of(L"\\/");
-    return slash == std::wstring_view::npos ? std::wstring(view)
-                                            : std::wstring(view.substr(slash + 1));
-}
-
 std::wstring ParentOf(const std::wstring& path) {
     std::wstring copy = path;
     while (copy.size() > 1 && (copy.back() == L'\\' || copy.back() == L'/')) copy.pop_back();
@@ -194,7 +185,7 @@ std::vector<BatchRenameItem> PreviewBatchRename(const std::vector<std::wstring>&
         if (cancelled && cancelled()) return {};
         BatchRenameItem item;
         item.source_path = paths[i];
-        item.original_name = FileNameOf(paths[i]);
+        item.original_name = path::FileNameOf(paths[i]);
         item.new_name = ApplyBatchRenameRule(item.original_name, i, rule);
         if (item.new_name.empty()) item.status = BatchRenameStatus::Empty;
         else if (!IsValidFileName(item.new_name)) item.status = BatchRenameStatus::Invalid;

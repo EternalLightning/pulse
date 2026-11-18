@@ -85,7 +85,7 @@ private:
         return D2D1::RectF(20 * scale_, FooterTop() - 44 * scale_, Width() - 20 * scale_, FooterTop() - 12 * scale_);
     }
     D2D1_RECT_F ErrorRect() const {
-        const float top = (spec_.fields.front().top + 36) * scale_;
+        const float top = (spec_.fields.back().top + 36) * scale_;
         return D2D1::RectF(20 * scale_, top, Width() - 20 * scale_, FooterTop() - 4 * scale_);
     }
     void Invalidate(D2D1_RECT_F rect) const {

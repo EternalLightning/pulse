@@ -357,6 +357,10 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
 
             toggle(lay.explorer_takeover_row, I::SettingsExplorerTakeover, I::SettingsExplorerTakeoverDesc, L"\xE8B7",
                    vm.settings_explorer_takeover, 24);
+            toggle(lay.file_dialog_bridge_row, I::SettingsFileDialogBridge, I::SettingsFileDialogBridgeDesc,
+                   L"\xE8E5", vm.settings_file_dialog_bridge, 38);
+            toggle(lay.file_dialog_takeover_row, I::SettingsFileDialogTakeover, I::SettingsFileDialogTakeoverDesc,
+                   L"\xE8A7", vm.settings_file_dialog_takeover, 37);
 
             if (lay.system_status.bottom > lay.system_status.top) {
                 const auto r = lay.system_status;
@@ -402,7 +406,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                 fluent::ControlState state{};
                 state.enabled = !vm.settings_transfer_busy;
                 state.hovered = state.enabled && IsHovered(vm, HitTestResult::SettingsDiagnosticsAction, i + 3);
-                DrawSettingsButton(vm, {lay.transfer_action[i], l10n::Get(transfer_labels[i]), {},
+                DrawSettingsButton(vm, {lay.transfer_action[i], l10n::Get(transfer_labels[i]) + (i < 2 ? L"…" : L""), {},
                     fluent::ButtonKind::Standard, state});
             }
 
@@ -425,7 +429,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         }
     } else {
         section(0,I::SearchModeName);section(1,I::SearchModeContent);
-        for (auto row : {lay.global_search_row, lay.global_search_hotkey_row, lay.search_pinyin_row,
+        for (auto row : {lay.global_search_row, lay.search_pinyin_row,
                 lay.filename_status, lay.disclosure[1], lay.content_header, lay.content_types,
                 lay.content_empty, lay.content_options, lay.content_rebuild}) {
             if (row.bottom <= row.top) continue;
@@ -433,12 +437,6 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             draw_card(row);
         }
         toggle(lay.global_search_row,I::GlobalSearch,I::GlobalSearchDesc,L"\xE721",vm.settings_global_search_enabled,15);
-        label(lay.global_search_hotkey_row,l10n::Get(I::GlobalSearchHotkey),
-            vm.settings_global_search_error.empty() ? l10n::Get(I::GlobalSearchHotkeyDesc) : vm.settings_global_search_error,
-            L"\xE765",lay.global_search_hotkey_button.top >= lay.global_search_hotkey_row.top+56*scale_
-                ? lay.global_search_hotkey_row.right-16*scale_ : lay.global_search_hotkey_button.left-12*scale_);
-        button(lay.global_search_hotkey_button,vm.settings_global_search_capturing ? l10n::Get(I::GlobalSearchRecording) : vm.settings_global_search_hotkey,H::SettingsGlobalSearchHotkey,0);
-
         toggle(lay.search_pinyin_row,I::SearchPinyin,I::SearchPinyinDesc,L"\xE721",vm.settings_search_pinyin,9);
         label(lay.filename_status,l10n::Get(I::SettingsFilenameIndex),vm.settings_index_status,L"\xE8A5",lay.filename_status.right-16*scale_);
         disclosure(lay.disclosure[1],I::SettingsMaintenance,I::SettingsMaintenanceDesc,L"\xE713",1,false);

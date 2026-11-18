@@ -123,7 +123,9 @@ void Gallery(IWICImagingFactory* wic, ID2D1Factory* factory, const wchar_t* file
         L"Network",L"Delete",L"Recycle",L"Tag",L"Settings",L"Sun",L"Cut",L"Copy",
         L"Paste",L"Rename",L"Sort",L"Filter",L"List",L"Grid",L"Split",L"Columns",
         L"Panel",L"Close panel",L"Check",L"Eye",L"Info",L"Home",L"Tray",L"Pin",
-        L"Link",L"Palette",L"Sliders",L"Warning",L"Lock",L"External",L"Favourite",L"More"
+        L"Link",L"Palette",L"Sliders",L"Warning",L"Lock",L"External",L"Favourite",L"More",
+        L"Undo",L"Select all",L"Invert selection",L"Terminal",L"New folder",L"Library",L"Applications",
+        L"Single pane",L"Stacked panes",L"Three panes",L"Four panes"
     };
     static_assert(std::size(names) == static_cast<size_t>(Icon::Count)-1);
     Ref<IWICBitmap> bitmap;
@@ -132,7 +134,8 @@ void Gallery(IWICImagingFactory* wic, ID2D1Factory* factory, const wchar_t* file
     Ref<ID2D1StrokeStyle> stroke;
     Ref<IDWriteFactory> write;
     Ref<IDWriteTextFormat> format;
-    HRESULT hr = wic->CreateBitmap(1100,1280,GUID_WICPixelFormat32bppPBGRA,WICBitmapCacheOnLoad,bitmap.Put());
+    constexpr UINT panel_height = 42+static_cast<UINT>((std::size(names)+10)/11)*98;
+    HRESULT hr = wic->CreateBitmap(1100,2*panel_height,GUID_WICPixelFormat32bppPBGRA,WICBitmapCacheOnLoad,bitmap.Put());
     if (SUCCEEDED(hr)) hr = factory->CreateWicBitmapRenderTarget(bitmap.value,
         D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE,
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,D2D1_ALPHA_MODE_PREMULTIPLIED),96,96),target.Put());
@@ -148,9 +151,9 @@ void Gallery(IWICImagingFactory* wic, ID2D1Factory* factory, const wchar_t* file
     target->BeginDraw();
     for (int theme_index=0;theme_index<2;++theme_index) {
         const auto theme=MakeTheme(theme_index==0,HexColor(0x8265B2));
-        const float top=static_cast<float>(theme_index)*640;
+        const float top=static_cast<float>(theme_index*panel_height);
         brush->SetColor(theme.surface_card);
-        target->FillRectangle({0,top,1100,top+640},brush.value);
+        target->FillRectangle({0,top,1100,top+static_cast<float>(panel_height)},brush.value);
         brush->SetColor(theme.text_secondary);
         const wchar_t* title=theme_index==0 ? L"PULSE  /  DARK  /  18, 24 & 32 px" : L"PULSE  /  LIGHT  /  18, 24 & 32 px";
         target->DrawText(title,static_cast<UINT32>(wcslen(title)),format.value,{0,top+12,1100,top+36},brush.value);

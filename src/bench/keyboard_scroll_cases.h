@@ -5,6 +5,101 @@
 #include <optional>
 #include <wrl/client.h>
 
+inline bool RunInitialSelectionChecks(pulse::AppState& s) {
+    using namespace pulse;
+    int failures = 0;
+    const auto check = [&](bool passed, const char* label) {
+        std::printf("[%s] %s\n", passed ? "PASS" : "FAIL", label);
+        failures += !passed;
+    };
+    BYTE saved_keys[256]{}, keys[256]{};
+    check(GetKeyboardState(saved_keys) != FALSE, "save fixture thread keyboard state");
+    SetFocus(s.hwnd);
+    check(GetFocus() == s.hwnd, "file pane has Win32 keyboard focus");
+    const auto key = [&](WPARAM code) {
+        SetKeyboardState(keys);
+        HandleKeyDown(&s, s.hwnd, WM_KEYDOWN, code, 1);
+    };
+    auto& tab = *ActiveTab(s);
+    auto entries = std::make_shared<std::vector<fs::DirEntry>>(120);
+    for (auto& entry : *entries) entry.name = L"Background keep.txt";
+    const int last = static_cast<int>(entries->size()) - 1;
+    (*entries)[0].name = L"a-hidden keep.txt";
+    (*entries)[0].attrs = FILE_ATTRIBUTE_HIDDEN;
+    (*entries)[1].name = L"alpha keep.cfg";
+    (*entries)[2].name = L"amber filtered.txt";
+    entries->back().name = L"Atlas keep";
+    entries->back().is_dir = true;
+    entries->back().attrs = FILE_ATTRIBUTE_DIRECTORY;
+    tab.SetSnapshot(entries);
+    tab.view_mode = ui::ViewMode::Details;
+    tab.group_mode = ui::GroupMode::None;
+    tab.filter_text = L"keep";
+    tab.SelectOnly(last);
+    s.safeMode = true;
+    key(L'A');
+    check(tab.selected_index == 1 && tab.SelectedCount() == 1,
+        "first letter selects the first match and skips hidden rows");
+    key(L'A');
+    check(tab.selected_index == last && tab.SelectedCount() == 1,
+        "repeated letter selects the next match and skips filtered rows");
+    if (s.renderer.MotionEnabled()) {
+        check(s.keyboardScroll && s.scrollAnimating && tab.scroll_y == 0 && s.scrollTargetY > 0,
+            "offscreen letter match starts keyboard reveal from the displayed position");
+        s.scrollLastUpdateTime -= std::chrono::milliseconds(20);
+        Render(s);
+        const float intermediate = tab.scroll_y;
+        check(intermediate > 0 && intermediate < s.scrollTargetY, "letter reveal advances through an intermediate position");
+        key(L'A');
+        check(tab.selected_index == 1 && s.keyboardScrollFrom.y == intermediate && s.scrollTargetY == 0,
+            "wrapping retargets the existing scroll from its current position");
+        s.scrollLastUpdateTime -= std::chrono::milliseconds(120);
+        Render(s);
+        check(tab.scroll_y == 0 && !s.scrollAnimating, "wrapped letter reveal settles and releases the frame chain");
+    } else {
+        check(tab.scroll_y > 0 && !s.scrollAnimating, "reduced motion reveals the selected match immediately");
+        key(L'A');
+        check(tab.selected_index == 1 && tab.scroll_y == 0, "repeated letter wraps to the first match");
+    }
+    key(L'B');
+    check(tab.selected_index == 3, "a different letter restarts from the first match");
+    key(L'B');
+    key(L'Z');
+    check(tab.selected_index == 4, "matching rows with duplicate names remain distinct and an unmatched letter preserves selection");
+    keys[VK_CONTROL] = 0x80;
+    key(L'A');
+    check(tab.SelectedCount() > 1, "Ctrl+A keeps the command shortcut");
+    keys[VK_CONTROL] = 0;
+    key(L'A');
+    key(VK_PROCESSKEY);
+    keys[VK_SHIFT] = 0x80;
+    key(L'A');
+    keys[VK_SHIFT] = 0;
+    check(tab.selected_index == 1 && tab.SelectedCount() == 1, "IME processing and shifted letters leave file selection alone");
+    const HWND editor = CreateWindowExW(0, L"EDIT", nullptr, WS_CHILD, 0, 0, 100, 20,
+        s.hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (editor) {
+        SetFocus(editor);
+        check(GetFocus() == editor, "native edit has Win32 keyboard focus");
+        key(L'B');
+        SendMessageW(editor, WM_CHAR, L'b', 1);
+        wchar_t typed[2]{};
+        GetWindowTextW(editor, typed, ARRAYSIZE(typed));
+        check(tab.selected_index == 1 && typed[0] == L'b', "letter remains available to the focused native edit");
+        SetFocus(s.hwnd);
+        DestroyWindow(editor);
+    } else check(false, "create native edit focus fixture");
+    tab.group_mode = ui::GroupMode::Type;
+    tab.group_direction = ui::SortDirection::Asc;
+    key(L'A');
+    check(tab.selected_index == last, "grouped view selects the first displayed match instead of the first source row");
+    key(L'A');
+    check(tab.selected_index == 1, "grouped view advances across groups in display order");
+    CancelScrollAnimation(s);
+    SetKeyboardState(saved_keys);
+    return failures == 0;
+}
+
 inline bool RunKeyboardScrollChecks(pulse::AppState& s) {
     using namespace pulse;
     int failures = 0;

@@ -291,6 +291,8 @@ int RunGroupToolbarUiTest(bool order_only = false, bool colors_only = false) {
                 const auto layout = ui::MakeToolbarLayout(rect.right, scale, s.renderer.TitleBarHeight(),
                     s.renderer.Margin(), s.renderer.NewButtonWidthPx(rect.right - left < 600 * scale),
                     left, expand);
+                check(layout.sort.right - layout.sort.left == layout.group.right - layout.group.left,
+                    "sort and group buttons share a width in text and icon modes");
                 if (layout.sort.right - layout.sort.left >= 60 * scale) {
                     ui::fluent::Painter painter(&s.compositor);
                     painter.SetScale(scale);

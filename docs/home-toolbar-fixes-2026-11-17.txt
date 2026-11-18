@@ -1,0 +1,44 @@
+首页、筛选按钮与 Windows 库修正（2026-11-17）
+
+按用户截图调整
+
+1. 筛选按钮：带文字的收起状态由96 DIP收紧为88 DIP；排序、分组、筛选及自定义按钮之间统一8 DIP间距。
+   图标模式仍为32 DIP，展开输入区域继续按可用空间分配；绘制、点击与编辑框沿用同一布局。
+2. 窗格标题栏的查看菜单恢复三个点，保留“查看”提示与原菜单分工。
+3. 首页卡片顺序改为：桌面、图片、视频、下载、回收站、库、控制面板、应用程序。
+4. 修复库根目录空白。
+
+库空白根因与修复
+
+本机 Windows 原生 Libraries 根目录有4项，物理 Libraries 目录也有4个.library-ms描述文件。
+但原生库项的SIGDN_FILESYSPATH均返回E_INVALIDARG（0x80070057）。旧代码遇到空路径直接continue，
+导致4项全部丢弃，返回成功却没有任何可显示条目。
+
+现在在后台STA中从Libraries已知目录和原生绝对解析名还原描述文件路径，保留原生名称、PIDL、
+pulse:library:导航路径及实际成员文件夹聚合。没有修改用户库、系统设置或文件。
+
+Files首页对照
+
+核查Files当前main：754c99145e9cee89eb9005a7dd1d86a0705c08b8。
+首页对应区域叫Quick access，卡片读取PinnedFoldersService中的固定位置，数量和内容可随用户变化；
+首次运行会在尚未固定时加入回收站。其他首页模块包括驱动器、网络位置、标签和最近文件。
+因此它没有与本地这组卡片完全相同的固定清单。
+
+来源：
+https://github.com/files-community/Files/blob/754c99145e9cee89eb9005a7dd1d86a0705c08b8/src/Files.App/ViewModels/UserControls/Widgets/QuickAccessWidgetViewModel.cs
+https://github.com/files-community/Files/blob/754c99145e9cee89eb9005a7dd1d86a0705c08b8/src/Files.App/Utils/Global/QuickAccessManager.cs
+https://files.community/docs/customize-settings/general
+
+实际验证
+
+- pulse Release目标构建通过，无新增编译警告；PULSE_WITH_SELFTEST=OFF。
+- 独立库回归11项：旧实现2项失败，修复后11项通过。包括真实非空根目录/描述路径与Shell身份、
+  仓库隔离双成员库聚合、请求取消及缺失库错误。源码与探针在bench_data/shell-libraries-2026-11-17/。
+- home_toolbar_library_test：61 PASS、0 FAIL。检查100%/175%/200% DPI、宽窄布局与筛选间距，
+  实际HomeCatalog卡片顺序、生产对象中的非空原生库列表、筛选展开/清除命中及界面绘制。
+- 已查看中英文浅深主题筛选截图、首页排序截图和原生库四项截图，无新增文字裁切或重叠。
+- UI依赖检查、git diff --check通过。没有重复运行已通过的快捷键和自定义窗口检查。
+
+构建与截图日志：bench_data/home-toolbar-2026-11-17/。
+复用夹具：scripts/test_customization_features.ps1 -BuildDir build-release -Fixture home_toolbar_library_test。
+未提交、推送、打包或更新安装版；未运行全套历史回归。

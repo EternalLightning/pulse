@@ -35,7 +35,8 @@ static_assert(static_cast<UINT>(StringId::SettingsChangeTracking) >= kFirstStrin
               static_cast<UINT>(StringId::TextRenderSmooth) <= kLastString &&
               static_cast<UINT>(StringId::OpenNetworkSettings) <= kLastString &&
               static_cast<UINT>(StringId::DupSkipSmallFiles) <= kLastString &&
-              static_cast<UINT>(StringId::ClearFilter) <= kLastString);
+              static_cast<UINT>(StringId::ClearFilter) <= kLastString &&
+              static_cast<UINT>(StringId::ShellApplications) <= kLastString);
 
 HINSTANCE g_module = nullptr;
 std::atomic<Language> g_preference{Language::System};

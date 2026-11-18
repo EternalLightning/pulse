@@ -493,6 +493,13 @@ struct AppState : AppCoreOwner {
     std::unordered_map<int, TabTrack> chipTracks;
     std::unordered_map<int, float> chipOffsets;
 
+    struct NameSelectionCycle {
+        wchar_t letter = 0;
+        uint64_t tab_identity = 0;
+        uint64_t view_generation = 0;
+        uint64_t selection_revision = 0;
+    } nameSelectionCycle;
+
     // Smooth scroll animation.
     bool scrollAnimating = false;
     ui::SmoothScroll sidebarScrollMotion, detailsScrollMotion, horizontalScrollMotion;

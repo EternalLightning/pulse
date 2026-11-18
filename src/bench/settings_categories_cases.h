@@ -64,6 +64,8 @@ int RunSettingsCategories() {
         {7,&ui::SettingsLayout::last_tab_row,H::SettingsToggle,32,I::CloseLastTabWindow},
         {7,&ui::SettingsLayout::window_size_lock_row,H::SettingsToggle,34,I::SettingsLockWindowSize},
         {8,&ui::SettingsLayout::explorer_takeover_row,H::SettingsToggle,24,I::SettingsExplorerTakeover},
+        {8,&ui::SettingsLayout::file_dialog_bridge_row,H::SettingsToggle,38,I::SettingsFileDialogBridge},
+        {8,&ui::SettingsLayout::file_dialog_takeover_row,H::SettingsToggle,37,I::SettingsFileDialogTakeover},
         {8,&ui::SettingsLayout::text_compare_row,H::None,0,I::SettingsTextCompare},
         {8,&ui::SettingsLayout::startup_tray_row,H::SettingsToggle,31,I::StartToTray},
         {9,&ui::SettingsLayout::staging_tray_row,H::SettingsToggle,36,I::SettingsStagingTray},

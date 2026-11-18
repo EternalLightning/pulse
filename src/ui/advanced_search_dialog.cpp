@@ -531,7 +531,7 @@ private:
                    spec_.kind != index::SearchKind::Any);
         DrawButton(LocationRect(), LocationLabel(spec_.location), 6,
                    spec_.location != model::LocationScope::Indexed);
-        DrawButton(BrowseRect(), l10n::Get(l10n::StringId::AdvSearchBrowse), 7);
+        DrawButton(BrowseRect(), l10n::Get(l10n::StringId::AdvSearchBrowse) + L"…", 7);
         DrawButton(DateRect(), DateLabel(spec_.date), 8,
                    spec_.date != model::DatePreset::Any);
         DrawButton(SizeRect(), SizeLabel(spec_.size), 9,

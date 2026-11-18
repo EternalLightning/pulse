@@ -214,6 +214,15 @@ void NetworkCatalogChecks() {
         sidebar.drives[0].detail != l10n::Get(l10n::StringId::HomeLoading) &&
         sidebar.drives[1].detail == l10n::Get(l10n::StringId::HomeLoading),
         "refresh during blocked network I/O retains local sidebar capacity and warning");
+    model::HomeQuickAccessPrefs quick_access;
+    quick_access.hidden = model::kHomeQuickAccessHiddenMask;
+    quick_access.AddFolder(L"C:\\Pulse home quick access fixture");
+    catalog.Refresh(quick_access);
+    catalog.Fill(pane);
+    Check(catalog.Loading() && pane.home_loading && !pane.home_cards.empty() &&
+        pane.home_cards.front().path == quick_access.folders.front() &&
+        std::count_if(pane.home_cards.begin(), pane.home_cards.end(), [](const auto& card) { return card.group == 0; }) == 1,
+        "home quick access changes apply immediately while mapped-drive metadata remains blocked");
     SetEvent(release_network);
     const auto deadline = GetTickCount64() + 3000;
     while (catalog.Loading() && GetTickCount64() < deadline) Sleep(1);

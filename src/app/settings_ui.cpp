@@ -9,6 +9,8 @@
 #include "background_window_fit.h"
 #include "system_ctx_settings.h"
 #include "settings_transfer_ui.h"
+#include "shortcut_settings_ui.h"
+#include "home_quick_access_ui.h"
 #include <algorithm>
 #include <cwctype>
 #include <cmath>
@@ -56,12 +58,14 @@ constexpr SettingDestination destinations[]={
     {I::ListZebraRows,6,0},{I::ListSizeBar,6,0},{I::SettingsShowPerformance,6,0},
     {I::SettingsNewTabHome,7,0},{I::SettingsExternalOpen,7,0},{I::PinnedNames,7,0},
     {I::CloseLastTabWindow,7,0},{I::SettingsMatchBackground,7,0},{I::SettingsLockWindowSize,7,0},
-    {I::SettingsDefaultManager,8,0},{I::SettingsExplorerTakeover,8,0},{I::SettingsLaunch,8,0},
+    {I::SettingsDefaultManager,8,0},{I::SettingsExplorerTakeover,8,0},
+    {I::SettingsFileDialogBridge,8,0},{I::SettingsFileDialogTakeover,8,0},
+    {I::SettingsLaunch,8,0},
     {I::StartToTray,8,0},{I::SettingsKeepRunning,8,0},{I::ConfigurationLocation,8,0},
     {I::SettingsTransfer,8,0},{I::ExportSettingsTitle,8,0},{I::ImportSettingsTitle,8,0},
     {I::SettingsStagingTray,9,0},{I::SettingsTextCompare,9,0},{I::SettingsChangeTracking,9,0},
     {I::SettingsChangeDays,9,0},
-    {I::GlobalSearch,1,0},{I::GlobalSearchHotkey,1,0},{I::SearchPinyin,1,0},
+    {I::GlobalSearch,1,0},{I::GlobalSearchHotkey,10,0},{I::SearchPinyin,1,0},
     {I::ContentIndexManage,1,0},{I::IndexLocation,1,2},{I::LocalDrives,1,2},
     {I::Exclusions,1,2},{I::ServerFolders,1,2},{I::SettingsContextMenu,2,0},
     {I::SettingsDuplicates,4,0},{I::SettingsAboutDiagnostics,3,0},{I::SettingsSystemContextMenu,5,0},
@@ -74,10 +78,24 @@ std::vector<ui::FluentMenuItem> FilterSettings(const std::wstring& query) {
         I::SettingsFileList,I::SettingsPageTabs,I::SettingsPageSystem,I::SettingsPageFileOps};
     for(size_t i=0;i<std::size(destinations);++i) {
         auto item=Item(static_cast<int>(i)+1,destinations[i].title);
-        item.shortcut=l10n::Get(pages[destinations[i].page]);
+        item.shortcut=destinations[i].page == 10 ? l10n::Pick(L"快捷键", L"Shortcuts") : l10n::Get(pages[destinations[i].page]);
         std::wstring haystack=item.text+L" "+item.shortcut;
         std::transform(haystack.begin(),haystack.end(),haystack.begin(),towlower);
         if(needle.empty() || haystack.find(needle)!=std::wstring::npos) items.push_back(std::move(item));
+    }
+    const std::wstring shortcuts = l10n::Pick(L"快捷键", L"Shortcuts");
+    std::wstring shortcut_search = shortcuts;
+    std::transform(shortcut_search.begin(), shortcut_search.end(), shortcut_search.begin(), towlower);
+    if (needle.empty() || shortcut_search.find(needle) != std::wstring::npos) {
+        ui::FluentMenuItem item; item.command = 1000; item.text = shortcuts;
+        items.push_back(std::move(item));
+    }
+    const std::wstring quick_access = l10n::Pick(L"快捷访问", L"Quick access");
+    std::wstring quick_access_search = quick_access;
+    std::transform(quick_access_search.begin(), quick_access_search.end(), quick_access_search.begin(), towlower);
+    if (needle.empty() || quick_access_search.find(needle) != std::wstring::npos) {
+        ui::FluentMenuItem item; item.command = 1001; item.text = quick_access;
+        items.push_back(std::move(item));
     }
     if(items.empty()) {auto item=Item(0,I::SettingsNoMatches);item.enabled=false;items.push_back(std::move(item));}
     return items;
@@ -91,6 +109,8 @@ void FindSetting(AppState& s) {
     ClientToScreen(s.hwnd,&pt);
     const int command=s.menu->TrackPopup(pt,FilterSettings(L""),FilterSettings,true);
     s.menu->SetFilterPlaceholder(L"");
+    if (command == 1000) { OpenSettingsTab(s, 10); return; }
+    if (command == 1001) { OpenSettingsTab(s, 11); return; }
     if(command>0 && command<=static_cast<int>(std::size(destinations))) {
         const auto& target=destinations[command-1];
         OpenSettingsTab(s,target.page);s.settingsExpanded|=target.expanded;
@@ -152,6 +172,8 @@ bool TestSettingsFilter(const std::wstring& query,I expected) {
 
 bool HandleSettingsControl(AppState& s,const H& hit) {
     switch(hit.region) {
+    case H::SettingsHomeQuickAccess: HandleHomeQuickAccessSettingsAction(s, hit.index, hit.sub_index, hit.path); break;
+    case H::SettingsShortcut: HandleShortcutSettingsAction(s, hit.index, hit.sub_index); break;
     case H::SettingsDiagnosticsAction:
         if (hit.index < 3 || hit.index > 5) return false;
         SettingsTransferAction(s, hit.index - 3);

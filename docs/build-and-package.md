@@ -36,6 +36,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 | `pulse_preview` | `Pulse.Preview.exe` | 预览主机 |
 | `pulse_shell` | `Pulse.Shell.exe` | Shell 主机 |
 | `pulse_integration` | `Pulse.Integration.exe` | 系统右键菜单集成辅助程序 |
+| `pulse_dialog_bridge` | `Pulse.DialogBridge.dll` | 当前用户可选的标准文件对话框 Shell 桥接 |
 
 构建步骤会准备相关 DLL、`7zip` 和许可证。脚本只构建交付目标及其依赖，不运行功能测试，也不生成安装包或 ZIP。
 

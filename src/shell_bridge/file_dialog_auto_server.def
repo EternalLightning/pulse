@@ -1,0 +1,7 @@
+; SPDX-License-Identifier: Apache-2.0
+; Adapted from jimmgreen/pulse at b32436831a066e18448b2810bef4bf989024fc68.
+; Modified for this Pulse distribution. See LICENSE and NOTICE.
+LIBRARY "Pulse.DialogBridge"
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

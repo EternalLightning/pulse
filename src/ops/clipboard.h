@@ -12,6 +12,8 @@
 #include <vector>
 
 struct IDataObject;
+struct IShellItem;
+struct IShellItemArray;
 
 namespace pulse::ops {
 
@@ -44,6 +46,8 @@ inline bool ClipboardHasShellFiles() {
 }
 
 bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence);
+// The broker STA is already OLE-initialized and has resolved the device PIDL.
+HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner);
 
 bool HasShellFileData(IDataObject* data);
 // STA worker only. Returns after the transfer completes; cancellation/failure
@@ -52,6 +56,7 @@ HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD effect,
                       const std::atomic_bool* cancelled = nullptr);
 
 #ifdef PULSE_CLIPBOARD_TESTING
+HRESULT ResolveShellClipboardItemsForTest(IDataObject* data, IShellItemArray** out);
 bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t preferred_effect);
 #endif
 

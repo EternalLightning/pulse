@@ -5,6 +5,8 @@
 
 #include "command_catalog.h"
 #include "context_menu.h"
+#include <algorithm>
+#include <cwctype>
 
 namespace pulse::app {
 namespace {
@@ -53,7 +55,45 @@ constexpr CommandDescriptor kCommands[] = {
     {CmdInstallFullIndex, S::EnableFullIndex, L"\xE721", {}, A::Always},
     {CmdSettings, S::Settings, L"\xE713", {}, A::Always},
     {CmdOpenRecycle, S::RecycleBin, L"\xE75C", {}, A::Always},
+    {CmdNewMenu, S::New, L"\xE710", {}, A::NewItem},
+    {CmdSplitMenu, S::SplitLayout, L"\xE8A7", {}, A::Always, P::LayoutSideBySide},
+    {CmdColumnLayout, S::ColumnLayout, L"\xE8FD", {}, A::View},
+    {CmdCustomizeCommands, S::CustomizeCommands, L"\xE713", {}, A::Always},
+    {CmdPathAliases, S::PathAliases, L"\xE71B", {}, A::Always},
+    {CmdSetPathAlias, S::PathAliasSet, L"\xE71B", {}, A::PinWorkspace},
+    {CmdLibraries, S::ShellLibraries, L"\xE8F1", {}, A::Always},
+    {CmdControlPanel, S::ShellControlPanel, L"\xE713", {}, A::Always},
+    {CmdApplications, S::ShellApplications, L"\xE71D", {}, A::Always},
 };
+
+std::vector<CommandShortcutOverride> shortcut_overrides;
+
+bool SupportedShortcutKey(unsigned key) {
+    return (key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9') ||
+        (key >= VK_F1 && key <= VK_F24) || key == VK_DELETE || key == VK_INSERT ||
+        key == VK_RETURN || key == VK_SPACE || key == VK_TAB || key == VK_ESCAPE ||
+        key == VK_BACK || key == VK_HOME || key == VK_END || key == VK_PRIOR ||
+        key == VK_NEXT || (key >= VK_LEFT && key <= VK_DOWN);
+}
+
+bool ReservedShortcut(const CommandShortcut& shortcut) {
+    for (const auto& descriptor : kCommands)
+        if (shortcut == descriptor.shortcut) return false;
+    if (!shortcut.ctrl && !shortcut.alt)
+        return shortcut.key < VK_F1 || shortcut.key > VK_F24 ||
+            shortcut.key == VK_F1 || shortcut.key == VK_F4 || shortcut.key == VK_F6;
+    if (shortcut.ctrl && shortcut.alt) return true; // AltGr must remain available to text input.
+    if (shortcut.key == VK_TAB || shortcut.key == VK_ESCAPE || shortcut.key == VK_SPACE ||
+        shortcut.key == VK_BACK || shortcut.key == VK_RETURN ||
+        (shortcut.key >= VK_LEFT && shortcut.key <= VK_DOWN) || shortcut.key == VK_HOME ||
+        shortcut.key == VK_END || shortcut.key == VK_PRIOR || shortcut.key == VK_NEXT ||
+        shortcut.key == VK_INSERT || shortcut.key == VK_DELETE) return true;
+    if (shortcut.alt && shortcut.key == VK_F4) return true;
+    if (shortcut.ctrl &&
+        (shortcut.key == 'T' || shortcut.key == 'K' || shortcut.key == 'P' ||
+         (shortcut.key == 'F' && !shortcut.shift) || shortcut.key == 'D' || shortcut.key == 'W' || shortcut.key == 'L')) return true;
+    return shortcut.ctrl && shortcut.shift && shortcut.key >= '1' && shortcut.key <= '7';
+}
 
 bool Enabled(CommandAvailability availability, const CommandContext& context) {
     const bool selected = context.selected_count > 0 && context.selection_filesystem &&
@@ -68,7 +108,7 @@ bool Enabled(CommandAvailability availability, const CommandContext& context) {
         return selected && !context.read_only && !context.device_selection &&
             (!context.selection_has_drive_root || context.selected_count == 1);
     case A::BatchRename: return mutable_selection && context.selected_count >= 2;
-    case A::Properties: return context.archive_view || selected;
+    case A::Properties: return context.shell_selection || context.archive_view || selected;
     case A::Paste:
         return context.filesystem_folder && !context.archive_view && !context.read_only && context.can_paste;
     case A::NewItem:
@@ -113,14 +153,136 @@ std::wstring CommandShortcutText(const CommandShortcut& shortcut) {
         text += L"F" + std::to_wstring(shortcut.key - VK_F1 + 1);
     else if (shortcut.key == VK_RETURN) text += L"Enter";
     else if (shortcut.key == VK_DELETE) text += L"Delete";
+    else if (shortcut.key == VK_INSERT) text += L"Insert";
+    else if (shortcut.key == VK_SPACE) text += L"Space";
+    else if (shortcut.key == VK_TAB) text += L"Tab";
+    else if (shortcut.key == VK_ESCAPE) text += L"Esc";
+    else if (shortcut.key == VK_BACK) text += L"Backspace";
+    else if (shortcut.key == VK_HOME) text += L"Home";
+    else if (shortcut.key == VK_END) text += L"End";
+    else if (shortcut.key == VK_PRIOR) text += L"PageUp";
+    else if (shortcut.key == VK_NEXT) text += L"PageDown";
+    else if (shortcut.key == VK_LEFT) text += L"Left";
+    else if (shortcut.key == VK_RIGHT) text += L"Right";
+    else if (shortcut.key == VK_UP) text += L"Up";
+    else if (shortcut.key == VK_DOWN) text += L"Down";
     else text += static_cast<wchar_t>(shortcut.key);
     return text;
+}
+
+CommandShortcut EffectiveCommandShortcut(int command, std::span<const CommandShortcutOverride> overrides) {
+    for (const auto& entry : overrides)
+        if (entry.command == command) return entry.shortcut;
+    const auto* descriptor = FindCommandDescriptor(command);
+    return descriptor ? descriptor->shortcut : CommandShortcut{};
+}
+
+CommandShortcut EffectiveCommandShortcut(int command) {
+    return EffectiveCommandShortcut(command, shortcut_overrides);
+}
+
+bool ParseCommandShortcut(std::wstring_view text, CommandShortcut& shortcut) {
+    std::wstring normalized;
+    for (wchar_t c : text) if (!iswspace(c)) normalized += static_cast<wchar_t>(towupper(c));
+    CommandShortcut parsed;
+    if (normalized.empty()) { shortcut = {}; return true; }
+    size_t begin = 0;
+    for (;;) {
+        const auto end = normalized.find(L'+', begin);
+        const auto token = normalized.substr(begin, end == std::wstring::npos ? end : end - begin);
+        if (token.empty()) return false;
+        if (token == L"CTRL" || token == L"CONTROL") {
+            if (parsed.ctrl || parsed.key) return false;
+            parsed.ctrl = true;
+        } else if (token == L"SHIFT") {
+            if (parsed.shift || parsed.key) return false;
+            parsed.shift = true;
+        } else if (token == L"ALT") {
+            if (parsed.alt || parsed.key) return false;
+            parsed.alt = true;
+        } else {
+            if (parsed.key || end != std::wstring::npos) return false;
+            if (token.size() == 1) parsed.key = static_cast<unsigned>(token.front());
+            else if (token.front() == 'F' && token.size() <= 3) {
+                unsigned number = 0;
+                for (size_t i = 1; i < token.size(); ++i) {
+                    if (token[i] < '0' || token[i] > '9') return false;
+                    number = number * 10 + token[i] - '0';
+                }
+                if (!number || number > 24) return false;
+                parsed.key = VK_F1 + number - 1;
+            } else {
+                constexpr std::pair<std::wstring_view, unsigned> keys[] = {
+                    {L"ENTER", VK_RETURN}, {L"DELETE", VK_DELETE}, {L"DEL", VK_DELETE},
+                    {L"INSERT", VK_INSERT}, {L"SPACE", VK_SPACE}, {L"TAB", VK_TAB},
+                    {L"ESC", VK_ESCAPE}, {L"ESCAPE", VK_ESCAPE}, {L"BACKSPACE", VK_BACK},
+                    {L"HOME", VK_HOME}, {L"END", VK_END}, {L"PAGEUP", VK_PRIOR},
+                    {L"PAGEDOWN", VK_NEXT}, {L"LEFT", VK_LEFT}, {L"RIGHT", VK_RIGHT},
+                    {L"UP", VK_UP}, {L"DOWN", VK_DOWN},
+                };
+                for (const auto& key : keys) if (token == key.first) parsed.key = key.second;
+            }
+        }
+        if (end == std::wstring::npos) break;
+        begin = end + 1;
+    }
+    if (!SupportedShortcutKey(parsed.key)) return false;
+    shortcut = parsed;
+    return true;
+}
+
+ShortcutBindingResult ValidateCommandShortcut(int command, const CommandShortcut& shortcut,
+    std::span<const CommandShortcutOverride> overrides, int* conflict_command) {
+    if (conflict_command) *conflict_command = CmdNone;
+    if (!FindCommandDescriptor(command)) return ShortcutBindingResult::Invalid;
+    if (!shortcut.key) return ShortcutBindingResult::Success;
+    if (!SupportedShortcutKey(shortcut.key)) return ShortcutBindingResult::Invalid;
+    if (ReservedShortcut(shortcut)) return ShortcutBindingResult::Reserved;
+    for (const auto& descriptor : kCommands) {
+        if (descriptor.command == command) continue;
+        if (EffectiveCommandShortcut(descriptor.command, overrides) == shortcut) {
+            if (conflict_command) *conflict_command = descriptor.command;
+            return ShortcutBindingResult::Conflict;
+        }
+    }
+    return ShortcutBindingResult::Success;
+}
+
+ShortcutBindingResult SetCommandShortcut(std::vector<CommandShortcutOverride>& overrides,
+    int command, const CommandShortcut& shortcut, int* conflict_command) {
+    const auto result = ValidateCommandShortcut(command, shortcut, overrides, conflict_command);
+    if (result != ShortcutBindingResult::Success) return result;
+    ResetCommandShortcut(overrides, command);
+    overrides.push_back({command, shortcut});
+    return result;
+}
+
+void ResetCommandShortcut(std::vector<CommandShortcutOverride>& overrides, int command) {
+    std::erase_if(overrides, [=](const auto& entry) { return entry.command == command; });
+}
+
+void ConfigureCommandShortcuts(std::span<const CommandShortcutOverride> overrides) {
+    shortcut_overrides.clear();
+    for (const auto& entry : overrides) {
+        if (!FindCommandDescriptor(entry.command) ||
+            (entry.shortcut.key && (!SupportedShortcutKey(entry.shortcut.key) || ReservedShortcut(entry.shortcut)))) continue;
+        ResetCommandShortcut(shortcut_overrides, entry.command);
+        shortcut_overrides.push_back(entry);
+    }
+    // Validate the final map together: exchanging two defaults must survive reload.
+    for (size_t i = 0; i < shortcut_overrides.size();) {
+        const auto entry = shortcut_overrides[i];
+        if (ValidateCommandShortcut(entry.command, entry.shortcut, shortcut_overrides) != ShortcutBindingResult::Success) {
+            shortcut_overrides.erase(shortcut_overrides.begin() + i);
+            i = 0;
+        } else ++i;
+    }
 }
 
 int LookupCommandShortcut(unsigned key, bool ctrl, bool shift, bool alt) {
     if (!key) return CmdNone;
     for (const auto& descriptor : kCommands) {
-        const auto& shortcut = descriptor.shortcut;
+        const auto shortcut = EffectiveCommandShortcut(descriptor.command);
         if (shortcut.key == key && shortcut.ctrl == ctrl &&
             shortcut.shift == shift && shortcut.alt == alt) return descriptor.command;
     }
@@ -135,7 +297,7 @@ ui::FluentMenuItem BuildCommandMenuItem(int command, const CommandContext& conte
     if (!descriptor) return item;
     item.text = l10n::Get(descriptor->label);
     item.glyph = descriptor->glyph;
-    item.shortcut = CommandShortcutText(descriptor->shortcut);
+    item.shortcut = CommandShortcutText(EffectiveCommandShortcut(command));
     item.pictogram = descriptor->pictogram;
     if (command == CmdViewBase) item.glyph_scale = 1.16f;
     else if (command == CmdViewBase + 2) item.glyph_scale = 0.82f;

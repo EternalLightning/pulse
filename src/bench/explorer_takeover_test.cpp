@@ -218,20 +218,32 @@ public:
         return ready;
     }
     bool OpenSelected(const std::wstring& path, const std::wstring& selected_path) {
+        ComPtr<IShellWindows> windows;
+        const HRESULT hr = CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER,
+            IID_PPV_ARGS(&windows));
+        if (FAILED(hr)) {
+            std::printf("[DIAG] IShellWindows=0x%08lX\n", static_cast<unsigned long>(hr));
+            Limit("could not enumerate Explorer windows for the isolated /select handoff");
+            return false;
+        }
         std::set<HWND> existing;
         EnumWindows(CollectCabinets, reinterpret_cast<LPARAM>(&existing));
-        PIDLIST_ABSOLUTE directory = nullptr, selected = nullptr;
-        HRESULT hr = SHParseDisplayName(path.c_str(), nullptr, &directory, 0, nullptr);
-        if (SUCCEEDED(hr)) hr = SHParseDisplayName(selected_path.c_str(), nullptr, &selected, 0, nullptr);
-        if (SUCCEEDED(hr)) {
-            PCUITEMID_CHILD child = ILFindLastID(selected);
-            hr = SHOpenFolderAndSelectItems(directory, 1, &child, 0);
+        wchar_t windows_dir[MAX_PATH]{};
+        const UINT length = GetWindowsDirectoryW(windows_dir, ARRAYSIZE(windows_dir));
+        if (!length || length >= ARRAYSIZE(windows_dir)) return false;
+        const std::wstring explorer = std::wstring(windows_dir) + L"\\explorer.exe";
+        std::wstring command = L"\"" + explorer + L"\" /select,\"" + selected_path + L"\"";
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        if (!CreateProcessW(explorer.c_str(), command.data(), nullptr, nullptr, FALSE, 0,
+                nullptr, nullptr, &startup, &process)) {
+            std::printf("[DIAG] explorer.exe /select launch error=%lu\n", GetLastError());
+            Limit("isolated explorer.exe /select launch is unavailable");
+            return false;
         }
-        CoTaskMemFree(directory); CoTaskMemFree(selected);
-        std::printf("[DIAG] isolated SHOpenFolderAndSelectItems=0x%08lX\n", static_cast<unsigned long>(hr));
-        if (FAILED(hr)) { Limit("isolated Shell folder-and-select launch is unavailable"); return false; }
-        ComPtr<IShellWindows> windows;
-        if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(&windows)))) return false;
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
         const bool found = Until([&] {
             long count = 0;
             if (FAILED(windows->get_Count(&count))) return false;
@@ -298,7 +310,7 @@ bool VisibleUnchanged(const OwnedSource& source, LONG_PTR style, LONG_PTR extend
         GetWindowLongPtrW(source.identity.hwnd, GWL_STYLE) == style &&
         GetWindowLongPtrW(source.identity.hwnd, GWL_EXSTYLE) == extended;
 }
-void RealCases(const std::filesystem::path& root) {
+void RealCases(const std::filesystem::path& root, bool select_only) {
     const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     Check(SUCCEEDED(apartment), "initialize the isolated real-Explorer fixture apartment");
     if (FAILED(apartment)) return;
@@ -313,6 +325,7 @@ void RealCases(const std::filesystem::path& root) {
     std::filesystem::create_directories(run);
     bool environment_ready = true;
     for (const std::wstring scenario : {L"shell-select", L"initializing-source", L"startup-input", L"post-submit-input", L"ack-failure", L"ack-success", L"navigate-replace", L"selection-replace", L"stop"}) {
+        if (select_only && scenario != L"shell-select") break;
         const auto folder = run / scenario;
         const auto next = run / (scenario + L"-next");
         std::filesystem::create_directories(folder);
@@ -393,7 +406,8 @@ void RealCases(const std::filesystem::path& root) {
         if (shell_select || initializing || scenario == L"ack-success" || scenario == L"startup-input" || scenario == L"post-submit-input") {
             if (shell_select || scenario == L"startup-input")
                 Check(request.selected_paths == std::vector<std::wstring>{(folder / L"selected.txt").wstring()},
-                    "opening-time input still delivers the exact selected file after settling");
+                    shell_select ? "explorer.exe /select hands off the exact selected file" :
+                        "opening-time input still delivers the exact selected file after settling");
             worker.Acknowledge(request.token, true);
             Check(Until([&] { return !source.SameIdentity(); }), "successful current ACK closes the verified single-tab fixture source");
             Check(worker.Stats().close_attempts == 1, "successful handoff attempts one source close");
@@ -436,7 +450,8 @@ void RealCases(const std::filesystem::path& root) {
         }
         worker.Stop();
     }
-    if (!environment_ready) Limit("remaining real scenarios require an isolated supported Explorer source; no global watcher fallback was enabled");
+    if (!environment_ready && !select_only)
+        Limit("remaining real scenarios require an isolated supported Explorer source; no global watcher fallback was enabled");
     DestroyWindow(owner);
     CoUninitialize();
 }
@@ -444,16 +459,17 @@ void RealCases(const std::filesystem::path& root) {
 int wmain(int argc, wchar_t** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     PolicyCases();
-    if (argc == 3 && wcscmp(argv[1], L"--real") == 0) {
+    const bool select_only = argc == 3 && wcscmp(argv[1], L"--real-select") == 0;
+    if (argc == 3 && (select_only || wcscmp(argv[1], L"--real") == 0)) {
         const auto root = std::filesystem::absolute(argv[2]).lexically_normal();
         const auto expected = (std::filesystem::current_path() / L"bench_data" / L"explorer-takeover-20261019").lexically_normal();
         if (!SamePath(root.wstring(), expected.wstring())) {
             Check(false, "real fixture root must be the explicitly scoped bench_data directory");
         } else {
-            RealCases(root);
+            RealCases(root, select_only);
         }
     } else if (argc != 1 && !(argc == 2 && wcscmp(argv[1], L"--policy") == 0)) {
-        std::printf("usage: pulse_explorer_takeover_test [--policy | --real bench_data/explorer-takeover-20261019]\n");
+        std::printf("usage: pulse_explorer_takeover_test [--policy | {--real | --real-select} bench_data/explorer-takeover-20261019]\n");
         return 2;
     }
     std::printf("[RESULT] failures=%d limits=%d\n", failures, limits);

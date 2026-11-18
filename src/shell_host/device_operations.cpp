@@ -6,6 +6,7 @@
 #include "device_operations.h"
 #include <shellapi.h>
 #include "../common/shell_id.h"
+#include "../ops/clipboard.h"
 #include <shlobj.h>
 #include <wrl/client.h>
 
@@ -45,54 +46,25 @@ HRESULT ExecuteDeviceOperation(const DeviceOperation& request) {
         hr = items->GetItemAt(0, &folder);
         if (FAILED(hr)) return hr;
         SFGAOF attrs = 0;
-        hr = folder->GetAttributes(SFGAO_FOLDER | SFGAO_READONLY, &attrs);
+        const bool paste = verb == L"paste";
+        hr = folder->GetAttributes(paste ? SFGAO_FOLDER : SFGAO_FOLDER | SFGAO_READONLY, &attrs);
         if (FAILED(hr)) return hr;
         if (!(attrs & SFGAO_FOLDER) || (attrs & SFGAO_READONLY)) return E_ACCESSDENIED;
-        if (verb == L"newfolder") {
-            if (request.name.empty() || request.name == L"." || request.name == L".." ||
-                request.name.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos) return E_INVALIDARG;
-            for (const auto ch : request.name) if (ch < 32) return E_INVALIDARG;
-            ComPtr<IFileOperation> operation;
-            hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
-                IID_PPV_ARGS(&operation));
-            if (SUCCEEDED(hr)) hr = operation->SetOwnerWindow(request.owner);
-            if (SUCCEEDED(hr)) hr = operation->SetOperationFlags(FOF_NOCONFIRMMKDIR);
-            if (SUCCEEDED(hr)) hr = operation->NewItem(folder.Get(), FILE_ATTRIBUTE_DIRECTORY,
-                request.name.c_str(), nullptr, nullptr);
-            if (SUCCEEDED(hr)) hr = operation->PerformOperations();
-            BOOL aborted = FALSE;
-            if (SUCCEEDED(hr)) hr = operation->GetAnyOperationsAborted(&aborted);
-            return SUCCEEDED(hr) && aborted ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : hr;
-        }
-        ComPtr<IDataObject> data;
-        hr = OleGetClipboard(&data);
-        if (FAILED(hr)) return hr;
-        ComPtr<IDropTarget> target;
-        hr = folder->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&target));
-        if (FAILED(hr)) return hr;
-        // Read the Shell's preferred effect; a copy must never silently become a move.
-        DWORD wanted = DROPEFFECT_COPY;
-        const UINT effect_format = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
-        FORMATETC format{static_cast<CLIPFORMAT>(effect_format), nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-        STGMEDIUM medium{};
-        if (effect_format && SUCCEEDED(data->GetData(&format, &medium))) {
-            if (medium.tymed == TYMED_HGLOBAL && medium.hGlobal && GlobalSize(medium.hGlobal) >= sizeof(DWORD)) {
-                if (const auto* value = static_cast<DWORD*>(GlobalLock(medium.hGlobal))) {
-                    if (*value == DROPEFFECT_MOVE) wanted = DROPEFFECT_MOVE;
-                    GlobalUnlock(medium.hGlobal);
-                }
-            }
-            ReleaseStgMedium(&medium);
-        }
-        DWORD effect = wanted;
-        const DWORD keys = MK_LBUTTON | (wanted == DROPEFFECT_MOVE ? MK_SHIFT : MK_CONTROL);
-        POINTL point{};
-        hr = target->DragEnter(data.Get(), keys, point, &effect);
-        if (FAILED(hr)) return hr;
-        if (!(effect & wanted)) { target->DragLeave(); return E_ACCESSDENIED; }
-        effect = wanted;
-        hr = target->Drop(data.Get(), keys, point, &effect);
-        return SUCCEEDED(hr) && effect == DROPEFFECT_NONE ? E_FAIL : hr;
+        if (paste) return ops::PasteShellClipboardToFolder(folder.Get(), request.owner);
+        if (request.name.empty() || request.name == L"." || request.name == L".." ||
+            request.name.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos) return E_INVALIDARG;
+        for (const auto ch : request.name) if (ch < 32) return E_INVALIDARG;
+        ComPtr<IFileOperation> operation;
+        hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&operation));
+        if (SUCCEEDED(hr)) hr = operation->SetOwnerWindow(request.owner);
+        if (SUCCEEDED(hr)) hr = operation->SetOperationFlags(FOF_NOCONFIRMMKDIR);
+        if (SUCCEEDED(hr)) hr = operation->NewItem(folder.Get(), FILE_ATTRIBUTE_DIRECTORY,
+            request.name.c_str(), nullptr, nullptr);
+        if (SUCCEEDED(hr)) hr = operation->PerformOperations();
+        BOOL aborted = FALSE;
+        if (SUCCEEDED(hr)) hr = operation->GetAnyOperationsAborted(&aborted);
+        return SUCCEEDED(hr) && aborted ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : hr;
     }
     ComPtr<IContextMenu> menu;
     hr = items->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&menu));

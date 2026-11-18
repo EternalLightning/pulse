@@ -17,6 +17,7 @@
 #include "tab_shape.h"
 #include "typography.h"
 #include "details_column_widths.h"
+#include "details_column_labels.h"
 #include "home_layout.h"
 #include "pane_header_icons.h"
 #include <bit>
@@ -281,7 +282,7 @@ D2D1_RECT_F MainRenderer::FilterBoxRect(const D2D1_RECT_F& pane_bounds, float ex
     const float width = pane_bounds.right;
     const float left = EffectiveSidebarWidth(width);
     return MakeToolbarLayout(width, scale_, title_bar_height_, margin_,
-        NewButtonWidthPx(width-left < 600*scale_), left, expand).filter;
+        NewButtonWidthPx(width-left < 600*scale_), left, expand, false, false, toolbar_order_).filter;
 }
 
 D2D1_RECT_F MainRenderer::PaneViewButtonRect(const D2D1_RECT_F& pane_bounds,
@@ -292,16 +293,36 @@ D2D1_RECT_F MainRenderer::PaneViewButtonRect(const D2D1_RECT_F& pane_bounds,
         right,pane_bounds.top+pane_header_height_-4*scale_);
 }
 
+D2D1_RECT_F MainRenderer::PaneSplitButtonRect(const D2D1_RECT_F& pane_bounds) const {
+    const auto rc = StepLeftHeaderButton(PaneViewButtonRect(pane_bounds), scale_);
+    return rc.left >= pane_bounds.left + 48 * scale_ ? rc : D2D1_RECT_F{};
+}
+
 D2D1_RECT_F MainRenderer::PaneMediumIconsRect(const D2D1_RECT_F& pane_bounds,
                                                float filter_expand) const {
-    const D2D1_RECT_F view = PaneViewButtonRect(pane_bounds, filter_expand);
-    return D2D1::RectF(view.left - kCommandIconStepDip * scale_, view.top,
-                       view.left - (kCommandIconStepDip - kCommandIconButtonDip) * scale_,
-                       view.bottom);
+    (void)filter_expand;
+    const auto split = PaneSplitButtonRect(pane_bounds);
+    if (split.right <= split.left) return {};
+    const auto rc = StepLeftHeaderButton(split, scale_);
+    return rc.left >= pane_bounds.left + 80 * scale_ ? rc : D2D1_RECT_F{};
 }
 D2D1_RECT_F MainRenderer::PaneDetailsRect(const D2D1_RECT_F& pane_bounds,
                                                 float filter_expand) const {
-    return StepLeftHeaderButton(PaneMediumIconsRect(pane_bounds, filter_expand), scale_);
+    const auto medium = PaneMediumIconsRect(pane_bounds, filter_expand);
+    if (medium.right <= medium.left) return {};
+    const auto rc = StepLeftHeaderButton(medium, scale_);
+    return rc.left >= pane_bounds.left + 80 * scale_ ? rc : D2D1_RECT_F{};
+}
+
+D2D1_RECT_F MainRenderer::PaneHeaderTextRect(const D2D1_RECT_F& pane_bounds) const {
+    float controls_left = PaneViewButtonRect(pane_bounds).left;
+    for (const auto rc : {PaneSplitButtonRect(pane_bounds), PaneMediumIconsRect(pane_bounds),
+                          PaneDetailsRect(pane_bounds)}) {
+        if (rc.right > rc.left) controls_left = std::min(controls_left, rc.left);
+    }
+    const float left = DetailsContentRect(pane_bounds, scale_).left + margin_ + 8 * scale_;
+    return D2D1::RectF(left, pane_bounds.top, std::max(left, controls_left - 8 * scale_),
+                      pane_bounds.top + pane_header_height_);
 }
 
 D2D1_RECT_F MainRenderer::FilterClearRect(const D2D1_RECT_F& pane_bounds, float expand) const {
@@ -325,6 +346,45 @@ MainRenderer::DetailsColumnLayout MainRenderer::DetailsColumns(
     const D2D1_RECT_F& pane_bounds, const PaneViewModel& vm) const {
     auto columns = DetailsColumns(pane_bounds, vm.details_column_dividers, vm.is_search,
                                   vm.search_column_dividers, vm.cloud_status_column);
+    if (!vm.is_search && vm.details_columns.configured && model::ValidDetailsColumns(vm.details_columns)) {
+        DetailsColumnLayout configured;
+        configured.left = columns.left;
+        configured.right = columns.right;
+        configured.count = 1;
+        configured.kinds[0] = ColumnKind::Name;
+        const auto automatic = AutoColumnWidths();
+        float metadata = 0.0f;
+        for (const auto kind : vm.details_columns.order) {
+            if (kind == ColumnKind::Name || (kind == ColumnKind::Cloud && !vm.cloud_status_column)) continue;
+            float width = vm.details_columns.widths[static_cast<size_t>(kind)];
+            if (width == 0.0f) {
+                switch (kind) {
+                case ColumnKind::Date: width = automatic.date; break;
+                case ColumnKind::Type: width = automatic.type; break;
+                case ColumnKind::Size: width = automatic.size; break;
+                case ColumnKind::Cloud: width = 80.0f; break;
+                case ColumnKind::DateTaken: width = 166.0f; break;
+                case ColumnKind::Dimensions: width = 128.0f; break;
+                default: width = 96.0f; break;
+                }
+            }
+            const float header = CellTextWidth(DetailsColumnLabel(kind)) / std::max(0.01f, scale_) + 20.0f;
+            const int index = configured.count++;
+            configured.kinds[static_cast<size_t>(index)] = kind;
+            configured.widths[static_cast<size_t>(index)] = std::max(width, header) * scale_;
+            metadata += configured.widths[static_cast<size_t>(index)];
+        }
+        const float total = std::max(0.0f, configured.right - configured.left);
+        // Keep the leading configured columns on narrow panes. Saved order and
+        // visibility survive a resize, even while trailing columns cannot fit.
+        while (configured.count > 1 && metadata + kDetailsFitNameDip * scale_ > total) {
+            metadata -= configured.widths[static_cast<size_t>(--configured.count)];
+        }
+        configured.widths[0] = std::max(0.0f, total - metadata);
+        configured.cloud_width = configured.Width(ColumnKind::Cloud);
+        configured.cloud_left = configured.Left(ColumnKind::Cloud);
+        return configured;
+    }
     // Explicit divider positions remain a manual override. A drag starts by
     // capturing this measured layout, so the first movement does not jump.
     const bool manual = vm.is_search
@@ -368,6 +428,30 @@ MainRenderer::DetailsColumnLayout MainRenderer::DetailsColumns(
     FitDetailsMetadata(columns.widths, columns.count, measured, scale_, columns.cloud_width);
     columns.cloud_left = columns.Left(ColumnKind::Cloud);
     return columns;
+}
+
+void MainRenderer::ResizeConfiguredColumn(const D2D1_RECT_F& pane_bounds, PaneViewModel& vm,
+                                          int divider_index, float cursor_x) const {
+    const auto columns = DetailsColumns(pane_bounds, vm);
+    if (!vm.details_columns.configured || vm.is_search || divider_index < 0 ||
+        divider_index + 1 >= columns.count || scale_ <= 0.0f) return;
+    const size_t left = static_cast<size_t>(divider_index);
+    const size_t right = left + 1;
+    const float x0 = left ? columns.DividerX(divider_index - 1) : columns.left;
+    const float x2 = columns.DividerX(divider_index + 1);
+    const float minimum = std::min(48.0f * scale_, (x2 - x0) * 0.5f);
+    const float edge = std::clamp(cursor_x, x0 + minimum, x2 - minimum);
+    if (columns.kinds[left] != ColumnKind::Name)
+        vm.details_columns.widths[static_cast<size_t>(columns.kinds[left])] = std::clamp((edge - x0) / scale_, 24.0f, 4096.0f);
+    vm.details_columns.widths[static_cast<size_t>(columns.kinds[right])] = std::clamp((x2 - edge) / scale_, 24.0f, 4096.0f);
+}
+
+void MainRenderer::AutoFitConfiguredColumn(PaneViewModel& vm, const D2D1_RECT_F& pane_bounds,
+                                           int divider_index) const {
+    const auto columns = DetailsColumns(pane_bounds, vm);
+    if (!vm.details_columns.configured || divider_index < 0 || divider_index >= columns.count) return;
+    for (int side = divider_index; side <= std::min(divider_index + 1, columns.count - 1); ++side)
+        vm.details_columns.widths[static_cast<size_t>(columns.kinds[static_cast<size_t>(side)])] = 0.0f;
 }
 
 MainRenderer::ColumnAutoWidths MainRenderer::AutoColumnWidths() const {
@@ -752,7 +836,7 @@ void MainRenderer::DrawEntryIcon(const ListEntryView& entry, float x, float y, f
         DrawIconText(x, y, size, size, L"\xE8EA", L"MTP", theme.accent_ink, 0.9f);
         return;
     }
-    if (entry.path.starts_with(L"pulse:device:")) {
+    if (!entry.shell_id.empty() && entry.path.starts_with(L"pulse:")) {
         if (compositor_ && compositor_->Dc())
             icon_cache_.Draw(compositor_->Dc(), dest, entry.shell_id, entry.name, entry.is_dir, entry.attrs);
         return;
@@ -1008,6 +1092,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
     const D2D1_RECT_F mediumRc = PaneMediumIconsRect(bounds, pane.filter_expand);
     const D2D1_RECT_F viewRc = PaneViewButtonRect(bounds, pane.filter_expand);
     const D2D1_RECT_F detailsRc = PaneDetailsRect(bounds);
+    const D2D1_RECT_F splitRc = PaneSplitButtonRect(bounds);
     if (pane.header_drop) {
         MakeBrush(dc, WithAlpha(theme.accent, 0.18f), brFillHover_);
         FillRoundedRect(dc, brFillHover_.get(), bounds.left + scale_, bounds.top + scale_,
@@ -1017,8 +1102,9 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
     // Focus changes affect controls; navigation affects only the title text.
     const bool split = vm.pane_slots.size() > 1;
     // Keep every view aligned with the Details name-column heading.
-    const float textLeft = DetailsContentRect(bounds, scale_).left + margin_ + 8.0f * scale_;
-    const float textRight = std::max(textLeft, detailsRc.left - 8.0f * scale_);
+    const auto titleRect = PaneHeaderTextRect(bounds);
+    const float textLeft = titleRect.left;
+    const float textRight = titleRect.right;
     const auto titleBadge = ChangeTitleRect(bounds, textRight, pane_header_height_, pane.title_change_badge, scale_, compositor_, pane.header_text);
     const float textWidth = (titleBadge.right > titleBadge.left ? titleBadge.left - 4 * scale_ : textRight) - textLeft;
     auto& title_surface = pane_title_surfaces_[painting_pane_];
@@ -1040,6 +1126,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Identity(), controlsOpacity), nullptr);
         auto headerButton = [&](const D2D1_RECT_F& rc, HitTestResult::Region region,
                                 PaneHeaderIcon icon, bool active, bool enabled = true) {
+            if (rc.right <= rc.left) return;
             const bool hovered = focused && enabled && vm.hover_region == static_cast<int>(region) &&
                                  vm.hover_control_index == pane_index;
             const D2D1_COLOR_F fill = active
@@ -1058,6 +1145,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
                      pane.view_mode == ViewMode::Details);
         headerButton(mediumRc, HitTestResult::PaneMediumIcons, PaneHeaderIcon::MediumIcons,
                      pane.view_mode == ViewMode::MediumIcons);
+        headerButton(splitRc, HitTestResult::SplitButton, PaneHeaderIcon::Split, false);
         headerButton(viewRc, HitTestResult::PaneViewButton, PaneHeaderIcon::More, false);
         if (fading) dc->PopLayer();
     }
@@ -1201,7 +1289,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
         FillRect(dc, brStrokeDivider_.get(), x, y + column_header_height_ - 1, w, 1);
         const DetailsColumnLayout columns = DetailsColumns(bounds, pane);
         if (pane_index >= 0 && pane_index < static_cast<int>(painted_columns_.size())) {
-            uint32_t mask = columns.two_line ? (1u << 8) : 0u;
+            uint32_t mask = columns.two_line ? (1u << 31) : 0u;
             for (int col = 0; col < columns.count; ++col)
                 mask |= 1u << static_cast<uint32_t>(columns.kinds[static_cast<size_t>(col)]);
             painted_columns_[static_cast<size_t>(pane_index)] = mask;
@@ -1273,9 +1361,12 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
                 drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnSize), SortColumn::Size, cw, true);
                 break;
             case ColumnKind::Cloud:
+            case ColumnKind::Dimensions:
+            case ColumnKind::Duration:
+            case ColumnKind::DateTaken:
                 MakeBrush(dc, theme.text, brText_);
                 DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(),
-                    compositor_->HeaderFormat(), brText_.get(), l10n::Get(l10n::StringId::CloudStatusColumn),
+                    compositor_->HeaderFormat(), brText_.get(), DetailsColumnLabel(columns.kinds[static_cast<size_t>(col)]),
                     cx + 8.0f * scale_, y, cw - 16.0f * scale_, column_header_height_);
                 cx += cw;
                 break;
@@ -1897,7 +1988,8 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
         }
         const size_t totalTags = tagIndices ? tagIndices->size() : (tagDots ? tagDots->size() : 0);
         const int tagDotCount = static_cast<int>(std::min<size_t>(3, totalTags));
-        const bool actions_allowed = vm.view_mode == ViewMode::Details && src != vm.rename_index;
+        const bool readonly_shell = e.path.starts_with(L"pulse:shell-item:") || e.path.starts_with(L"pulse:library:");
+        const bool actions_allowed = vm.view_mode == ViewMode::Details && src != vm.rename_index && !readonly_shell;
         const bool actions_visible = actions_allowed && (hover || (selected && vm.selected_count == 1));
         const bool star_visible = actions_allowed && (actions_visible || e.starred);
         const bool new_tab_visible = actions_allowed && hover && e.is_dir;
@@ -2035,6 +2127,13 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                 return FitEndEllipsis(text, width, [&](const std::wstring& s) { return CellTextWidth(s); });
             };
             const auto secondary = brTextSecondary_->GetColor();
+            std::vector<PreviewProperty> media_properties;
+            if (!e.is_dir && !e.record_only && HasMediaDetailsExtension(e.path) &&
+                std::any_of(detailsColumns.kinds.begin(), detailsColumns.kinds.begin() + detailsColumns.count,
+                    [](ColumnKind kind) { return model::IsMediaDetailsColumn(kind); })) {
+                thumbnail_cache_.Properties(e.path, e.attrs, vm.view_generation, e.modified_value,
+                    e.size_value, media_properties, ThumbnailCache::Consumer::Main, false);
+            }
             for (int col = 1; col < detailsColumns.count; ++col) {
                 const float colX = detailsColumns.DividerX(col - 1);
                 const float colW = detailsColumns.widths[static_cast<size_t>(col)];
@@ -2113,6 +2212,21 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                     draw_detail_text(fit(e.type_text, typeAvail), typeLeft, typeAvail,
                                      DWRITE_TEXT_ALIGNMENT_LEADING);
                     if (deleted_change) MakeBrush(dc, secondary, brTextSecondary_);
+                    break;
+                }
+                case ColumnKind::Dimensions:
+                case ColumnKind::Duration:
+                case ColumnKind::DateTaken: {
+                    const auto label = DetailsColumnLabel(detailsColumns.kinds[static_cast<size_t>(col)]);
+                    const auto kind = detailsColumns.kinds[static_cast<size_t>(col)];
+                    const std::wstring_view chinese = kind == ColumnKind::Dimensions ? L"尺寸" :
+                        kind == ColumnKind::Duration ? L"时长" : L"拍摄时间";
+                    const std::wstring_view english = kind == ColumnKind::Dimensions ? L"Dimensions" :
+                        kind == ColumnKind::Duration ? L"Duration" : L"Date taken";
+                    const auto property = std::find_if(media_properties.begin(), media_properties.end(),
+                        [&](const auto& item) { return item.label == label || item.label == chinese || item.label == english; });
+                    if (property != media_properties.end())
+                        draw_detail_text(fit(property->value, avail), left, avail, DWRITE_TEXT_ALIGNMENT_LEADING);
                     break;
                 }
                 case ColumnKind::Size: {

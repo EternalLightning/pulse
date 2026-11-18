@@ -10,6 +10,10 @@
 #include "app_column_view.h"
 #include "../ui/toolbar_layout.h"
 #include "app_internal.h"
+#include "command_customization_ui.h"
+#include "toolbar_menus.h"
+#include "path_aliases_ui.h"
+#include "../fs/shell_namespace.h"
 #include "device_navigation.h"
 #include "device_menu.h"
 #include "cloud_commands.h"
@@ -115,6 +119,10 @@ app::CommandContext BuildCommandContext(AppState& s) {
     context.can_view = tab != nullptr;
     if (!tab) return context;
     context.selected_count = tab->SelectedCount();
+    if (fs::IsShellNamespacePath(tab->current_path) && !fs::IsLibraryPath(tab->current_path)) for (const int index : tab->SelectedIndices()) {
+        if (index >= 0 && static_cast<size_t>(index) < tab->EntryCount() &&
+            fs::IsShellItemEntry(tab->EntryAt(static_cast<size_t>(index)))) context.shell_selection = true;
+    }
     context.can_group_selection = CanGroupSelection(tab);
     context.can_dissolve_selection = CanDissolveSelection(tab);
     context.archive_view = IsArchiveView(tab->current_path);
@@ -122,7 +130,7 @@ app::CommandContext BuildCommandContext(AppState& s) {
     context.filesystem_folder = !tab->current_path.empty() &&
         !fs::IsVirtualPath(tab->current_path) && !context.archive_view;
     context.has_entries = tab->EntryCount() > 0;
-    if (context.filesystem_folder && tab->snapshot && !tab->content_results) {
+    if ((context.filesystem_folder || fs::IsLibraryPath(tab->current_path)) && tab->snapshot && !tab->content_results) {
         // Ordinary folder snapshots contain filesystem children; retain the
         // cached selection summary when the toolbar rebuilds every frame.
         context.selection_filesystem = context.selected_count > 0;
@@ -146,6 +154,10 @@ app::CommandContext BuildCommandContext(AppState& s) {
         context.read_only = !context.filesystem_folder;
     }
     context.can_paste = CanPasteIntoCurrent(s, false);
+    if (fs::IsShellNamespacePath(tab->current_path)) {
+        context.filesystem_folder = false;
+        context.can_paste = false;
+    }
     context.has_target = s.targetPane && s.targetPane != s.pane;
     if (context.has_target) {
         const auto* target = s.targetPane->ActiveTab();
@@ -577,6 +589,20 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
 }
 
 void DispatchMenuCommand(AppState& s, int cmd) {
+    if (const auto* tab = ActiveTab(s); tab && BuildCommandContext(s).shell_selection) {
+        if (cmd == app::CmdProperties) {
+            std::vector<std::wstring> ids;
+            for (const int index : tab->SelectedIndices()) {
+                const auto row = tab->EntryAt(static_cast<size_t>(index));
+                if (!row.shell_id.empty()) ids.push_back(row.shell_id);
+            }
+            app::QueueDeviceOperation(s, L"properties", std::move(ids));
+            return;
+        }
+        if (cmd == app::CmdCut || cmd == app::CmdCopy || cmd == app::CmdDelete || cmd == app::CmdRename ||
+            cmd == app::CmdBatchRename || cmd == app::CmdCopyPath || cmd == app::CmdOpenPath ||
+            cmd == app::CmdCopyToTarget || cmd == app::CmdMoveToTarget) return;
+    }
     if (HandleCloudCommand(s, cmd)) return;
     if (const auto* tab = ActiveTab(s); tab && app::HasDeviceSelection(*tab)) {
         if (cmd == app::CmdProperties) {
@@ -594,6 +620,16 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         return;
     }
     switch (cmd) {
+    case app::CmdNewMenu: ShowNewDropdown(s); return;
+    case app::CmdSplitMenu: ShowSplitDropdown(s); return;
+    case app::CmdCustomizeCommands: ShowCommandCustomization(s); return;
+    case app::CmdPathAliases: ShowPathAliases(s); return;
+    case app::CmdSetPathAlias:
+        if (const auto* tab = ActiveTab(s)) SetPathAlias(s, tab->current_path);
+        return;
+    case app::CmdLibraries: NavigateTo(s, fs::kLibrariesPath); return;
+    case app::CmdControlPanel: NavigateTo(s, fs::kControlPanelPath); return;
+    case app::CmdApplications: NavigateTo(s, fs::kApplicationsPath); return;
     case app::CmdOperationCenter: ToggleOperationCenter(s); break;
     case app::CmdGroupAuto:
     case app::CmdGroupNone:
@@ -939,6 +975,10 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         items.push_back(app::BuildCommandMenuItem(app::CmdNewFolderWithSelection, context));
     if (context.can_dissolve_selection)
         items.push_back(app::BuildCommandMenuItem(app::CmdUngroupFolder, context));
+    if (app::IsCommandEnabled(app::CmdCopyToTarget, context) || app::IsCommandEnabled(app::CmdMoveToTarget, context)) {
+        items.push_back(app::BuildCommandMenuItem(app::CmdCopyToTarget, context));
+        items.push_back(app::BuildCommandMenuItem(app::CmdMoveToTarget, context));
+    }
     if (std::any_of(paths.begin(), paths.end(), pulse::path::IsDriveRootPath))
         app::RestrictDriveItemMenu(items, paths.size() == 1);
     if (tab) AppendCloudCommands(s, *tab, items);
@@ -1196,6 +1236,17 @@ bool HandleShellMenuCommand(AppState& s, int cmd) {
 }
 
 void ShowItemContextMenu(AppState& s, POINT screen_pt) {
+    if (BuildCommandContext(s).shell_selection && EnsureMenu(s)) {
+        std::vector<ui::FluentMenuItem> items;
+        ui::FluentMenuItem open; open.command = app::CmdOpen; open.text = l10n::Get(l10n::StringId::Open);
+        items.push_back(std::move(open));
+        items.push_back(app::BuildCommandMenuItem(app::CmdProperties, BuildCommandContext(s)));
+        s.menu->SetTheme(s.darkMode, s.accentColor);
+        const int command = s.menu->TrackPopup(screen_pt, std::move(items));
+        if (command == app::CmdOpen) OpenSelected(s);
+        else if (command) DispatchMenuCommand(s, command);
+        return;
+    }
     if(DeferContentSelection(s,[=](AppState& v){ShowItemContextMenu(v,screen_pt);})) return;
     if (!EnsureMenu(s)) return;
     app::Tab* tab = ActiveTab(s);
@@ -1308,7 +1359,14 @@ void ShowNewDropdown(AppState& s) {
     const auto* tab = ActiveTab(s);
     if (!tab || IsArchiveView(tab->current_path)) return;
     if (!EnsureMenu(s)) return;
-    const auto anchor = s.renderer.NewCommandRect((float)s.compositor.Width()); POINT pt{(LONG)anchor.left, (LONG)anchor.bottom};
+    auto anchor = s.renderer.NewCommandRect((float)s.compositor.Width());
+    if (anchor.right <= anchor.left) {
+        const float width = static_cast<float>(s.compositor.Width());
+        const auto layout = ui::MakeToolbarLayout(width, s.scale, s.renderer.TitleBarHeight(), s.renderer.Margin(),
+            s.renderer.NewButtonWidthPx(true), s.renderer.EffectiveSidebarWidth(width), 0, false, false, s.appPrefs.toolbar_order);
+        anchor = layout.overflow;
+    }
+    POINT pt{static_cast<LONG>(anchor.left), static_cast<LONG>(anchor.bottom)};
     ClientToScreen(s.hwnd, &pt);
     if (app::IsDeviceTab(tab)) {
         if (app::DeviceRegistry::Instance().FolderWritable(tab->current_path)) CreateNewItem(s, true);
@@ -1337,9 +1395,21 @@ void ShowNewDropdown(AppState& s) {
 
 // ---------------------------------------------------------------------------
 // Stage 1B-2: OLE drag & drop wiring.
-void ShowSplitDropdown(AppState& s) {
+void ShowSplitDropdown(AppState& s, int pane_index) {
     if (!EnsureMenu(s)) return;
-    const auto anchor = s.renderer.SplitCommandRect((float)s.compositor.Width()); POINT pt{(LONG)anchor.left, (LONG)anchor.bottom};
+    const float width = static_cast<float>(s.compositor.Width());
+    const float left = s.renderer.EffectiveSidebarWidth(width);
+    const auto layout = ui::MakeToolbarLayout(width, s.scale, s.renderer.TitleBarHeight(), s.renderer.Margin(),
+        s.renderer.NewButtonWidthPx(width-left < 600*s.scale), left,
+        s.pane ? s.pane->filter_expand : 0.0f, false, false, s.appPrefs.toolbar_order);
+    auto anchor = layout.commands[6].right > layout.commands[6].left ? layout.commands[6] : layout.overflow;
+    if (pane_index >= 0) {
+        const auto vm = BuildVm(s);
+        if (pane_index >= static_cast<int>(vm.pane_slots.size())) return;
+        anchor = s.renderer.PaneSplitButtonRect(vm.pane_slots[static_cast<size_t>(pane_index)].rect);
+        if (anchor.right <= anchor.left) return;
+    }
+    POINT pt{static_cast<LONG>(anchor.left), static_cast<LONG>(anchor.bottom)};
     ClientToScreen(s.hwnd, &pt);
     SetMenuToggleRect(s, anchor);
     int cmd = s.menu->TrackToolbarPopup(pt, app::BuildSplitMenu(static_cast<int>(LayoutOf(s))));
@@ -1365,7 +1435,7 @@ void RefreshSidebarModel(AppState& s) {
             s.sidebar.cloud.push_back(std::move(entry));
         }
     }
-    s.home_catalog.Refresh();
+    s.home_catalog.Refresh(s.appPrefs.home_quick_access);
     s.home_catalog.FillDriveLabels(s.sidebar);
     for (const auto& device : app::DeviceRegistry::Instance().Devices()) {
         app::SidebarEntry entry;
@@ -1679,7 +1749,7 @@ void ShowSortDropdown(AppState& s) {
     const float left = s.renderer.EffectiveSidebarWidth(width);
     const auto layout = ui::MakeToolbarLayout(width,s.scale,s.renderer.TitleBarHeight(),s.renderer.Margin(),
         s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left,(s.pane ? s.pane->filter_expand : 0.0f),
-        IsArchiveView(tab->current_path),IsRecycleTab(tab));
+        IsArchiveView(tab->current_path),IsRecycleTab(tab),s.appPrefs.toolbar_order);
     POINT anchor{static_cast<LONG>(layout.sort.left),static_cast<LONG>(layout.sort.bottom)};
     ClientToScreen(s.hwnd,&anchor);
     auto items = app::BuildSortMenu(options);
@@ -1698,7 +1768,7 @@ void ShowGroupDropdown(AppState& s) {
     const float width = static_cast<float>(s.compositor.Width());
     const float left = s.renderer.EffectiveSidebarWidth(width);
     const auto layout = ui::MakeToolbarLayout(width,s.scale,s.renderer.TitleBarHeight(),s.renderer.Margin(),
-        s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left,(s.pane ? s.pane->filter_expand : 0.0f));
+        s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left,(s.pane ? s.pane->filter_expand : 0.0f),false,false,s.appPrefs.toolbar_order);
     POINT anchor{static_cast<LONG>(layout.group.left),static_cast<LONG>(layout.group.bottom)};
     ClientToScreen(s.hwnd,&anchor);
     const auto items = app::BuildGroupingMenu(tab->group_mode,tab->group_direction,true);
@@ -1714,47 +1784,56 @@ void ShowToolbarMore(AppState& s) {
     if (!EnsureMenu(s)) return;
     auto* tab=ActiveTab(s);
     if (!tab) return;
-    std::vector<ui::FluentMenuItem> items;
-    const int commands[]={app::CmdCut,app::CmdCopy,app::CmdPaste,app::CmdRename,app::CmdDelete,app::CmdProperties};
     const float width=static_cast<float>(s.compositor.Width());
     const float left=s.renderer.EffectiveSidebarWidth(width);
     const auto command_context = BuildCommandContext(s);
-    if (width-left < 540*s.scale) for (const int command : commands)
-        items.push_back(app::BuildCommandMenuItem(command, command_context));
-    if (!items.empty() && width-left < 540*s.scale) items.back().separator_after=true;
-    if (IsArchiveView(tab->current_path)) {
+    const auto layout=ui::MakeToolbarLayout(width,s.scale,s.renderer.TitleBarHeight(),s.renderer.Margin(),
+        s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left,s.pane ? s.pane->filter_expand : 0.0f,
+        IsArchiveView(tab->current_path),IsRecycleTab(tab),s.appPrefs.toolbar_order);
+    if (!layout.has_overflow) { ShowCommandCustomization(s); return; }
+    auto items = app::BuildToolbarOverflowMenu(s.appPrefs.toolbar_order, layout, command_context,
+        static_cast<int>(LayoutOf(s)));
+    const auto append_context = [&](ui::FluentMenuItem item) {
+        if (items.size() > 1) items[items.size() - 2].separator_after = false;
+        item.separator_after = true;
+        items.insert(items.end() - 1, std::move(item));
+    };
+    if (IsArchiveView(tab->current_path) && layout.extract.right <= layout.extract.left) {
         ui::FluentMenuItem extract;
         extract.command=app::CmdExtract; extract.text=l10n::Get(l10n::StringId::ArchiveExtract); extract.enabled=tab->SelectedCount()>0;
-        items.push_back(extract);
+        append_context(extract);
         extract.command=app::CmdExtractAll; extract.text=l10n::Get(l10n::StringId::ArchiveExtractAll); extract.enabled=!tab->loading;
-        items.push_back(extract);
+        append_context(std::move(extract));
     }
-    if (IsRecycleTab(tab)) {
+    if (IsRecycleTab(tab) && layout.empty_recycle.right <= layout.empty_recycle.left) {
         const bool can_empty = !tab->loading && (!s.recycle_info.valid || s.recycle_info.items > 0);
         auto recycle_items = app::BuildRecycleBackgroundMenu(false, {}, can_empty);
-        items.push_back(std::move(recycle_items.front()));
+        append_context(std::move(recycle_items.front()));
     }
-    ui::FluentMenuItem split;
-    split.text=l10n::Get(l10n::StringId::SplitLayout);
-    split.children=app::BuildSplitMenu(-1);
-    items.push_back(std::move(split));
-    ui::FluentMenuItem preview;
-    preview.command=app::CmdDetailsPanel;
-    preview.text=l10n::Get(l10n::StringId::DetailsPane);
-    preview.checked=s.showDetailsPanel;
-    items.push_back(std::move(preview));
-    ui::FluentMenuItem column;
-    column.command=app::CmdColumnLayout;
-    column.text=l10n::Get(l10n::StringId::ColumnLayout);
-    column.checked=tab->column_layout;
-    items.push_back(std::move(column));
-    const auto layout=ui::MakeToolbarLayout(width,s.scale,s.renderer.TitleBarHeight(),s.renderer.Margin(),
-        s.renderer.NewButtonWidthPx(true),left);
     POINT anchor{static_cast<LONG>(layout.overflow.left),static_cast<LONG>(layout.overflow.bottom)};
     ClientToScreen(s.hwnd,&anchor);
     SetMenuToggleRect(s, layout.overflow);
     const int cmd=s.menu->TrackToolbarPopup(anchor,items);
     if (cmd!=app::CmdNone) DispatchMenuCommand(s,cmd);
+}
+
+void ShowToolbarContextMenu(AppState& s, POINT screen_pt, int command) {
+    if (!EnsureMenu(s)) return;
+    const bool removable = std::find(s.appPrefs.toolbar_order.begin(), s.appPrefs.toolbar_order.end(), command)
+        != s.appPrefs.toolbar_order.end();
+    s.menu->SetTheme(s.darkMode, s.accentColor);
+    const int choice = s.menu->TrackToolbarPopup(screen_pt, app::BuildToolbarContextMenu(removable));
+    if (choice == app::kUnpinToolbarItem && removable) {
+        const auto previous = s.appPrefs.toolbar_order;
+        std::erase(s.appPrefs.toolbar_order, command);
+        if (!s.appPrefs.Save()) {
+            s.appPrefs.toolbar_order = previous;
+            s.notification_toast.ShowError(s.hwnd, l10n::Get(l10n::StringId::CustomizeCommands),
+                l10n::Pick(L"无法保存工具栏设置。", L"Unable to save toolbar settings."));
+            return;
+        }
+        s.core.windows.ForEach([](HWND hwnd, AppState&) { InvalidateRect(hwnd, nullptr, FALSE); });
+    } else if (choice == app::CmdCustomizeCommands) ShowCommandCustomization(s);
 }
 
 void ShowAdvancedSearch(AppState& s, bool require_scope) {
@@ -1985,6 +2064,11 @@ void ShowOmnibar(AppState& s, OmnibarMode mode) {
     }
     if (q.kind == app::OmnibarQuery::Kind::Command) return;
     if (q.needle.empty()) return;
+    std::wstring alias;
+    if (ResolvePathAlias(s, q.needle, alias)) {
+        if (!alias.empty()) NavigateTo(s, alias);
+        return;
+    }
     const std::wstring path = FormatAddressPath(q.needle);
     const DWORD attrs = GetFileAttributesW(path.c_str());
     if (app::LooksLikeFilesystemPath(q.needle) || attrs != INVALID_FILE_ATTRIBUTES)

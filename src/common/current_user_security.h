@@ -11,9 +11,9 @@
 
 namespace pulse {
 
-inline std::wstring CurrentUserSidString() {
+inline std::wstring ProcessUserSidString(HANDLE process) {
     HANDLE token = nullptr;
-    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return {};
+    if (!OpenProcessToken(process, TOKEN_QUERY, &token)) return {};
     DWORD bytes = 0;
     GetTokenInformation(token, TokenUser, nullptr, 0, &bytes);
     std::vector<BYTE> token_user(bytes);
@@ -28,6 +28,8 @@ inline std::wstring CurrentUserSidString() {
     LocalFree(sid);
     return result;
 }
+
+inline std::wstring CurrentUserSidString() { return ProcessUserSidString(GetCurrentProcess()); }
 
 class CurrentUserSecurityAttributes {
 public:

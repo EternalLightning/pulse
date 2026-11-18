@@ -42,11 +42,25 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
         dc->SetTransform(transform);
         auto text = header;
         text.left += 24 * scale_; text.top += 2 * scale_;
+        if (group == 0) text.right = layout.customize.left - 8*scale_;
         const auto title = l10n::Get(headings[group]);
         painter_.DrawText(title, text, compositor_->TextFormat(), header_highlight ? theme.text_selected : theme.text);
         const float line_left = text.left + MeasureTextWidth(compositor_->DwriteFactory(), compositor_->TextFormat(), title) + 12 * scale_;
-        if (line_left < header.right)
-            painter_.FillRoundedRect(D2D1::RectF(line_left, header.top + 15 * scale_, header.right, header.top + 16 * scale_), 0, header_highlight ? theme.text_selected : theme.stroke_divider);
+        const float line_right = group == 0 ? layout.customize.left-12*scale_ : header.right;
+        if (line_left < line_right)
+            painter_.FillRoundedRect(D2D1::RectF(line_left, header.top + 15 * scale_, line_right, header.top + 16 * scale_), 0, header_highlight ? theme.text_selected : theme.stroke_divider);
+        if (group == 0) {
+            fluent::ButtonSpec customize;
+            customize.bounds = layout.customize;
+            customize.text = l10n::Pick(L"自定义", L"Customize");
+            customize.glyph = L"\xE9E9";
+            customize.kind = fluent::ButtonKind::Transparent;
+            customize.bordered = false;
+            customize.center_content = true;
+            customize.icon_only = layout.customize.right-layout.customize.left < 60*scale_;
+            customize.state.hovered = vm.hover_region == HitTestResult::HomeCustomize && vm.hover_pane_index == pane_index;
+            painter_.DrawButton(customize);
+        }
         if (expansion <= 0.0f) continue;
         dc->PushAxisAlignedClip(layout.content_clips[group], D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         if (expansion < 1.0f) dc->PushLayer(D2D1::LayerParameters(layout.content_clips[group], nullptr,
@@ -66,8 +80,11 @@ void MainRenderer::DrawHome(const WindowViewModel& vm, const PaneViewModel& pane
         } else if (layout.empty[group]) {
             auto empty_text = layout.headings[group];
             empty_text.top += 36 * scale_; empty_text.bottom += 38 * scale_;
-            painter_.DrawText(l10n::Get(pane.home_loading ? l10n::StringId::HomeLoading :
-                group == 2 ? l10n::StringId::HomeNetworkEmpty : l10n::StringId::HomeCapacityUnavailable),
+            const std::wstring message = group == 0 && !pane.home_loading
+                ? l10n::Pick(L"暂无快捷访问项目", L"No quick access items")
+                : l10n::Get(pane.home_loading ? l10n::StringId::HomeLoading :
+                    group == 2 ? l10n::StringId::HomeNetworkEmpty : l10n::StringId::HomeCapacityUnavailable);
+            painter_.DrawText(message,
                 empty_text, compositor_->SmallFormat(), theme.text_secondary);
         }
         for (const auto& placed : layout.cards) {

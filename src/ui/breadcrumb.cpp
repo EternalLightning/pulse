@@ -74,6 +74,13 @@ std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path,
             seg.text = pulse::l10n::Get(pulse::l10n::StringId::StarredItems);
         else if (pulse_kind == L"recent")
             seg.text = pulse::l10n::Get(pulse::l10n::StringId::Recent);
+        else if (pulse_kind == L"shell" || pulse_kind == L"library") {
+            if (!virtual_title.empty()) seg.text = virtual_title;
+            else if (pulse_kind == L"library" || pulse_rest == L"libraries")
+                seg.text = l10n::Get(l10n::StringId::ShellLibraries);
+            else if (pulse_rest == L"controlpanel") seg.text = l10n::Get(l10n::StringId::ShellControlPanel);
+            else seg.text = l10n::Get(l10n::StringId::ShellApplications);
+        }
         else if (pulse_kind == L"settings")
             seg.text = pulse::l10n::Get(pulse::l10n::StringId::Settings);
         else if (pulse_kind == L"archive") {

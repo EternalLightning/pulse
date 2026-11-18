@@ -1519,20 +1519,37 @@ TitleChrome MakeTitleChrome(float window_w, float scale, float title_h) {
 }
 
 constexpr float kSettingsNavW = 200.0f;
-constexpr int kSettingsNavCount = 10;
+constexpr int kSettingsNavCount = 12;
 constexpr bool IsSettingsCategory(int page) { return page == 0 || (page >= 6 && page <= 9); }
-constexpr int kSettingsNavOrder[] = {0, 6, 7, 8, 9, 1, 2, 4};
-constexpr int kSettingsNavGroupStart[] = {0, 1, 3, 5, 7};
+constexpr int kSettingsNavOrder[] = {0, 10, 11, 6, 7, 8, 9, 1, 2, 4};
+constexpr int kSettingsNavGroupStart[] = {0, 3, 5, 7, 9};
 constexpr l10n::StringId kSettingsNavTitles[] = {
     l10n::StringId::SettingsAppearance, l10n::StringId::SettingsSearchIndex,
     l10n::StringId::SettingsContextMenu, l10n::StringId::SettingsAboutDiagnostics,
     l10n::StringId::SettingsDuplicates, l10n::StringId::SettingsContextMenu,
     l10n::StringId::SettingsFileList, l10n::StringId::SettingsPageTabs,
     l10n::StringId::SettingsPageSystem, l10n::StringId::SettingsPageFileOps,
+    l10n::StringId::Settings,
+    l10n::StringId::Settings,
 };
+std::wstring SettingsPageTitle(int page) {
+    if (page == 11) return l10n::Pick(L"快捷访问", L"Quick access");
+    return page == 10 ? std::wstring(l10n::Pick(L"快捷键", L"Shortcuts")) : l10n::Get(kSettingsNavTitles[page]);
+}
 constexpr int SettingsSidebarPage(int page) { return page == 5 ? 2 : page; }
 
 struct SettingsLayout {
+    struct HomeAccessFolder {
+        D2D1_RECT_F card{}, title{}, path{}, up{}, down{}, remove{};
+    };
+    D2D1_RECT_F home_access_add{}, home_access_reset{}, home_access_empty{};
+    D2D1_RECT_F home_access_builtin[model::kHomeQuickAccessItemCount]{}, home_access_sections[3]{};
+    std::vector<HomeAccessFolder> home_access_folders;
+    struct ShortcutRow {
+        D2D1_RECT_F card{}, title{}, binding{}, remove{}, reset{}, group{};
+    };
+    D2D1_RECT_F shortcut_search{}, shortcut_clear{}, shortcut_reset_all{}, shortcut_empty{}, shortcut_global_error{};
+    std::vector<ShortcutRow> shortcut_rows;
     SysCtxLayout sysctx;
     static constexpr int kContextCards = 6;
     D2D1_RECT_F context_cards[kContextCards]{}, context_header[kContextCards]{},
@@ -1582,6 +1599,8 @@ struct SettingsLayout {
     D2D1_RECT_F wallpaper_blur_row[3]{};
     D2D1_RECT_F startup_row[3]{};
     D2D1_RECT_F explorer_takeover_row{};
+    D2D1_RECT_F file_dialog_takeover_row{};
+    D2D1_RECT_F file_dialog_bridge_row{};
     D2D1_RECT_F startup_tray_row{}, last_tab_row{};
     D2D1_RECT_F system_status{};
     D2D1_RECT_F new_tab_row{};
@@ -1684,7 +1703,7 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
     const float nav_height = (l.nav.bottom-l.nav.top)/scale;
     const bool headings = nav_width >= 100*scale && nav_height >= 660;
     const float group_gap = headings ? 30.0f : 8.0f;
-    const float row_height = std::clamp((nav_height-76-5*group_gap)/9, 24.0f, 40.0f);
+    const float row_height = std::clamp((nav_height-76-5*group_gap)/11, 24.0f, 40.0f);
     float nav_y = l.nav.top + 12*scale;
     for (int position=0; position<static_cast<int>(std::size(kSettingsNavOrder)); ++position) {
         for (int group=0; group<5; ++group) if (position==kSettingsNavGroupStart[group]) {
@@ -1709,6 +1728,10 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
     y += 8.0f * scale;
     if (IsSettingsCategory(vm.settings_page)) {
         y = LayoutSettingsGeneral(l, vm, scale, y, painter);
+    } else if (vm.settings_page == 10) {
+        y = LayoutSettingsShortcuts(l, vm, scale, y, painter);
+    } else if (vm.settings_page == 11) {
+        y = LayoutSettingsHomeQuickAccess(l, vm, scale, y, painter);
     } else if (vm.settings_page == 1) {
         const float card_left = l.content.left + pad;
         const float card_right = l.content.right - pad;
@@ -1719,14 +1742,6 @@ SettingsLayout MakeSettingsLayout(const WindowViewModel& vm, const D2D1_RECT_F& 
             l10n::Get(l10n::StringId::GlobalSearchDesc),scale,painter);
         l.global_search_row = D2D1::RectF(card_left, y, card_right, y + global_search_height);
         y += global_search_height;
-        const bool hotkey_stacked = card_right-card_left < 560*scale;
-        const float hotkey_width = std::min(card_right-card_left-70*scale, std::max(176*scale,
-            label_btn_w(vm.settings_global_search_capturing ? l10n::Get(l10n::StringId::GlobalSearchRecording) : vm.settings_global_search_hotkey)));
-        l.global_search_hotkey_row = D2D1::RectF(card_left, y, card_right, y + (hotkey_stacked ? 108 : 68)*scale);
-        const float hotkey_left = hotkey_stacked ? card_left+54*scale : card_right-16*scale-hotkey_width;
-        const float hotkey_top = y+(hotkey_stacked ? 62 : 18)*scale;
-        l.global_search_hotkey_button = D2D1::RectF(hotkey_left, hotkey_top, hotkey_left+hotkey_width, hotkey_top+32*scale);
-        y = l.global_search_hotkey_row.bottom;
         const float pinyin_height=SettingsToggleHeight(card_right-card_left,
             l10n::Get(l10n::StringId::SearchPinyinDesc),scale,painter);
         l.search_pinyin_row = D2D1::RectF(card_left, y, card_right, y + pinyin_height);

@@ -911,6 +911,11 @@ void Painter::DrawButton(const ButtonSpec& spec) {
     content.right -= pad_x;
     content.top += pad_y;
     content.bottom -= pad_y;
+    if (spec.center_content && !spec.icon_only) {
+        const float inset = std::max(0.0f, (Width(spec.bounds) -
+            MeasureButtonWidth(spec.text, spec.glyph, spec.drop_down)) * 0.5f);
+        content.left += inset;
+    }
     if (spec.icon_only) {
         if (!spec.skip_glyph) DrawGlyph(spec.glyph, content, foreground);
     } else if (Width(content) > 0.0f && Height(content) > 0.0f) {

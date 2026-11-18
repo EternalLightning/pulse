@@ -7,6 +7,7 @@
 #include "fs_recycle.h"
 #include "drive_kind.h"
 #include "../common/current_user_security.h"
+#include "../common/file_name.h"
 #include <shellapi.h>
 #include <algorithm>
 #include <cstring>
@@ -15,15 +16,6 @@
 
 namespace pulse::fs {
 namespace {
-
-std::wstring FileNameOf(const std::wstring& path) {
-    std::wstring_view view = path;
-    while (view.size() > 1 && (view.back() == L'\\' || view.back() == L'/'))
-        view.remove_suffix(1);
-    const size_t slash = view.find_last_of(L"\\/");
-    return slash == std::wstring_view::npos ? std::wstring(view)
-                                            : std::wstring(view.substr(slash + 1));
-}
 
 bool ParseIndexBytes(const BYTE* data, size_t size, RecycleItem& out) {
     if (!data || size < 24) return false;
@@ -48,7 +40,7 @@ bool ParseIndexBytes(const BYTE* data, size_t size, RecycleItem& out) {
         if (out.original_path.find(L'\0') != std::wstring::npos) return false;
         out.size = file_size;
         out.deleted = deleted;
-        out.name = FileNameOf(out.original_path);
+        out.name = path::FileNameOf(out.original_path);
         return !out.original_path.empty() && !out.name.empty();
     }
     if (ver == 1) {
@@ -61,7 +53,7 @@ bool ParseIndexBytes(const BYTE* data, size_t size, RecycleItem& out) {
         memcpy(&file_size, data + 8, 8);
         memcpy(&out.deleted, data + 16, 8);
         out.size = file_size;
-        out.name = FileNameOf(out.original_path);
+        out.name = path::FileNameOf(out.original_path);
         return !out.original_path.empty() && !out.name.empty();
     }
     return false;
@@ -111,7 +103,7 @@ std::wstring RecycleIndexPath(const std::wstring& content_path) {
 
 bool ReadRecycleIndex(const std::wstring& index_path, RecycleItem& out) {
     out = {};
-    const std::wstring name = FileNameOf(index_path);
+    const std::wstring name = path::FileNameOf(index_path);
     if (name.size() < 3 || name[0] != L'$' || (name[1] != L'I' && name[1] != L'i'))
         return false;
     out.index_path = index_path;
@@ -131,7 +123,7 @@ bool ReadRecycleIndex(const std::wstring& index_path, RecycleItem& out) {
     if (!ok || read < 24) return false;
     if (!ParseIndexBytes(buf.data(), read, out)) return false;
 
-    std::wstring r_name = FileNameOf(index_path);
+    std::wstring r_name = path::FileNameOf(index_path);
     if (r_name.size() >= 2) r_name[1] = (r_name[1] == L'I') ? L'R' : L'r';
     const size_t slash = index_path.find_last_of(L'\\');
     out.content_path = (slash == std::wstring::npos)

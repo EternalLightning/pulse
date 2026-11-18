@@ -5,9 +5,11 @@
 
 #include "ui_renderer_internal.h"
 #include "toolbar_layout.h"
+#include "toolbar_icons.h"
 #include "address_search_layout.h"
 #include "toolbar_command_state.h"
 #include "pane_header_icons.h"
+#include "command_icons.h"
 #include "../common/resource_ids.h"
 
 namespace pulse::ui {
@@ -20,7 +22,7 @@ void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_
     auto* dc = compositor_->Dc();
     const float left = EffectiveSidebarWidth(rect.right);
     const bool compact = rect.right-left < 600*scale_;
-    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view,vm.pane.is_recycle);
+    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view,vm.pane.is_recycle,vm.toolbar_order);
     const float address_opacity = rect.right - left < 480 * scale_
         ? AddressSearchContentOpacity(1.0f - vm.address_search_animation) : 1.0f;
     if (address_opacity > 0.0f) {
@@ -163,56 +165,47 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
     auto* dc = compositor_->Dc();
     const float left = EffectiveSidebarWidth(rect.right);
     const bool compact = rect.right-left < 600*scale_;
-    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view,vm.pane.is_recycle);
+    const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view,vm.pane.is_recycle,vm.toolbar_order);
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
     FillRect(dc,brStrokeDivider_.get(),left+margin_,title_bar_height_+44*scale_,rect.right-left-2*margin_,scale_);
-    const std::wstring label=l10n::Get(l10n::StringId::New);
-    fluent::ButtonSpec create;
-    create.bounds=layout.create; create.text=compact ? std::wstring_view{} : std::wstring_view{label};
-    create.glyph=kIconAdd; create.kind=fluent::ButtonKind::Transparent;
-    create.bordered=false;
-    create.icon_only=compact; create.drop_down=!compact;
-    create.skip_glyph=true;
-    create.state.enabled=!vm.archive_view;
-    create.state.hovered=create.state.enabled && IsHovered(vm,HitTestResult::NewButton);
-    painter_.DrawButton(create);
-    const float icon_x=compact ? (layout.create.left+layout.create.right)*0.5f
-                               : layout.create.left+18*scale_;
-    const float icon_y=(layout.create.top+layout.create.bottom)*0.5f;
     const auto icon_bounds=[&](float cx,float cy) {
         const float radius=8*scale_;
         return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
     };
-    const auto enabled_color=theme.accent_ink;
-    const auto create_color=!create.state.enabled ? theme.text_disabled
-        : IsHighContrast() && create.state.hovered ? theme.text_selected : enabled_color;
-    const int create_icon=vm.dark ? IDR_FILES_NEW_COLOR_DARK_SVG : IDR_FILES_NEW_COLOR_SVG;
-    auto create_bounds=icon_bounds(icon_x,icon_y);
-    // Move the complete 1px icon onto pixel centers, keeping its layers concentric.
-    const float shift_x=std::floor(create_bounds.left)+0.5f-create_bounds.left;
-    const float shift_y=std::floor(create_bounds.top)+0.5f-create_bounds.top;
-    create_bounds.left+=shift_x; create_bounds.right+=shift_x;
-    create_bounds.top+=shift_y; create_bounds.bottom+=shift_y;
-    if (!DrawFluentSvg(create.state.enabled && !IsHighContrast() ? create_icon : IDR_FILES_NEW_SVG,
-        create_bounds,1.0f,create.state.enabled && !IsHighContrast() ? nullptr : &create_color)) {
-        const auto icon=create_bounds;
-        DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
-            kIconAdd,L"",create_color,0.82f);
+    const auto draw_command_icon = [&](command_icons::Icon icon, D2D1_RECT_F bounds, D2D1_COLOR_F color) {
+        if (!paneHeaderStroke_.get()) command_icons::CreateStrokeStyle(dc, &paneHeaderStroke_);
+        MakeBrush(dc, color, brText_);
+        return toolbar_icons::Draw(dc, brText_.get(), paneHeaderStroke_.get(), icon, bounds, scale_);
+    };
+    if (layout.create.right > layout.create.left) {
+        const std::wstring label=l10n::Get(l10n::StringId::New);
+        fluent::ButtonSpec create;
+        create.bounds=layout.create; create.text=compact ? std::wstring_view{} : std::wstring_view{label};
+        create.glyph=kIconAdd; create.kind=fluent::ButtonKind::Transparent;
+        create.bordered=false;
+        create.icon_only=compact; create.drop_down=!compact;
+        create.skip_glyph=true;
+        create.state.enabled=!vm.archive_view && (vm.toolbar_commands.empty() ||
+            std::any_of(vm.toolbar_commands.begin(), vm.toolbar_commands.end(), [](const auto& command) {
+                return command.command == 186 && command.enabled;
+            }));
+        create.state.hovered=create.state.enabled && IsHovered(vm,HitTestResult::NewButton);
+        painter_.DrawButton(create);
+        const float icon_x=compact ? (layout.create.left+layout.create.right)*0.5f
+                                   : layout.create.left+18*scale_;
+        const float icon_y=(layout.create.top+layout.create.bottom)*0.5f;
+        const auto create_color=!create.state.enabled ? theme.text_disabled
+            : IsHighContrast() && create.state.hovered ? theme.text_selected : theme.text;
+        draw_command_icon(command_icons::Icon::Add,icon_bounds(icon_x,icon_y),create_color);
     }
-    if (layout.commands[0].right > layout.commands[0].left) {
+    if (layout.create.right > layout.create.left && layout.commands[0].right > layout.create.right) {
         MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
         FillRect(dc,brStrokeDivider_.get(),layout.create.right+6*scale_,
             layout.create.top+7*scale_,scale_,18*scale_);
     }
-    const wchar_t* glyphs[]={kIconCut,kIconCopy,kIconPaste,kIconRename,kIconDelete,kIconSettings,kIconSplit,
-        vm.details_visible ? kIconDetailsClose : kIconDetailsOpen,L""};
-    const int files_icons[]={IDR_FILES_CUT_SVG,IDR_FILES_COPY_SVG,IDR_FILES_PASTE_SVG,
-        IDR_FILES_RENAME_SVG,IDR_FILES_DELETE_SVG,IDR_FILES_PROPERTIES_SVG};
-    const int color_icons[]={IDR_FILES_CUT_COLOR_SVG,IDR_FILES_COPY_COLOR_SVG,IDR_FILES_PASTE_COLOR_SVG,
-        IDR_FILES_RENAME_COLOR_SVG,IDR_FILES_DELETE_COLOR_SVG,IDR_FILES_PROPERTIES_COLOR_SVG};
-    const int dark_color_icons[]={IDR_FILES_CUT_COLOR_DARK_SVG,IDR_FILES_COPY_COLOR_DARK_SVG,
-        IDR_FILES_PASTE_COLOR_DARK_SVG,IDR_FILES_RENAME_COLOR_DARK_SVG,
-        IDR_FILES_DELETE_COLOR_DARK_SVG,IDR_FILES_PROPERTIES_COLOR_DARK_SVG};
+    using Icon = command_icons::Icon;
+    const Icon icons[]={Icon::Cut,Icon::Copy,Icon::Paste,Icon::Rename,Icon::Delete,Icon::Info,
+        Icon::Split,vm.details_visible ? Icon::PanelClose : Icon::Panel,Icon::Columns};
     const HitTestResult::Region hits[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
         HitTestResult::Rename,HitTestResult::Delete,HitTestResult::Properties,
         HitTestResult::SplitButton,HitTestResult::DetailsToggle,HitTestResult::PaneColumnLayout};
@@ -225,25 +218,28 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const bool selected=(i==6 && vm.pane_slots.size()>1) || (i==7 && vm.details_visible) ||
             (i==8 && vm.pane.column_strip.enabled);
         DrawButton(layout.commands[i],theme,enabled && IsHovered(vm,hits[i]) ? theme.fill_hover :
-            selected ? theme.fill_selected : kTransparent,
-            i<=6 ? L"" : glyphs[i],L"",!enabled ? theme.text_disabled : selected ? theme.accent_ink : theme.text_secondary,true,true,0.82f);
+            selected ? theme.fill_selected : kTransparent,L"",L"",theme.text,true,true);
         const auto foreground = !enabled ? theme.text_disabled
-            : IsHighContrast() && (selected || IsHovered(vm, hits[i])) ? theme.text_selected
-            : selected ? theme.accent_ink : theme.text_secondary;
-        if (i<6) {
-            const auto& r=layout.commands[i];
-            const float cx=(r.left+r.right)*0.5f, cy=(r.top+r.bottom)*0.5f;
-            const D2D1_COLOR_F color=IsHighContrast() ? foreground : enabled ? enabled_color : theme.text_disabled;
-            const int color_icon=vm.dark ? dark_color_icons[i] : color_icons[i];
-            if (!DrawFluentSvg(enabled && !IsHighContrast() ? color_icon : files_icons[i],icon_bounds(cx,cy),
-                1.0f,enabled && !IsHighContrast() ? nullptr : &color)) {
-                const auto icon=icon_bounds(cx,cy);
-                DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
-                    glyphs[i],L"",color,0.82f);
-            }
-        }
-        if (i==6) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Split,foreground);
-        if (i==8) DrawPaneHeaderIcon(layout.commands[i],PaneHeaderIcon::Columns,foreground);
+            : IsHighContrast() && (selected || IsHovered(vm,hits[i])) ? theme.text_selected
+            : selected ? theme.accent_ink : theme.text;
+        draw_command_icon(icons[i],layout.commands[i],foreground);
+    }
+    for (const auto& placed : layout.placed_commands) {
+        if (placed.command == 186 || std::find(kLegacyToolbarCommands.begin(), kLegacyToolbarCommands.end(),
+            placed.command) != kLegacyToolbarCommands.end()) continue;
+        const auto item = std::find_if(vm.toolbar_commands.begin(), vm.toolbar_commands.end(),
+            [&](const auto& command) { return command.command == placed.command; });
+        if (item == vm.toolbar_commands.end()) continue;
+        const bool hovered = IsHovered(vm, HitTestResult::CustomToolbarCommand, placed.command);
+        fluent::ButtonSpec button;
+        button.bounds = placed.bounds; button.glyph = item->glyph;
+        button.icon_only = true; button.kind = fluent::ButtonKind::Transparent;
+        button.bordered = false;
+        button.skip_glyph = true;
+        button.state.enabled = item->enabled; button.state.hovered = hovered;
+        painter_.DrawButton(button);
+        draw_command_icon(toolbar_icons::Resolve(item->glyph,item->pictogram,item->command),placed.bounds,
+            !item->enabled ? theme.text_disabled : IsHighContrast() && hovered ? theme.text_selected : theme.text);
     }
     const auto contextual_button = [&](const D2D1_RECT_F& bounds, HitTestResult::Region hit,
                                        const wchar_t* text, bool enabled) {
@@ -263,9 +259,9 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         contextual_button(layout.empty_recycle,HitTestResult::EmptyRecycle,
             l10n::Get(l10n::StringId::EmptyRecycleBin).c_str(),vm.can_empty_recycle);
     }
-    if (layout.overflow.right > layout.overflow.left) {
+    if (layout.has_overflow && layout.overflow.right > layout.overflow.left) {
         DrawButton(layout.overflow,theme,IsHovered(vm,HitTestResult::ToolbarMore) ? theme.fill_hover : kTransparent,
-            L"\xE712",L"",theme.text_secondary,true,true);
+            L"\xE712",L"",theme.text,true,true);
     }
     const auto command = [&](D2D1_RECT_F bounds, const wchar_t* glyph, int files_icon,
                              l10n::StringId label, HitTestResult::Region region, bool dropdown, bool enabled = true) {
@@ -285,14 +281,22 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float cy=(bounds.top+bounds.bottom)*0.5f;
         const auto foreground=!enabled ? theme.text_disabled
             : IsHighContrast() && button.state.hovered ? theme.text_selected : theme.text;
-        if (!DrawFluentSvg(files_icon,icon_bounds(cx,cy),1.0f,&foreground)) {
-            const auto icon=icon_bounds(cx,cy);
+        auto icon=icon_bounds(cx,cy);
+        if (files_icon == IDR_TOOLBAR_CUSTOMIZE_SVG) {
+            const float side = icon.right-icon.left;
+            icon.left = std::round(icon.left); icon.top = std::round(icon.top);
+            icon.right = icon.left+side; icon.bottom = icon.top+side;
+        }
+        if (!DrawFluentSvg(files_icon,icon,1.0f,&foreground)) {
             DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
-                glyph,L"",IsHighContrast() ? foreground : enabled ? theme.text_secondary : theme.text_disabled,0.82f);
+                glyph,L"",foreground,0.82f);
         }
     };
+    if (!layout.has_overflow && layout.overflow.right > layout.overflow.left) {
+        command(layout.overflow,L"\xE9E9",IDR_TOOLBAR_CUSTOMIZE_SVG,l10n::StringId::CustomizeCommands,HitTestResult::ToolbarMore,false);
+    }
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
-    FillRect(dc,brStrokeDivider_.get(),layout.sort.left-6*scale_,layout.sort.top+7*scale_,scale_,18*scale_);
+    FillRect(dc,brStrokeDivider_.get(),layout.sort.left-4*scale_,layout.sort.top+7*scale_,scale_,18*scale_);
     command(layout.sort,L"\xE8CB",IDR_FILES_SORT_SVG,l10n::StringId::ToolbarSort,HitTestResult::ToolbarSort,true);
     command(layout.group,L"\xE8FD",IDR_FILES_GROUP_SVG,l10n::StringId::ToolbarGroup,HitTestResult::ToolbarGroup,true,vm.can_group);
     if (vm.pane.filter_expand <= 0.015f && !vm.filter_editing) {

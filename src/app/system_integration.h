@@ -15,6 +15,7 @@ inline constexpr UINT kSystemIntegrationMessage = WM_APP + 68;
 inline constexpr UINT kShellSelectionMessage = WM_APP + 69;
 inline constexpr UINT kExplorerTakeoverMessage = WM_APP + 70;
 std::wstring SystemExecutablePath();
+std::wstring SystemFileDialogBridgePath(std::wstring executable);
 struct ExplorerTakeoverRequest;
 struct SystemTakeoverTestCallbacks {
     std::function<bool(uint64_t)> active;

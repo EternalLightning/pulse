@@ -10,6 +10,7 @@
 // app_navigation.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
 #include "device_navigation.h"
+#include "../fs/shell_namespace.h"
 #include "../index/live_filename_search.h"
 #include "app_column_view.h"
 #include "../ui/lumatext_renderer.h"
@@ -115,6 +116,17 @@ static void SetPathFailure(app::Tab& tab, DWORD error) {
     tab.banner_message = format::FileOperationErrorText(HRESULT_FROM_WIN32(error));
     if (tab.snapshot && tab.net_readonly)
         tab.banner_message += L" (" + l10n::Get(l10n::StringId::CachedReadOnly) + L")";
+}
+
+static std::wstring ShellViewTitle(const std::wstring& path) {
+    using I = l10n::StringId;
+    if (path == fs::kLibrariesPath) return l10n::Get(I::ShellLibraries);
+    if (path == fs::kControlPanelPath) return l10n::Get(I::ShellControlPanel);
+    if (path == fs::kApplicationsPath) return l10n::Get(I::ShellApplications);
+    const auto split = path.find_last_of(L"\\/");
+    auto name = split == std::wstring::npos ? path : path.substr(split + 1);
+    if (name.size() > 11) name.resize(name.size() - 11);
+    return name;
 }
 
 static void FailListing(AppState& s, app::Tab& tab, DWORD error) {
@@ -823,7 +835,7 @@ void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path, PathL
         tab.virtual_title = l10n::Get(l10n::StringId::Home);
         tab.SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
         CancelScrollAnimation(s);
-        s.home_catalog.Refresh();
+        s.home_catalog.Refresh(s.appPrefs.home_quick_access);
         return;
     }
     if (kind == L"changes") {
@@ -1068,6 +1080,20 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         SyncVisibleWatches(s);
         return;
     }
+    if (fs::IsShellNamespacePath(normalized)) {
+        tab.virtual_title = ShellViewTitle(normalized);
+        if (!fs::IsLibraryPath(normalized))
+            tab.details_columns = {true, {model::DetailsColumnKind::Name}, {}};
+        tab.ClearBanner();
+        tab.net_readonly = false;
+        tab.SetSnapshot(nullptr);
+        tab.applied_generation = 0;
+        tab.loading = true;
+        tab.pending_generation = AdmitListingRequest(s, tab, s.worker.Refresh(normalized,
+            tab.sort_column, tab.sort_direction, app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode)));
+        SyncVisibleWatches(s);
+        return;
+    }
     if (app::IsDeviceTab(&tab)) {
         tab.virtual_title = app::DeviceTitle(normalized);
         tab.ClearBanner();
@@ -1106,6 +1132,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         tab.group_mode = group.mode;
         tab.group_direction = group.direction;
         const auto columns = s.appPrefs.folder_views.FindColumns(normalized);
+        tab.details_columns = s.appPrefs.folder_views.FindColumnLayout(normalized).value_or(model::DetailsColumnPrefs{});
         if (columns) tab.details_column_dividers = *columns;
         else if (reason == PathLoadReason::RestoreSession)
             s.appPrefs.folder_views.SetColumns(normalized, tab.details_column_dividers);
@@ -1173,7 +1200,7 @@ void ResumeTransferredTab(AppState& s, app::Tab& tab) {
     tab.search_loading_more = false;
     tab.loading = false;
 
-    if (!fs::IsVirtualPath(tab.current_path) || app::IsDeviceTab(&tab)) {
+    if (!fs::IsVirtualPath(tab.current_path) || app::IsDeviceTab(&tab) || fs::IsShellNamespacePath(tab.current_path)) {
         if (tab.snapshot) CaptureListingSelection(tab);
         tab.PrepareEntryRefresh(false);
         tab.loading = !tab.snapshot;
@@ -1189,7 +1216,7 @@ void ResumeTransferredTab(AppState& s, app::Tab& tab) {
     std::wstring kind, rest;
     app::ParsePulsePath(tab.current_path, &kind, &rest);
     if (kind == L"home") {
-        s.home_catalog.Refresh();
+        s.home_catalog.Refresh(s.appPrefs.home_quick_access);
         RequestNetworkDiscovery(s);
         return;
     }
@@ -1504,7 +1531,8 @@ void RefreshPath(AppState& s, const std::wstring& path, RefreshReason reason) {
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return;
     }
-    if (fs::IsVirtualPath(normalized) && !fs::IsRecycleViewPath(normalized) && !fs::IsDevicePath(normalized)) {
+    if (fs::IsVirtualPath(normalized) && !fs::IsRecycleViewPath(normalized) && !fs::IsDevicePath(normalized) &&
+        !fs::IsShellNamespacePath(normalized)) {
         for (app::Tab* tab : tabs) {
             if (tab->search_content_stopped && reason != RefreshReason::Explicit) continue;
             // The subscribed session consumes changes since its initial snapshot,
@@ -1862,12 +1890,14 @@ void ApplyLayoutPreset(AppState& s, app::LayoutPreset preset) {
     std::wstring clone = pulse::path::DefaultNavigationRoot();
     ui::ViewMode cloneView = ui::ViewMode::Details;
     std::array<float, 4> cloneColumns{};
+    model::DetailsColumnPrefs cloneColumnLayout;
     std::array<float, 5> cloneSearchColumns{};
     if (s.pane && s.pane->ActiveTab() && !s.pane->ActiveTab()->current_path.empty())
         clone = s.pane->ActiveTab()->current_path;
     if (s.pane && s.pane->ActiveTab()) {
         cloneView = s.pane->ActiveTab()->view_mode;
         cloneColumns = s.pane->ActiveTab()->details_column_dividers;
+        cloneColumnLayout = s.pane->ActiveTab()->details_columns;
         cloneSearchColumns = s.pane->ActiveTab()->search_column_dividers;
     }
     while (Panes(s).size() < n) {
@@ -1878,6 +1908,7 @@ void ApplyLayoutPreset(AppState& s, app::LayoutPreset preset) {
         if (tab) {
             tab->view_mode = cloneView;
             tab->details_column_dividers = cloneColumns;
+            tab->details_columns = cloneColumnLayout;
             tab->search_column_dividers = cloneSearchColumns;
         }
         Panes(s).push_back(std::move(p));
@@ -1943,7 +1974,9 @@ void SortBy(AppState& s, ui::SortColumn col) {
     SetSort(s, col, direction);
 }
 void RememberFolderColumns(AppState& s, const app::Tab& tab) {
-    if (s.appPrefs.folder_views.SetColumns(tab.current_path, tab.details_column_dividers)) s.appPrefs.Save();
+    const bool widths = s.appPrefs.folder_views.SetColumns(tab.current_path, tab.details_column_dividers);
+    const bool layout = s.appPrefs.folder_views.SetColumnLayout(tab.current_path, tab.details_columns);
+    if (widths || layout) s.appPrefs.Save();
 }
 
 void SetGroup(AppState& s, ui::GroupMode mode, ui::SortDirection direction) {
@@ -2013,6 +2046,26 @@ void OpenSelected(AppState& s) {
     if(DeferContentSelection(s,[=](AppState& v){OpenSelected(v);})) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot) return;
+    const auto selected = tab->SelectedIndices();
+    if (selected.size() == 1) {
+        const auto& row = tab->EntryAt(static_cast<size_t>(selected.front()));
+        if (fs::IsLibraryPath(row.full_path)) {
+            NavigateTo(s, row.full_path, ui::SurfaceMotion::Forward);
+            return;
+        }
+    }
+    if (std::any_of(selected.begin(), selected.end(), [&](int index) {
+            return fs::IsShellItemEntry(tab->EntryAt(static_cast<size_t>(index)));
+        })) {
+        std::vector<std::wstring> ids;
+        for (const auto index : selected) {
+            const auto& row = tab->EntryAt(static_cast<size_t>(index));
+            if (!row.shell_id.empty()) ids.push_back(row.shell_id);
+            else if (!row.is_dir) ids.push_back(EntryFullPath(*tab, index));
+        }
+        app::QueueDeviceOperation(s, L"open", std::move(ids));
+        return;
+    }
     if (app::HasDeviceSelection(*tab)) {
         if (tab->SelectedCount() == 1) {
             const auto& row = tab->EntryAt(static_cast<size_t>(tab->SelectedIndices().front()));
@@ -2049,7 +2102,9 @@ void OpenSelected(AppState& s) {
             return;
         }
         std::wstring full = EntryFullPath(*tab, indices[0]);
-        if (e.is_dir) NavigateTo(s, full, motion);
+        if (fs::IsLibraryPath(std::wstring(fs::kLibraryPrefix) + full))
+            NavigateTo(s, std::wstring(fs::kLibraryPrefix) + full, motion);
+        else if (e.is_dir) NavigateTo(s, full, motion);
         else if (ops::IsArchivePath(full)) NavigateTo(s, ArchiveViewPath(full), motion);
         else {
             OpenFileInCurrentView(s, full);
@@ -2079,6 +2134,15 @@ void OpenSelected(AppState& s) {
 void GoUp(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
+    if (fs::IsShellNamespacePath(tab->current_path)) {
+        NavigateTo(s, fs::ShellNamespaceParent(tab->current_path), ui::SurfaceMotion::Backward);
+        return;
+    }
+    if (!fs::IsVirtualPath(tab->current_path) && !tab->back_stack.empty() &&
+        fs::IsLibraryPath(tab->back_stack.top().path)) {
+        NavigateTo(s, tab->back_stack.top().path, ui::SurfaceMotion::Backward);
+        return;
+    }
     if (app::IsDeviceTab(tab)) {
         NavigateTo(s, app::DeviceParent(tab->current_path), ui::SurfaceMotion::Backward);
         return;

@@ -15,7 +15,8 @@ using H = ui::HitTestResult;
 bool IsSetting(H::Region region) {
     return (region >= H::SettingsContentIndex && region <= H::SettingsContentAction) ||
         (region >= H::SettingsNav && region <= H::SettingsDupDeleteAll) ||
-        region == H::SettingsWallpaperLook || region == H::SettingsWallpaperBlur;
+        region == H::SettingsWallpaperLook || region == H::SettingsWallpaperBlur || region == H::SettingsShortcut ||
+        region == H::SettingsHomeQuickAccess;
 }
 
 bool SameControl(const H& a, const H& b) {
