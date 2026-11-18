@@ -689,6 +689,7 @@ struct WindowViewModel {
     bool settings_take_over_win_e = false;
     bool settings_take_over_this_pc = false;
     bool settings_explorer_takeover = false;
+    bool settings_file_dialog_takeover = false;
     bool settings_file_dialog_bridge = false;
     bool settings_system_pending = false;
     std::wstring settings_system_status;

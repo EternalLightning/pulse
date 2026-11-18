@@ -67,7 +67,7 @@ public:
     Compositor();
     ~Compositor();
 
-    bool Init(HWND hwnd);
+    bool Init(HWND hwnd, bool software_device = false);
     const std::wstring& InitializationError() const { return initialization_error_; }
     void Shutdown();
     void Resize(int width, int height);
@@ -185,6 +185,7 @@ private:
     HMONITOR text_params_monitor_ = nullptr;
     int text_params_mode_ = -1;
     bool transparentComposition_ = false;
+    bool software_device_ = false;
     bool device_lost_ = false;
     bool animation_frames_paused_ = true;
     bool show_transition_pending_ = false;

@@ -15,6 +15,7 @@
 #include <shellscalingapi.h>
 #include <shlobj.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 
@@ -57,10 +58,11 @@ bool Compositor::IsDeviceLost(HRESULT hr) {
            hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DRIVER_INTERNAL_ERROR;
 }
 
-bool Compositor::Init(HWND hwnd) {
+bool Compositor::Init(HWND hwnd, bool software_device) {
     initialization_error_.clear();
     animation_frames_paused_ = true;
     hwnd_ = hwnd;
+    software_device_ = software_device;
     device_lost_ = false;
     if (!InitD3D()) return false;
     RECT rc;
@@ -130,7 +132,8 @@ bool Compositor::InitD3D() {
     };
     // Windows on this UI thread share bitmap resource domains, while their
     // targets, text formats, DPI and LumaText renderers remain independent.
-    static thread_local SharedGraphics shared;
+    static thread_local std::array<SharedGraphics, 2> devices;
+    auto& shared = devices[software_device_];
     const auto retain = []<typename T>(ComPtr<T>& destination, T* source) {
         destination.reset();
         destination.p = source;
@@ -148,10 +151,12 @@ bool Compositor::InitD3D() {
         flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
         D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1 };
-        hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
-            levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
-            &d3dDevice_, nullptr, nullptr);
-        if (FAILED(hr)) {
+        if (!software_device_) {
+            hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
+                levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
+                &d3dDevice_, nullptr, nullptr);
+        }
+        if (software_device_ || FAILED(hr)) {
             hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags,
                 levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
                 &d3dDevice_, nullptr, nullptr);
@@ -684,7 +689,7 @@ bool Compositor::Recover() {
     const HWND hwnd = hwnd_;
     if (!hwnd) return false;
     Shutdown();
-    if (!Init(hwnd)) {
+    if (!Init(hwnd, software_device_)) {
         device_lost_ = true;
         return false;
     }

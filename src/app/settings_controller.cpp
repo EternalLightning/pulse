@@ -532,7 +532,7 @@ void SettingsController::ToggleUi(int index) {
     } else if (index == 2) {
         prefs_->keep_running_on_close = !prefs_->keep_running_on_close;
         SaveAndApply(SettingsEffect::TrayVisibility);
-    } else if (index == 21 || index == 24 || index == 38) {
+    } else if (index == 21 || index == 24 || index == 37 || index == 38) {
         if (ui_.toggle_system_integration) ui_.toggle_system_integration(index);
     } else if (index == 4) {
         prefs_->show_status_performance = !prefs_->show_status_performance;

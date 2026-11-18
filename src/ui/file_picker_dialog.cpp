@@ -251,6 +251,7 @@ public:
             width, height, nullptr, nullptr, instance, this)) return false;
         const int measured_width = std::clamp(MinimumTrackWidth(), width, std::max(width, work_width));
         CenterOwnedWindow(window_, source, measured_width, height);
+        if (spec_.should_close && spec_.should_close()) return false;
         if (!SetTimer(window_, kWatchTimer, 80, nullptr)) return false;
         StartLoad(spec_.initial_path);
         ShowDialogWithFade(window_);
@@ -1012,7 +1013,7 @@ private:
         }
         switch (message) {
         case WM_CREATE:
-            if (!compositor_.Init(window_)) return -1;
+            if (!compositor_.Init(window_, spec_.software_device)) return -1;
             compositor_.RecreateTextFormats(scale_);
             painter_.SetCompositor(&compositor_);
             painter_.SetScale(scale_);

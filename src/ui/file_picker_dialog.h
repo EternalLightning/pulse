@@ -40,6 +40,7 @@ struct FilePickerSpec {
     size_t filter_index = 0;
     bool allow_multiselect = false;
     bool show_hidden = false;
+    bool software_device = false;
 
     // Callback work must be nonblocking. An index of zero is the first filter.
     std::function<bool(const FilePickerResult&)> begin_submit;

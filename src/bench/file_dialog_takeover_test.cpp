@@ -10,6 +10,7 @@
 #include <wrl/client.h>
 #include <cstdio>
 #include <atomic>
+#include <bit>
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -56,8 +57,13 @@ int NativeFixture(const std::wstring& directory, bool fallback) {
     {
         ComPtr<IFileOpenDialog> dialog;
         ComPtr<IShellItem> folder;
+        using Entry = HRESULT (WINAPI*)(REFCLSID, REFIID, void**);
+        const HMODULE system_dialog = LoadLibraryExW(L"comdlg32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        const auto entry = system_dialog ? std::bit_cast<Entry>(GetProcAddress(system_dialog, "DllGetClassObject")) : nullptr;
+        ComPtr<IClassFactory> factory;
         const COMDLG_FILTERSPEC filters[] = {{L"Text files (*.txt)", L"*.txt"}};
-        if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))) &&
+        if (entry && SUCCEEDED(entry(CLSID_FileOpenDialog, IID_PPV_ARGS(&factory))) &&
+            SUCCEEDED(factory->CreateInstance(nullptr, IID_PPV_ARGS(&dialog))) &&
             SUCCEEDED(SHCreateItemFromParsingName(directory.c_str(), nullptr, IID_PPV_ARGS(&folder))) &&
             SUCCEEDED(dialog->SetOptions(FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_DONTADDTORECENT)) &&
             SUCCEEDED(dialog->SetFileTypes(1, filters)) && SUCCEEDED(dialog->SetFolder(folder.Get())) &&
@@ -159,7 +165,10 @@ bool WatcherCase(const std::wstring& folder, bool fallback) {
         GetExitCodeProcess(process.Get(), &status);
         if (status) std::printf("[DIAG] native fixture exit=%lu\n", status);
     }
-    return success && status == 0;
+    watcher.Stop();
+    const bool stopped = WaitFor([&] { return watcher.StoppedForTesting(); }, 5000);
+    if (!stopped) std::puts("[DIAG] foreground observer did not stop");
+    return success && status == 0 && stopped;
 }
 
 bool BridgeCase(const std::wstring& directory, const std::filesystem::path& pulse, bool save) {

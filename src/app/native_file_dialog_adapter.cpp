@@ -633,11 +633,10 @@ bool NativeDialogStillMatches(const NativeFileDialog& dialog) {
         (!dialog.filter_window || IsSourceControl(dialog.filter_window, dialog, L"ComboBox"));
 }
 
-bool CommitNativeDialogSelection(const NativeFileDialog& dialog,
-    const std::vector<std::wstring>& paths, size_t filter_index, std::wstring& reason,
-    const std::function<bool()>& cancelled, bool* confirmation_attempted) {
+bool PrepareNativeDialogSelection(const NativeFileDialog& dialog, const std::vector<std::wstring>& paths,
+    size_t filter_index, NativeFileDialog& prepared, std::wstring& reason,
+    const std::function<bool()>& cancelled) {
     reason.clear();
-    if (confirmation_attempted) *confirmation_attempted = false;
     if (Cancelled(cancelled, reason)) return false;
     NativeFileDialog current;
     if (!InspectNativeFileDialog(dialog.window, current, reason)) return false;
@@ -656,7 +655,6 @@ bool CommitNativeDialogSelection(const NativeFileDialog& dialog,
     if (!WriteFilename(current, text, reason, cancelled))
         return false;
     if (Cancelled(cancelled, reason)) return false;
-    NativeFileDialog prepared;
     if (!InspectNativeFileDialog(current.window, prepared, reason)) return false;
     if (!SameIdentity(current, prepared)) return Fail(reason, L"回填后窗口或控件身份发生变化。");
     if (!SameFilters(current.filters, prepared.filters)) return Fail(reason, L"回填后文件类型列表发生变化。");
@@ -664,22 +662,32 @@ bool CommitNativeDialogSelection(const NativeFileDialog& dialog,
     if (prepared.filter_index != filter_index) return Fail(reason, L"回填后原生文件类型选中项发生变化。");
     if (paths.size() > 1 && (!prepared.allow_multiselect || !SameDirectory(current.initial_path, prepared.initial_path)))
         return Fail(reason, L"The native current directory or multiselection support changed.");
-    if (!IsWindowEnabled(current.confirm_window)) return Fail(reason, L"回填后原生确认按钮不可用。");
-    if (current.kind == NativeDialogKind::Folder && !current.legacy_folder) {
+    return true;
+}
+
+bool ConfirmNativeDialogSelection(const NativeFileDialog& prepared, std::wstring& reason,
+    const std::function<bool()>& cancelled, bool& confirmation_attempted) {
+    confirmation_attempted = false;
+    if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(prepared, reason)) return false;
+    std::wstring filename;
+    DWORD_PTR filter = 0;
+    if (!WindowText(prepared.filename_window, filename) || filename != prepared.filename ||
+        (prepared.filter_window && (!Send(prepared.filter_window, CB_GETCURSEL, 0, 0, filter) || filter != prepared.filter_index)))
+        return Fail(reason, L"The native filename or filter changed before confirmation.");
+    if (prepared.kind == NativeDialogKind::Folder && !prepared.legacy_folder) {
         // The provider submits the typed folder. A bare BN_CLICKED can navigate there instead.
         ComPtr<IUIAutomation> automation;
         if (!Automation(automation, reason)) return false;
-        auto button = Element(automation.Get(), current.confirm_window);
+        auto button = Element(automation.Get(), prepared.confirm_window);
         ComPtr<IUIAutomationInvokePattern> invoke;
         if (!button || FAILED(button->GetCurrentPatternAs(UIA_InvokePatternId, IID_PPV_ARGS(&invoke))))
             return Fail(reason, L"The native folder confirmation has no invoke pattern.");
-        if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(current, reason)) return false;
-        if (confirmation_attempted) *confirmation_attempted = true;
+        if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(prepared, reason)) return false;
+        confirmation_attempted = true;
         return SUCCEEDED(invoke->Invoke()) || Fail(reason, L"The native folder confirmation could not be invoked.");
     }
-    const bool queued = PostButtonCommand(current, current.confirm_window, IDOK, reason, cancelled);
-    if (confirmation_attempted) *confirmation_attempted = queued;
-    return queued;
+    confirmation_attempted = PostButtonCommand(prepared, prepared.confirm_window, IDOK, reason, cancelled);
+    return confirmation_attempted;
 }
 
 bool CancelNativeDialog(const NativeFileDialog& dialog, std::wstring& reason,

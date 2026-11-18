@@ -477,8 +477,7 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         l.startup_row[2]=toggle_row(I::SettingsDefaultManagerDesc);
         l.explorer_takeover_row=toggle_row(I::SettingsExplorerTakeoverDesc);
         l.file_dialog_bridge_row=toggle_row(I::SettingsFileDialogBridgeDesc);
-        l.file_dialog_takeover_row=row(SettingsToggleHeight(right-left,
-            l10n::Get(I::SettingsFileDialogTakeoverDesc), scale, painter, 16.0f)/scale);
+        l.file_dialog_takeover_row=toggle_row(I::SettingsFileDialogTakeoverDesc);
         if(!vm.settings_system_pending && !vm.settings_system_status.empty())
             l.system_status=row((SettingsCaptionHeight(vm.settings_system_status, right-left-70*scale,
                 scale, painter)+2*kSettingsRowPaddingDip*scale)/scale);

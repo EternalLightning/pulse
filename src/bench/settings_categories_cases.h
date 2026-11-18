@@ -26,6 +26,13 @@ int RunSettingsCategories() {
         ++checks;
         if(!ok) { ++failures; std::cout<<"[FAIL] "<<label<<'\n'; }
     };
+    app::AppPrefs migrated;
+    check(migrated.FromJson(LR"({"experimental_file_dialog_takeover":true})") &&
+        !migrated.foreground_file_dialog_takeover, "previous takeover setting cannot opt in to the foreground observer");
+    migrated.foreground_file_dialog_takeover = true;
+    app::AppPrefs reloaded;
+    check(reloaded.FromJson(migrated.ToJson()) && reloaded.foreground_file_dialog_takeover,
+        "a fresh foreground observer opt-in survives a configuration round trip");
     auto owned=std::make_unique<AppState>();
     auto& state=*owned;
     state.isolatedTest=true;state.shot.active=true;
@@ -67,6 +74,7 @@ int RunSettingsCategories() {
         {7,&ui::SettingsLayout::window_size_lock_row,H::SettingsToggle,34,I::SettingsLockWindowSize},
         {8,&ui::SettingsLayout::explorer_takeover_row,H::SettingsToggle,24,I::SettingsExplorerTakeover},
         {8,&ui::SettingsLayout::file_dialog_bridge_row,H::SettingsToggle,38,I::SettingsFileDialogBridge},
+        {8,&ui::SettingsLayout::file_dialog_takeover_row,H::SettingsToggle,37,I::SettingsFileDialogTakeover},
         {8,&ui::SettingsLayout::text_compare_row,H::None,0,I::SettingsTextCompare},
         {8,&ui::SettingsLayout::startup_tray_row,H::SettingsToggle,31,I::StartToTray},
         {9,&ui::SettingsLayout::staging_tray_row,H::SettingsToggle,36,I::SettingsStagingTray},
@@ -143,13 +151,6 @@ int RunSettingsCategories() {
                 const I titles[]={I::ListSmartDate,I::ListZebraRows,I::ListSizeBar};
                 for(int i=0;i<3;++i) segments.push_back({layout.list_style_row[i],H::SettingsToggle,17+i,titles[i]});
             } else if(page==8) {
-                const auto paused = layout.file_dialog_takeover_row;
-                vm.settings_scroll = std::max(0.0f, paused.top-layout.content.top-24*scale);
-                const auto visible = ui::MakeSettingsLayout(vm, rect, scale, state.renderer.TitleBarHeight(), 28*scale, &measuring);
-                const auto row = visible.file_dialog_takeover_row;
-                const auto hit = state.renderer.HitTest(vm, rect, (row.left+row.right)/2, (row.top+row.bottom)/2);
-                check(row.bottom>row.top && row.top>=visible.content.top && row.bottom<=visible.content.bottom &&
-                    hit.region!=H::SettingsToggle, "paused file dialog takeover is visible and has no activation target");
                 segments={{layout.startup_row[0],H::SettingsToggle,1,I::SettingsLaunch},
                     {layout.startup_row[1],H::SettingsToggle,2,I::SettingsKeepRunning},
                     {layout.startup_row[2],H::SettingsToggle,21,I::SettingsDefaultManager},

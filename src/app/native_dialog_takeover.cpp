@@ -12,7 +12,7 @@
 #include <cstdint>
 #include <mutex>
 #include <optional>
-#include <set>
+#include <map>
 #include <thread>
 #include <utility>
 
@@ -20,9 +20,15 @@ namespace pulse::app {
 namespace {
 using I = l10n::StringId;
 constexpr DWORD kPollMs = 60;
+constexpr DWORD kIdlePollMs = 120;
 constexpr ULONGLONG kSettleMs = 150;
 constexpr ULONGLONG kInspectUntilMs = 900;
 constexpr ULONGLONG kConfirmationMs = 8000;
+
+struct AutomationApartment {
+    const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ~AutomationApartment() { if (SUCCEEDED(result)) CoUninitialize(); }
+};
 
 struct Appearance {
     bool dark = false;
@@ -78,10 +84,6 @@ bool DialogCandidate(HWND window, DWORD source_process = 0) {
         !dialog_bridge::HasNativeFallback(pid);
 }
 
-BOOL CALLBACK RememberVisibleDialog(HWND window, LPARAM data) {
-    if (DialogCandidate(window)) reinterpret_cast<std::set<HWND>*>(data)->insert(window);
-    return TRUE;
-}
 } // namespace
 
 struct NativeDialogTakeover::Shared {
@@ -93,6 +95,7 @@ struct NativeDialogTakeover::Shared {
     std::atomic<bool> stopped{false};
     std::atomic<bool> watcher_failed{false};
     std::atomic<bool> ready{false};
+    std::atomic<bool> exited{false};
     std::atomic<HWND> fixture_foreground{nullptr};
     std::mutex appearance_mutex;
     Appearance appearance;
@@ -147,6 +150,7 @@ void RunPicker(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
         spec.filter_index = source.filter_index;
         spec.allow_multiselect = source.allow_multiselect;
         spec.show_hidden = appearance.show_hidden;
+        spec.software_device = true;
         spec.begin_submit = [&](const ui::FilePickerResult& result) {
             return QueueAction(shared, session, {false, result});
         };
@@ -156,7 +160,8 @@ void RunPicker(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
             return std::exchange(session->reply, std::nullopt);
         };
         spec.should_close = [&] {
-            return !IsCurrent(*shared, *session) || !SourceOpen(source);
+            return !IsCurrent(*shared, *session) || !SourceOpen(source) ||
+                (!session->picker && ForegroundForObservation(*shared) != source.window);
         };
         spec.on_ready = [&](HWND picker) {
             session->picker = picker;
@@ -216,10 +221,25 @@ void ServiceSession(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
     };
     bool attempted = false;
     std::wstring reason;
-    const bool sent = request->cancel
-        ? CancelNativeDialog(session.source, reason, cancelled)
-        : CommitNativeDialogSelection(session.source, request->selection.paths,
-            request->selection.filter_index, reason, cancelled, &attempted);
+    bool sent = false;
+    if (request->cancel) {
+        sent = CancelNativeDialog(session.source, reason, cancelled);
+    } else {
+        NativeFileDialog prepared;
+        bool ready = false;
+        {
+            const AutomationApartment apartment;
+            ready = SUCCEEDED(apartment.result) && PrepareNativeDialogSelection(session.source,
+                request->selection.paths, request->selection.filter_index, prepared, reason, cancelled);
+        }
+        // Release accessibility providers while the native app still owns the dialog.
+        if (ready && prepared.kind == NativeDialogKind::Folder && !prepared.legacy_folder) {
+            const AutomationApartment apartment;
+            sent = SUCCEEDED(apartment.result) && ConfirmNativeDialogSelection(prepared, reason, cancelled, attempted);
+        } else if (ready) {
+            sent = ConfirmNativeDialogSelection(prepared, reason, cancelled, attempted);
+        }
+    }
     if (sent || attempted) {
         session.confirmation_deadline = GetTickCount64() + kConfirmationMs;
     } else if (!cancelled()) {
@@ -227,113 +247,82 @@ void ServiceSession(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
     }
 }
 
-struct Observer {
-    explicit Observer(NativeDialogTakeover::Shared& state) : shared(state) {}
-
-    NativeDialogTakeover::Shared& shared;
-    std::set<HWND> handled;
+void WatchDialogs(const std::shared_ptr<NativeDialogTakeover::Shared>& shared) {
     HWND candidate = nullptr;
     ULONGLONG observed = 0;
     ULONGLONG retry_at = 0;
-    bool presenting = false;
-};
-thread_local Observer* observer = nullptr;
-
-void ObserveWindow(DWORD event, HWND window, LONG object, LONG child) {
-    if (!observer || !IsEnabled(observer->shared) || !window ||
-        (event != EVENT_SYSTEM_FOREGROUND && (object != OBJID_WINDOW || child != CHILDID_SELF))) return;
-    if (event == EVENT_OBJECT_DESTROY || event == EVENT_OBJECT_HIDE) {
-        observer->handled.erase(window);
-        if (observer->candidate == window) observer->candidate = nullptr;
-        return;
-    }
-    if (ForegroundForObservation(observer->shared) != window || !DialogCandidate(window, observer->shared.source_process) ||
-        observer->handled.contains(window) || observer->candidate == window) return;
-    if (observer->presenting || (GetAsyncKeyState(VK_SHIFT) & 0x8000)) {
-        observer->handled.insert(window);
-        return;
-    }
-    observer->candidate = window;
-    observer->observed = GetTickCount64();
-    observer->retry_at = observer->observed + kSettleMs;
-}
-
-void CALLBACK OnWindow(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD) {
-    ObserveWindow(event, window, object, child);
-}
-
-void WatchDialogs(const std::shared_ptr<NativeDialogTakeover::Shared>& shared) {
-    const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(com)) { shared->watcher_failed = true; return; }
-    Observer state{*shared};
-    observer = &state;
-    const DWORD flags = WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS;
-    const auto foreground = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
-        OnWindow, shared->source_process, 0, flags);
-    const auto objects = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, nullptr,
-        OnWindow, shared->source_process, 0, flags);
-    if (!foreground || !objects) shared->watcher_failed = true;
+    std::map<HWND, DWORD> handled;
+    const auto remember = [&](HWND window) {
+        if (const DWORD thread = GetWindowThreadProcessId(window, nullptr))
+            handled.insert_or_assign(window, thread);
+    };
     std::shared_ptr<Session> session;
+    std::thread picker_thread;
     uint64_t observed_generation = 0;
-    HWND fixture_observed = nullptr;
     while (!shared->stopped && !shared->watcher_failed) {
         const uint64_t generation = shared->generation.load();
         const bool enabled = (generation & 1u) != 0;
         if (generation != observed_generation) {
-            state.candidate = nullptr;
-            state.handled.clear();
-            if (enabled) EnumWindows(RememberVisibleDialog, reinterpret_cast<LPARAM>(&state.handled));
+            candidate = nullptr;
+            handled.clear();
+            const HWND current = ForegroundForObservation(*shared);
+            if (enabled && DialogCandidate(current, shared->source_process)) remember(current);
             if (session) session->finishing = true;
             observed_generation = generation;
             shared->ready = enabled;
         }
-        MSG message{};
-        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-        if (const HWND fixture = shared->fixture_foreground.load(); fixture && fixture != fixture_observed) {
-            fixture_observed = fixture;
-            ObserveWindow(EVENT_SYSTEM_FOREGROUND, fixture, OBJID_WINDOW, CHILDID_SELF);
-        }
         if (session && session->returned) {
-            state.presenting = false;
+            if (picker_thread.joinable()) picker_thread.join();
             session.reset();
         }
-        if (enabled && IsEnabled(*shared) && session) {
-            ServiceSession(shared, *session);
-        } else if (enabled && IsEnabled(*shared) && state.candidate) {
+        if (enabled && IsEnabled(*shared)) {
+            std::erase_if(handled, [](const auto& entry) {
+                return !IsWindowVisible(entry.first) || GetWindowThreadProcessId(entry.first, nullptr) != entry.second;
+            });
+            if (session) ServiceSession(shared, *session);
             const auto now = GetTickCount64();
-            const HWND source = state.candidate;
-            if (!DialogCandidate(source, shared->source_process)) {
-                state.candidate = nullptr;
-            } else if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) ||
-                now - state.observed >= kInspectUntilMs) {
-                state.handled.insert(source);
-                state.candidate = nullptr;
-            } else if (ForegroundForObservation(*shared) == source && now >= state.retry_at) {
+            const HWND source = ForegroundForObservation(*shared);
+            if (session || handled.contains(source) || !DialogCandidate(source, shared->source_process)) {
+                candidate = nullptr;
+            } else {
+                if (source != candidate) {
+                    candidate = source;
+                    observed = now;
+                    retry_at = now + kSettleMs;
+                }
+                if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) || now - observed >= kInspectUntilMs) {
+                    remember(source);
+                    candidate = nullptr;
+                }
+            }
+            if (candidate && now >= retry_at) {
                 NativeFileDialog dialog;
                 std::wstring reason;
-                if (InspectNativeFileDialog(source, dialog, reason)) {
-                    state.candidate = nullptr;
-                    state.handled.insert(source);
+                bool recognized = false;
+                {
+                    const AutomationApartment apartment;
+                    if (FAILED(apartment.result)) { shared->watcher_failed = true; break; }
+                    recognized = InspectNativeFileDialog(source, dialog, reason);
+                }
+                if (recognized) {
+                    candidate = nullptr;
+                    remember(source);
                     if (ForegroundForObservation(*shared) == source && shared->generation == generation && IsEnabled(*shared)) {
                         session = std::make_shared<Session>(std::move(dialog), generation);
-                        state.presenting = true;
-                        try { std::thread(RunPicker, shared, session).detach(); }
+                        try { picker_thread = std::thread(RunPicker, shared, session); }
                         catch (...) { session->returned = true; }
                     }
-                } else state.retry_at = GetTickCount64() + kSettleMs;
+                } else retry_at = now + kSettleMs;
             }
         }
-        const DWORD timeout = (session || state.candidate) ? kPollMs : INFINITE;
-        MsgWaitForMultipleObjects(1, &shared->wake, FALSE, timeout, QS_ALLINPUT);
+        const DWORD timeout = session || candidate ? kPollMs : enabled ? kIdlePollMs : INFINITE;
+        WaitForSingleObject(shared->wake, timeout);
     }
-    if (session) session->finishing = true;
-    if (objects) UnhookWinEvent(objects);
-    if (foreground) UnhookWinEvent(foreground);
-    observer = nullptr;
-    CoUninitialize();
+    if (session) {
+        session->finishing = true;
+        if (picker_thread.joinable()) picker_thread.join();
+    }
+    shared->exited = true;
 }
 } // namespace
 
@@ -352,6 +341,11 @@ bool NativeDialogTakeover::StartForTesting(DWORD source_process) {
 bool NativeDialogTakeover::ReadyForTesting() const {
     std::lock_guard lock(mutex_);
     return shared_ && shared_->source_process && shared_->ready;
+}
+
+bool NativeDialogTakeover::StoppedForTesting() const {
+    std::lock_guard lock(mutex_);
+    return !shared_ || shared_->exited;
 }
 
 bool NativeDialogTakeover::ObserveForTesting(HWND source) {

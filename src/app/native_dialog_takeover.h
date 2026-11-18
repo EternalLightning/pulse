@@ -24,6 +24,7 @@ public:
     // The integration fixture watches only its own child process.
     bool StartForTesting(DWORD source_process);
     bool ReadyForTesting() const;
+    bool StoppedForTesting() const;
     bool ObserveForTesting(HWND source);
     struct Shared;
 

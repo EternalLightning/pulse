@@ -35,17 +35,18 @@ struct NativeFileDialog {
     bool legacy_folder = false;
 };
 
-// Inspect and commit on a COM-initialized worker on the source desktop.
+// Inspect and prepare on a COM-initialized worker on the source desktop.
 // The caller verifies foreground ownership before opening the replacement.
 bool InspectNativeFileDialog(HWND window, NativeFileDialog& dialog, std::wstring& reason);
 // Window and control identity only. Safe to poll while a native modal prompt is active.
 bool NativeDialogStillMatches(const NativeFileDialog& dialog);
 
-// True means a single confirmation was queued. The native dialog owns validation.
-// The caller serializes submission and stops submitting once confirmation_attempted is true.
-bool CommitNativeDialogSelection(const NativeFileDialog& dialog,
-    const std::vector<std::wstring>& paths, size_t filter_index, std::wstring& reason,
-    const std::function<bool()>& cancelled = {}, bool* confirmation_attempted = nullptr);
+bool PrepareNativeDialogSelection(const NativeFileDialog& dialog, const std::vector<std::wstring>& paths,
+    size_t filter_index, NativeFileDialog& prepared, std::wstring& reason,
+    const std::function<bool()>& cancelled);
+// The native dialog owns validation. A modern folder dialog uses the provider's COM invoke pattern.
+bool ConfirmNativeDialogSelection(const NativeFileDialog& prepared, std::wstring& reason,
+    const std::function<bool()>& cancelled, bool& confirmation_attempted);
 bool CancelNativeDialog(const NativeFileDialog& dialog, std::wstring& reason,
     const std::function<bool()>& cancelled = {});
 
