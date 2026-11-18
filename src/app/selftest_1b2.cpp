@@ -453,27 +453,22 @@ void TestBreadcrumb() {
     cat.persist = false;
     cat.PinWorkspace(L"C:\\local", L"local", 0, { L"C:\\local" });
     cat.PinWorkspace(L"\\\\server\\share", L"nas", 0, { L"\\\\server\\share" });
-    cat.workspaces[1].frequent.push_back({ L"\\\\server\\share\\sub", 3 });
-    pane.view.NavigateTo(L"\\\\server\\share");
+    pane.view.NavigateTo(L"\\\\server\\share\\sub");
     const auto wvm = BuildWindowViewModel(pane, sidebar, true, false, true, &cat, 0);
     const auto workspaces = std::find_if(wvm.sidebar.begin(), wvm.sidebar.end(),
         [](const auto& section) {
             return section.id == static_cast<int>(SidebarSectionId::Workspaces);
         });
-    Check(workspaces != wvm.sidebar.end() && workspaces->items.size() == 3,
-          L"sidebar: workspace group holds both workspaces + frequent child");
-    if (workspaces != wvm.sidebar.end() && workspaces->items.size() == 3) {
+    Check(workspaces != wvm.sidebar.end() && workspaces->items.size() == 2,
+          L"sidebar: workspace group holds only the two pinned workspaces");
+    if (workspaces != wvm.sidebar.end() && workspaces->items.size() == 2) {
         const auto& local = workspaces->items[0];
         const auto& nas = workspaces->items[1];
-        const auto& sub = workspaces->items[2];
         Check(local.badge.empty() && local.icon_glyph == L"\xE8B7",
               L"sidebar: local workspace keeps default glyph, no badge");
         Check(nas.badge == L"当前服务器" && nas.icon_glyph == L"\xE968" &&
               colorIs(nas.icon_color, 0x38BDF8),
               L"sidebar: active UNC workspace shows server badge + network glyph");
-        Check(sub.badge.empty() && sub.icon_glyph == L"\xE968" &&
-              colorIs(sub.icon_color, 0x38BDF8),
-              L"sidebar: UNC frequent child gets network glyph, no badge");
     }
 
     const auto access = BuildSidebarModel();
@@ -4308,14 +4303,6 @@ void TestPlacesAndIndex() {
 
     Check(fs::IsUncPath(L"\\\\server\\share") && !fs::IsUncPath(L"C:\\Users"),
           L"net: UNC detection");
-
-    cat.PinWorkspace(L"C:\\proj", L"proj", 0, { L"C:\\proj" });
-    cat.RecordVisit(L"C:\\proj\\src");
-    cat.RecordVisit(L"C:\\proj\\src");
-    cat.RecordVisit(L"C:\\proj\\docs");
-    auto freq = cat.FrequentChildren(cat.FindWorkspace(L"C:\\proj"), 8);
-    Check(!freq.empty() && freq[0].find(L"src") != std::wstring::npos,
-          L"places: frequent child is most visited");
 
     Pane pane;
     pane.NewTab(L"C:\\proj");

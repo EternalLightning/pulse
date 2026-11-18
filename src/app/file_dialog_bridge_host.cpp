@@ -3,6 +3,7 @@
 // Host transport adapted from jimmgreen/pulse b32436831a066e18448b2810bef4bf989024fc68.
 
 #include "file_dialog_bridge_host.h"
+#include "file_picker_places.h"
 #include "app_commands.h"
 #include "app_prefs.h"
 #include "../common/localization.h"
@@ -201,6 +202,7 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner,
     for (const auto& filter : request.filters) spec.filters.push_back({Wide(filter.label), Wide(filter.pattern)});
     spec.allow_multiselect = (request.options & wire::AllowMultiSelect) != 0;
     spec.show_hidden = prefs.show_hidden_files || (request.options & wire::ShowHidden);
+    spec.load_places = LoadFilePickerPlaces;
     bool use_windows = false;
     bool active_prompt = false;
     HWND picker = nullptr;

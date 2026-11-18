@@ -435,13 +435,6 @@ bool HorizontalScrollbarGeometry(const AppState& s, const ui::PaneViewModel& pan
     return true;
 }
 
-void RememberPath(AppState& s, const std::wstring& path) {
-    if (path.empty() || fs::IsVirtualPath(path)) return;
-    std::wstring n = fs::NormalizePath(path);
-    if (n.empty()) return;
-    s.places.RecordVisit(n);
-}
-
 void RecordRecentOpen(AppState& s, const std::wstring& path,
                              app::PlaceItemKind kind) {
     s.places.RecordRecent(path, kind);

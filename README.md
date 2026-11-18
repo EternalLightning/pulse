@@ -4,11 +4,24 @@
 
 Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和批量文件操作放在同一个工作空间。
 
-本仓库提供基于 Pulse 的独立修改发行版，由 EternalLightning 维护，不代表原项目的官方发行。原项目由 jimmgreen 及其贡献者开发，原作者仓库：[jimmgreen/pulse](https://github.com/jimmgreen/pulse)。
+本仓库是 Pulse 的独立修改发行版，由 EternalLightning 维护。原项目由 jimmgreen 及其贡献者开发。[上游仓库](https://github.com/jimmgreen/pulse) · [版本差异](#与上游-pulse-的区别) · [来源与许可证](#来源与许可证)
 
-本项目自身的代码、脚本和文档采用 [Apache License 2.0](LICENSE)，发行版来源与修改说明见 [NOTICE](NOTICE)。第三方代码、图标、商标和运行库遵循各自条款，详见[第三方声明](THIRD_PARTY_NOTICES.md)。安装包与免安装包均附带许可证文件。
+[下载与历史版本](https://github.com/EternalLightning/pulse/releases) · [反馈问题](https://github.com/EternalLightning/pulse/issues)
 
-[反馈问题](https://github.com/EternalLightning/pulse/issues)
+![Pulse 外观](docs/images/appearance.png)
+
+## 与上游 Pulse 的区别
+
+比较基于本仓库 `1.5.5.0` 与上游 `main` 的 `b324368`。两个仓库独立编号。[上游 README](https://github.com/jimmgreen/pulse/blob/b32436831a066e18448b2810bef4bf989024fc68/README.md)
+
+| 功能 | 本发行版 | 上游 Pulse |
+| --- | --- | --- |
+| 系统与更新 | 面向 Windows 10 / 11 x64，提供安装包和免安装 ZIP，从本仓库 Releases 手动下载更新。 | 另提供 Windows 8.1 x64 兼容安装包，支持在应用内检查、下载和安装更新。 |
+| 正文搜索与压缩包 | 随包提供文档提取程序、PDFium 和 7-Zip。可搜索受支持文件的正文，也可浏览和解压 ZIP、7z、RAR。 | 正文搜索使用按需增强包。内置 ZIP 预览，7z、RAR 需要另行安装并启用原生压缩包插件。 |
+| 会话恢复 | 启动时保留窗口偏好，导航从新会话开始。 | 自动更新后可恢复保存的窗口会话。 |
+| 首页、别名与工具栏 | 首页卡片可独立配置，有 Windows 库、控制面板和应用程序入口。用 `@work` 形式的文件夹路径别名跳转，窗格标题栏单独提供查看菜单。 | 文件和文件夹均可设置显示别名，支持集中管理和导入导出。工具栏可固定命令或程序并加入分隔线。 |
+| 文件选择对话框 | Shell 桥接与前台兼容接管可分别启用。兼容接管默认关闭，打开窗口时可按住 Shift 跳过。 | 提供实验性的打开与保存对话框接管，场景不受支持时保留 Windows 原生界面。 |
+| 助手与扩展 | — | 提供 Pulse 助手和开发预览阶段的原生插件 SDK，外部 MCP 客户端可通过单独的 AI 增强包连接。 |
 
 ## 让工作空间适合你
 
@@ -72,14 +85,14 @@ Pulse 将多窗口、多标签、多窗格、文件与正文搜索、预览和�
 - 在「设置 → 启动与集成」可分别打开文件选择窗口的 Shell 桥接和兼容接管。兼容接管只识别前台的标准 Windows 对话框，默认关闭。打开时按住 Shift 可跳过，也可在选择器中切回 Windows 对话框。
 - 文件列表获得焦点时，按 A–Z 选中名称以对应字母开头的第一项，继续按同一个字母会按当前显示顺序循环。
 - 右键菜单合并资源管理器与 Windows 11 新式菜单项（如 VS Code、Windows Terminal、NanaZip），Pulse 自带项可以隐藏。
-- 支持开机启动到托盘、设置默认位置、启动时恢复上次的标签页。
+- 支持开机启动到托盘、设置默认位置，以及保存和手动恢复具名工作区。
 - 文件被占用时显示占用进程，可以结束进程后重试；「此电脑」显示磁盘类型和容量条。
 
 ![Pulse 设置与系统集成](docs/images/settings.png)
 
 ## 从源码构建
 
-使用 Windows 10 / 11 x64、Visual Studio 2022 v143 C++ 工具及 Windows SDK。构建入口会下载并校验 `scripts/build-tools.lock.json` 固定的 CMake 和 Ninja，缓存于 `.build-tools`。便携包、产物校验与 CI 脚本另需 PowerShell 7.2+（`pwsh`）；安装包需要 Inno Setup 6。
+使用 Windows 10 / 11 x64、Visual Studio 2022 v143 C++ 工具、Windows SDK 和 Python 3.10+。构建入口会下载并校验 `scripts/build-tools.lock.json` 固定的 CMake 和 Ninja，缓存于 `.build-tools`。便携包、产物校验与 CI 脚本另需 PowerShell 7.2+（`pwsh`）。安装包需要 Inno Setup 6。
 
 在仓库根目录运行；脚本会自动查找并初始化 x64 Visual Studio 工具环境：
 
@@ -129,9 +142,9 @@ pwsh -NoProfile -File .\scripts\verify_release_artifacts.ps1 `
 
 ## CI 与正式发布
 
-`scripts/build_release_ci.ps1` 是独立的 Visual Studio 2022 v143 回归与安装包流程，默认目录为 `build-ci`，会运行多项测试，不用于日常增量构建。GitHub Actions 不会自动生成便携包，发布阶段依赖预先上传到对应草稿的 ZIP。`scripts/package_release.ps1` 的签名目录仍固定为 `build`，与当前默认构建目录不一致。
+GitHub Actions 发布时，先向 Release 草稿上传便携 ZIP，再推送与 `version.txt` 匹配的标签，例如 `v1.5.5.0`。工作流运行回归测试、生成安装包，然后将安装包与草稿里的 ZIP 一起发布。签名通过独立的 `scripts/package_release.ps1` 执行，默认使用 `build-release`。[发布工作流](.github/workflows/release.yml) · [发布与签名步骤](scripts/RELEASE.md)
 
-当前可用的本地交付路径以上述构建、安装包和便携包命令为准。CI 的前置条件、现有缺口、签名及上传步骤见[发布流程](scripts/RELEASE.md)；LumaText SDK 固定和静态运行库说明见[运行库与 SDK 文档](docs/static-runtime-packaging.md)。
+源码构建和发行包使用固定的 LumaText SDK。运行库与 SDK 版本的维护方法见[运行库与 SDK 文档](docs/static-runtime-packaging.md)。
 
 技术栈为 C++20、Win32、Direct2D 和 DirectComposition。文件系统、索引、预览与 Shell 任务分别放在对应模块，避免阻塞界面。
 
@@ -139,7 +152,22 @@ pwsh -NoProfile -File .\scripts\verify_release_artifacts.ps1 `
 
 界面开发：[UI 与文字渲染规范](docs/ui-style-guide.md) · [LumaText 覆盖与迁移建议](docs/lumatext-coverage.md)
 
-## 许可证与再分发
+## 来源与许可证
+
+Pulse 的上游代码与本发行版的项目代码、脚本和文档采用 **Apache License 2.0**。第三方代码、图标和运行库适用各自的条款。下表列出代码改编和界面素材的主要来源。[Apache-2.0 全文](LICENSE) · [发行版归属与修改声明](NOTICE)
+
+| 原项目或素材 | 在本发行版中的用法 | 许可证与来源 |
+| --- | --- | --- |
+| jimmgreen/pulse | 文件管理器的上游代码。文件对话框 Shell 桥接、选择器 IPC 和相关验证逻辑也从上游适配。 | Apache-2.0 · [适配时的上游提交](https://github.com/jimmgreen/pulse/tree/b32436831a066e18448b2810bef4bf989024fc68) |
+| chenzai666/pulse | 适配原生文件对话框兼容接管模块。 | Apache-2.0 · [来源提交](https://github.com/chenzai666/pulse/tree/fc6dae4a2737c2bc3014972fb24d30219bd7624f) |
+| Files Community / Files | 应用图标和部分工具栏、窗格与视图图标。工具栏图标从 XAML 转为 SVG，部分图标调整了填色以适应主题。 | 这些素材采用 MIT · [应用图标来源](third_party/files-icon/README.md) · [工具栏图标来源与许可](THIRD_PARTY_NOTICES.md#files-工具栏图标来源) |
+| wangwenx190/d2d-mica | 适配 Direct2D 材质图，用于自定义背景取样、着色和 Mica 效果。 | MIT · [原项目](https://github.com/wangwenx190/d2d-mica) · [适配说明及版权](third_party/d2d-mica/README.pulse.md) |
+| Microsoft Fluent System Icons | 首页图标和部分工具栏图标。 | MIT · [对应 SVG 的来源](assets/fluent/SOURCES.md) · [许可证](assets/fluent/LICENSE) |
+| Microsoft OneDrive 产品图标 | 在检测到的 OneDrive 同步目录旁标识该服务。 | Microsoft Fabric Assets License Agreement · [原始素材及使用范围](assets/microsoft_brand/README.md) · [协议全文](assets/microsoft_brand/LICENSE.pdf) |
+
+拼音数据、SQLite、LumaText、PDFium 和 7-Zip 的来源、许可证及包内位置见[第三方声明](THIRD_PARTY_NOTICES.md)。安装包与免安装 ZIP 均附带项目许可证、归属声明和第三方许可文件。随附的 7-Zip 还带有对应版本的上游源码归档。[7-Zip 版本与源码说明](third_party/7zip/README.md)
+
+### 再分发
 
 Apache-2.0 允许在遵守条款的前提下使用、修改和分发本项目，包括商业使用。分发源码或二进制时，应向接收者提供完整的 `LICENSE`，保留适用的版权、专利、商标及归属声明，并随附 `NOTICE` 中的适用归属信息；修改过的文件应带有醒目的修改声明。仅保留 Git 提交记录不能替代文件内的修改声明。
 

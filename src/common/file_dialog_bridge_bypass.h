@@ -36,4 +36,36 @@ inline bool HasNativeFallback(DWORD process) noexcept {
     return true;
 }
 
+inline void NativeModeName(wchar_t (&name)[96], DWORD process, DWORD thread, HWND owner, bool open) noexcept {
+    swprintf_s(name, L"Local\\Pulse.DialogBridge.NativeMode.%lu.%lu.%llx.%d", process, thread,
+        static_cast<unsigned long long>(reinterpret_cast<ULONG_PTR>(owner)), open ? 1 : 0);
+}
+
+class NativeModeScope {
+public:
+    NativeModeScope(HWND owner, bool open) noexcept {
+        wchar_t name[96]{};
+        NativeModeName(name, GetCurrentProcessId(), GetCurrentThreadId(), owner, open);
+        marker_ = CreateEventW(nullptr, TRUE, TRUE, name);
+    }
+    ~NativeModeScope() { if (marker_) CloseHandle(marker_); }
+    NativeModeScope(const NativeModeScope&) = delete;
+    NativeModeScope& operator=(const NativeModeScope&) = delete;
+private:
+    HANDLE marker_ = nullptr;
+};
+
+inline bool HasNativeOpenMode(DWORD process, DWORD thread, HWND owner) noexcept {
+    const auto has_mode = [&](bool open) {
+        wchar_t name[96]{};
+        NativeModeName(name, process, thread, owner, open);
+        const HANDLE marker = OpenEventW(SYNCHRONIZE, FALSE, name);
+        if (!marker) return false;
+        CloseHandle(marker);
+        return true;
+    };
+    // An overlapping native show with the same owner makes the mode ambiguous.
+    return has_mode(true) && !has_mode(false);
+}
+
 } // namespace pulse::dialog_bridge

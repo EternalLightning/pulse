@@ -24,11 +24,11 @@ void MainRenderer::DrawPaneHeaderIcon(const D2D1_RECT_F& rc, PaneHeaderIcon icon
     case PaneHeaderIcon::MediumIcons: command = I::Grid; break;
     case PaneHeaderIcon::More: command = I::More; break;
     case PaneHeaderIcon::Split: command = I::Split; break;
-    case PaneHeaderIcon::View: command = I::List; break;
+    case PaneHeaderIcon::View: command = I::Details; break;
     case PaneHeaderIcon::Filter: command = I::Filter; break;
     }
     MakeBrush(dc, color, brText_);
-    toolbar_icons::Draw(dc, brText_.get(), paneHeaderStroke_.get(), command, rc, scale_);
+    toolbar_icons::Draw(painter_, dc, brText_.get(), paneHeaderStroke_.get(), command, rc, scale_);
 }
 
 } // namespace pulse::ui

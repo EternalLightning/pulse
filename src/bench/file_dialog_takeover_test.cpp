@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "../app/native_dialog_takeover.h"
 #include "../app/native_file_dialog_adapter.h"
+#include "../app/file_picker_places.h"
 #include "../common/file_dialog_bridge_bypass.h"
 #include "../common/localization.h"
+#include "../common/user_storage.h"
 #include "../ipc/picker_client.h"
 #include "../shell_bridge/file_dialog_wrapper.h"
 
@@ -12,8 +14,10 @@
 #include <cstdio>
 #include <atomic>
 #include <bit>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
 #include <thread>
 
 namespace {
@@ -21,6 +25,17 @@ namespace wire = pulse::ipc::picker;
 using Microsoft::WRL::ComPtr;
 constexpr wchar_t kOpenTitle[] = L"Pulse fixture - window takeover";
 constexpr wchar_t kFallbackTitle[] = L"Pulse fixture - native fallback";
+constexpr wchar_t kCustomConfirmTitle[] = L"Pulse fixture - custom open confirmation";
+
+enum class NativeCase { Open, ExplicitFallback, CustomConfirm };
+
+const wchar_t* NativeTitle(NativeCase test) {
+    switch (test) {
+    case NativeCase::ExplicitFallback: return kFallbackTitle;
+    case NativeCase::CustomConfirm: return kCustomConfirmTitle;
+    default: return kOpenTitle;
+    }
+}
 
 HWND Find(const wchar_t* cls, const wchar_t* title, DWORD expected_process = 0) {
     const HWND window = FindWindowW(cls, title);
@@ -60,7 +75,7 @@ bool WaitFor(Check check, DWORD timeout = 10000) {
     return false;
 }
 
-int NativeFixture(const std::wstring& directory, bool fallback) {
+int NativeFixture(const std::wstring& directory, NativeCase test) {
     if (FAILED(OleInitialize(nullptr))) return 2;
     int result = 1;
     {
@@ -77,7 +92,7 @@ int NativeFixture(const std::wstring& directory, bool fallback) {
             host_called = true;
             wire::Response reply;
             reply.operation = std::get<wire::Request>(request.body).operation;
-            if (fallback) {
+            if (test == NativeCase::ExplicitFallback) {
                 reply.status = wire::Status::UseNative;
             } else {
                 reply.status = wire::Status::Unsupported;
@@ -93,10 +108,11 @@ int NativeFixture(const std::wstring& directory, bool fallback) {
             SUCCEEDED(SHCreateItemFromParsingName(directory.c_str(), nullptr, IID_PPV_ARGS(&folder))) &&
             SUCCEEDED(dialog->SetOptions(FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_DONTADDTORECENT)) &&
             SUCCEEDED(dialog->SetFileTypes(1, filters)) && SUCCEEDED(dialog->SetFolder(folder.Get())) &&
-            SUCCEEDED(dialog->SetTitle(fallback ? kFallbackTitle : kOpenTitle)) &&
+            SUCCEEDED(dialog->SetTitle(NativeTitle(test))) &&
+            (test != NativeCase::CustomConfirm || SUCCEEDED(dialog->SetOkButtonLabel(L"确认"))) &&
             SUCCEEDED(dialog->SetFileName(L"sample.txt"))) {
             const HRESULT shown = dialog->Show(nullptr);
-            if (fallback) {
+            if (test == NativeCase::ExplicitFallback) {
                 result = host_called && shown == HRESULT_FROM_WIN32(ERROR_CANCELLED) ? 0 : 1;
             } else if (host_called && shown == S_OK) {
                 ComPtr<IShellItem> selected;
@@ -113,11 +129,12 @@ int NativeFixture(const std::wstring& directory, bool fallback) {
     return result;
 }
 
-bool WatcherCase(const std::wstring& folder, bool fallback) {
+bool WatcherCase(const std::wstring& folder, NativeCase test) {
     wchar_t executable[MAX_PATH]{};
     if (!GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable))) return false;
-    std::wstring command = L"\"" + std::wstring(executable) + L"\" " +
-        (fallback ? L"--native-fallback" : L"--native") + L" \"" + folder + L"\"";
+    const wchar_t* argument = test == NativeCase::ExplicitFallback ? L"--native-fallback" :
+        test == NativeCase::CustomConfirm ? L"--native-custom-confirm" : L"--native";
+    std::wstring command = L"\"" + std::wstring(executable) + L"\" " + argument + L" \"" + folder + L"\"";
     STARTUPINFOW startup{sizeof(startup)};
     PROCESS_INFORMATION child{};
     if (!CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED,
@@ -128,7 +145,7 @@ bool WatcherCase(const std::wstring& folder, bool fallback) {
         WaitFor([&] { return watcher.ReadyForTesting(); }, 4000);
     AllowSetForegroundWindow(child.dwProcessId);
     ResumeThread(thread.Get());
-    const auto title = fallback ? kFallbackTitle : kOpenTitle;
+    const auto title = NativeTitle(test);
     HWND native = nullptr;
     if (success) success = WaitFor([&] {
         native = Find(L"#32770", title, child.dwProcessId);
@@ -143,7 +160,7 @@ bool WatcherCase(const std::wstring& folder, bool fallback) {
             success = watcher.ObserveForTesting(native);
         }
     }
-    if (success && fallback) {
+    if (success && test == NativeCase::ExplicitFallback) {
         const bool intercepted = WaitFor([&] {
             return Find(L"PulseFilePicker", title, GetCurrentProcessId()) != nullptr;
         }, 1300);
@@ -260,30 +277,123 @@ bool BridgeCase(const std::wstring& directory, const std::filesystem::path& puls
         (!save || !std::filesystem::exists(expected));
 }
 
+bool SidebarCase(const std::filesystem::path& folder) {
+    using namespace pulse;
+    const auto first = (folder / L"First").wstring(), second = (folder / L"Second").wstring();
+    const auto cloud = (folder / L"Cloud").wstring(), network = (folder / L"Network").wstring();
+    for (const auto* path : {&first, &second, &cloud, &network}) std::filesystem::create_directory(*path);
+    const auto config = (folder / L"config").wstring();
+    storage::OverrideDefaultRootForTesting(config);
+    std::filesystem::create_directory(config);
+    std::ofstream(std::filesystem::path(config) / L"places.json") << R"({
+        "quick_access_paths": ["C:\\First pin", "C:\\Second pin"],
+        "quick_access_order": ["C:\\Second pin", "C:\\First pin"],
+        "networks": [{"name":"Saved share","unc":"\\\\test-server\\test-share"}]
+    })";
+    const auto places = app::LoadFilePickerPlaces([] { return false; });
+    if (places.quick_access.size() < 2 || places.quick_access[0].directory != L"C:\\Second pin" ||
+        places.quick_access[1].directory != L"C:\\First pin" || places.network.empty() ||
+        places.network.front().directory != L"\\\\test-server\\test-share") {
+        std::puts("[DIAG] saved quick access order or network location missing");
+        return false;
+    }
+
+    ui::FilePickerSpec spec;
+    spec.title = L"Pulse fixture - picker sidebar";
+    spec.software_device = true;
+    spec.load_places = [=](const auto&) {
+        return ui::PickerPlaces{{{L"OneDrive account", cloud, L"\xE753"}},
+            {{L"First pin", first, L"\xE8B7"}, {L"Second pin", second, L"\xE8B7"}},
+            {{L"Saved share", network, L"\xE968"}}};
+    };
+    bool navigated = false;
+    std::thread driver;
+    spec.on_ready = [&](HWND window) {
+        driver = std::thread([&, window] {
+            const double scale = GetDpiForWindow(window) / 96.0;
+            const auto at = [=](int x, int y) {
+                return MAKELPARAM(std::lround(x * scale), std::lround(y * scale));
+            };
+            const auto click = [&](int y) {
+                const auto point = at(75, y);
+                PostMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                PostMessageW(window, WM_LBUTTONUP, 0, point);
+            };
+            const auto key = [&](WPARAM value) { PostMessageW(window, WM_KEYDOWN, value, 1); };
+            navigated = WaitFor([&] {
+                if (FindFilename(window, first.c_str())) return true;
+                click(157); // 100 DIP list origin, 30 DIP account and 12 DIP divider.
+                return false;
+            }, 3500);
+            if (navigated) {
+                key(VK_HOME);
+                key(VK_RETURN);
+                navigated = WaitFor([&] { return FindFilename(window, cloud.c_str()); }, 2000);
+            }
+            if (navigated) {
+                navigated = SetWindowPos(window, nullptr, 0, 0, static_cast<int>(std::lround(590 * scale)),
+                    static_cast<int>(std::lround(420 * scale)), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE;
+            }
+            if (navigated) {
+                key(VK_END);
+                key(VK_RETURN);
+                navigated = WaitFor([&] { return FindFilename(window, network.c_str()); }, 2000);
+            }
+            PostMessageW(window, WM_CLOSE, 0, 0);
+        });
+    };
+    if (FAILED(OleInitialize(nullptr))) return false;
+    ui::FilePickerResult selection;
+    const bool picked = ui::ShowFilePicker(nullptr, spec, true, {0.20f, 0.50f, 0.85f, 1.0f}, selection);
+    if (driver.joinable()) driver.join();
+    OleUninitialize();
+    return navigated && !picked;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
-    if (argc == 3 && (wcscmp(argv[1], L"--native") == 0 || wcscmp(argv[1], L"--native-fallback") == 0))
-        return NativeFixture(argv[2], wcscmp(argv[1], L"--native-fallback") == 0);
+    if (argc == 3) {
+        const std::wstring_view argument = argv[1];
+        if (argument == L"--native") return NativeFixture(argv[2], NativeCase::Open);
+        if (argument == L"--native-fallback") return NativeFixture(argv[2], NativeCase::ExplicitFallback);
+        if (argument == L"--native-custom-confirm") return NativeFixture(argv[2], NativeCase::CustomConfirm);
+    }
     const bool watcher_only = argc == 3 && wcscmp(argv[2], L"--watcher-only") == 0;
     const bool fallback_only = argc == 3 && wcscmp(argv[2], L"--fallback-only") == 0;
+    const bool custom_open_only = argc == 3 && wcscmp(argv[2], L"--custom-open-only") == 0;
     const bool host_only = argc == 3 && wcscmp(argv[2], L"--host-only") == 0;
-    if (argc != 2 && !watcher_only && !fallback_only && !host_only) return 2;
+    const bool sidebar_only = argc == 3 && wcscmp(argv[2], L"--sidebar-only") == 0;
+    if (argc != 2 && !watcher_only && !fallback_only && !custom_open_only && !host_only && !sidebar_only) return 2;
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
     const auto folder = std::filesystem::absolute(argv[1]) /
         (L"picker-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     if (!std::filesystem::create_directories(folder)) return 2;
     std::ofstream(folder / L"sample.txt") << "fixture";
+    if (sidebar_only) {
+        const bool sidebar = SidebarCase(folder);
+        std::printf("[%s] Picker sidebar loads saved places and navigates all three groups\n", sidebar ? "PASS" : "FAIL");
+        return sidebar ? 0 : 1;
+    }
     if (fallback_only) {
-        const bool fallback = WatcherCase(folder.wstring(), true);
+        const bool fallback = WatcherCase(folder.wstring(), NativeCase::ExplicitFallback);
         std::printf("[%s] Explicit Windows choice bypasses window takeover\n", fallback ? "PASS" : "FAIL");
         return fallback ? 0 : 1;
     }
     bool ok = true;
+    if (custom_open_only || (!watcher_only && !host_only)) {
+        const bool taken_over = WatcherCase(folder.wstring(), NativeCase::CustomConfirm);
+        std::printf("[%s] Open fallback with a custom confirmation uses the verified dialog mode\n",
+            taken_over ? "PASS" : "FAIL");
+        if (custom_open_only) return taken_over ? 0 : 1;
+        ok = taken_over;
+    }
     if (!host_only) {
-        ok = WatcherCase(folder.wstring(), false);
-        std::printf("[%s] Window watcher submits after the Shell bridge falls back automatically\n", ok ? "PASS" : "FAIL");
+        const bool taken_over = WatcherCase(folder.wstring(), NativeCase::Open);
+        std::printf("[%s] Window watcher submits after the Shell bridge falls back automatically\n",
+            taken_over ? "PASS" : "FAIL");
+        ok &= taken_over;
     }
     if (watcher_only) return ok ? 0 : 1;
     wchar_t executable[MAX_PATH]{};

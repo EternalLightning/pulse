@@ -230,7 +230,9 @@ void FolderViewPrefs::AppendJson(std::wstring& out) const {
             if (i) out += L",";
             out += std::to_wstring(columns.widths[i]);
         }
-        out += L"]}";
+        out += L"]";
+        if (columns.show_cloud_on_local) out += L",\"show_cloud_on_local\":true";
+        out += L"}";
     }
     out += L"]";
 }
@@ -282,6 +284,7 @@ void FolderViewPrefs::ReadJson(const std::wstring& input) {
             if (!path || path->kind != json::Kind::String || !order || order->kind != json::Kind::Array) continue;
             model::DetailsColumnPrefs columns;
             columns.configured = true;
+            columns.show_cloud_on_local = json::Bool(item.Find(L"show_cloud_on_local"));
             for (const auto& value : order->children) {
                 if (value.kind != json::Kind::String) continue;
                 for (size_t i = 0; i < model::kDetailsColumnCount; ++i) {

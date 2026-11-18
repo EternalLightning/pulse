@@ -94,14 +94,52 @@ struct Artwork {
 Artwork ExpectedArtwork(int command) {
     using namespace pulse::app;
     switch (command) {
-    case CmdNewMenu: return {IDR_FILES_NEW_SVG, IDR_FILES_NEW_COLOR_SVG, IDR_FILES_NEW_COLOR_DARK_SVG, 14};
-    case CmdCut: return {IDR_FILES_CUT_SVG, IDR_FILES_CUT_COLOR_SVG, IDR_FILES_CUT_COLOR_DARK_SVG, 16};
-    case CmdCopy: return {IDR_FILES_COPY_SVG, IDR_FILES_COPY_COLOR_SVG, IDR_FILES_COPY_COLOR_DARK_SVG, 16};
-    case CmdPaste: return {IDR_FILES_PASTE_SVG, IDR_FILES_PASTE_COLOR_SVG, IDR_FILES_PASTE_COLOR_DARK_SVG, 16};
-    case CmdRename: return {IDR_FILES_RENAME_SVG, IDR_FILES_RENAME_COLOR_SVG, IDR_FILES_RENAME_COLOR_DARK_SVG, 14};
-    case CmdDelete: return {IDR_FILES_DELETE_SVG, IDR_FILES_DELETE_COLOR_SVG, IDR_FILES_DELETE_COLOR_DARK_SVG, 14};
-    case CmdProperties: return {IDR_FILES_PROPERTIES_SVG, IDR_FILES_PROPERTIES_COLOR_SVG, IDR_FILES_PROPERTIES_COLOR_DARK_SVG, 14};
+    case CmdNewMenu: return {IDR_FILES_NEW_SVG, IDR_FILES_NEW_COLOR_SVG, IDR_FILES_NEW_COLOR_DARK_SVG, 16};
+    case CmdCut: return {IDR_FILES_CUT_SVG, IDR_FILES_CUT_COLOR_SVG, IDR_FILES_CUT_COLOR_DARK_SVG, 17};
+    case CmdCopy: return {IDR_FILES_COPY_SVG, IDR_FILES_COPY_COLOR_SVG, IDR_FILES_COPY_COLOR_DARK_SVG, 18};
+    case CmdPaste: return {IDR_FILES_PASTE_SVG, IDR_FILES_PASTE_COLOR_SVG, IDR_FILES_PASTE_COLOR_DARK_SVG, 17};
+    case CmdRename: return {IDR_FILES_RENAME_SVG, IDR_FILES_RENAME_COLOR_SVG, IDR_FILES_RENAME_COLOR_DARK_SVG, 16};
+    case CmdDelete: return {IDR_FILES_DELETE_SVG, IDR_FILES_DELETE_COLOR_SVG, IDR_FILES_DELETE_COLOR_DARK_SVG, 16};
+    case CmdProperties: return {IDR_FILES_PROPERTIES_SVG, IDR_FILES_PROPERTIES_COLOR_SVG, IDR_FILES_PROPERTIES_COLOR_DARK_SVG, 16};
+    case CmdCopyPath: return {IDR_FILES_COPY_PATH_SVG, 0, 0, 18};
+    case CmdAdvancedSearch: return {IDR_FILES_TOOLBAR_ADVANCED_SEARCH_SVG, 0, 0, 18};
+    case CmdOperationCenter: return {IDR_FILES_STATUS_CENTER_SVG, 0, 0, 16};
+    case CmdCustomizeCommands: return {IDR_TOOLBAR_CUSTOMIZE_SVG, 0, 0, 16};
     default: return {};
+    }
+}
+int ExpectedRoundedArtwork(ui::command_icons::Icon icon) {
+    using I = ui::command_icons::Icon;
+    switch (icon) {
+    case I::Details: return IDR_FILES_LAYOUT_DETAILS_SVG;
+    case I::Grid: case I::Applications: return IDR_FILES_LAYOUT_GRID_SVG;
+    case I::List: return IDR_FILES_LAYOUT_LIST_SVG;
+    case I::Columns: case I::LayoutThree: return IDR_FILES_LAYOUT_COLUMNS_SVG;
+    case I::Content: return IDR_FILES_LAYOUT_CONTENT_SVG;
+    case I::Split: return IDR_FILES_PANE_VERTICAL_SVG;
+    case I::LayoutStacked: return IDR_FILES_PANE_HORIZONTAL_SVG;
+    case I::Panel: return IDR_FILES_PANEL_RIGHT_SVG;
+    case I::SelectAll: return IDR_FILES_SELECT_ALL_SVG;
+    case I::InvertSelection: return IDR_FILES_SELECT_INVERT_SVG;
+    case I::Copy: return IDR_FILES_COPY_SVG;
+    case I::Cut: return IDR_FILES_CUT_SVG;
+    case I::Rename: return IDR_FILES_RENAME_SVG;
+    case I::File: return IDR_FILES_TOOLBAR_FILE_SVG;
+    case I::Folder: return IDR_FILES_TOOLBAR_FOLDER_SVG;
+    case I::NewFolder: return IDR_FILES_TOOLBAR_NEW_FOLDER_SVG;
+    case I::Terminal: return IDR_FILES_TOOLBAR_TERMINAL_SVG;
+    case I::Refresh: return IDR_FILES_TOOLBAR_REFRESH_SVG;
+    case I::Search: return IDR_FILES_TOOLBAR_SEARCH_SVG;
+    case I::Settings: return IDR_FILES_TOOLBAR_SETTINGS_SVG;
+    case I::Recycle: return IDR_FILES_TOOLBAR_RECYCLE_SVG;
+    case I::Pin: return IDR_FILES_TOOLBAR_PIN_SVG;
+    case I::Filter: return IDR_FILES_FILTER_SVG;
+    case I::Library: return IDR_FLUENT_BOOK_OPEN_SVG;
+    case I::Undo: return IDR_FLUENT_ARROW_UNDO_SVG;
+    case I::Link: return IDR_FLUENT_LINK_SVG;
+    case I::LayoutSingle: return IDR_FLUENT_SQUARE_SVG;
+    case I::LayoutFour: return IDR_FLUENT_TABLE_SIMPLE_SVG;
+    default: return 0;
     }
 }
 Pixels ExpectedIcon(ui::Compositor& compositor, const Pixels& actual,
@@ -126,25 +164,25 @@ Pixels ExpectedIcon(ui::Compositor& compositor, const Pixels& actual,
     const auto background = Background(actual);
     const float cx = create ? button.left + 18 * scale : (button.left + button.right) / 2;
     const float cy = (button.top + button.bottom) / 2;
-    const auto slot = D2D1::RectF(cx - 8 * scale, cy - 8 * scale,
-        cx + 8 * scale, cy + 8 * scale);
+    const auto slot = D2D1::RectF(cx - 9 * scale, cy - 9 * scale,
+        cx + 9 * scale, cy + 9 * scale);
     dc->SetTarget(reference.get()); dc->SetTransform(D2D1::Matrix3x2F::Identity());
     dc->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
     dc->BeginDraw(); dc->Clear(D2D1::ColorF(background[2] / 255.0f, background[1] / 255.0f, background[0] / 255.0f));
     // Preserve the production viewport and world coordinates: hardware AA can change on a translated small target.
     // Brush selection is independent of VM state and the UI path.
+    ui::fluent::Painter painter(&compositor);
+    painter.BeginFrame(theme);
     bool drawn;
     if (artwork_resource) {
         const float size = std::round(artwork_size * scale);
         const float left = create ? std::floor(cx) + 0.5f - size / 2 : std::round(cx - size / 2);
         const float top = create ? std::floor(cy) + 0.5f - size / 2 : std::round(cy - size / 2);
-        ui::fluent::Painter painter(&compositor);
-        painter.BeginFrame(theme);
         drawn = painter.DrawSvgResource(artwork_resource, {left, top, left + size, top + size},
                                         tinted ? &foreground : nullptr);
     } else {
-        drawn = ui::toolbar_icons::Draw(dc, brush.get(), stroke.get(), icon, slot, scale);
+        drawn = ui::toolbar_icons::Draw(painter, dc, brush.get(), stroke.get(), icon, slot, scale, 18.0f);
     }
     const HRESULT result = dc->EndDraw();
     Pixels pixels;
@@ -160,14 +198,33 @@ struct Ink {
     float peak = 0;
     std::array<BYTE, 4> background{}, peak_pixel{};
     std::vector<bool> mask;
+    std::vector<float> coverage;
     int Width() const { return right - left; }
     int Height() const { return bottom - top; }
 };
+bool HasMirrorSymmetry(const Pixels& pixels, const Ink& ink) {
+    if (ink.count == 0) return false;
+    float horizontal = 0, vertical = 0, total = 0;
+    const auto coverage = [&](int x, int y) {
+        return ink.coverage[static_cast<size_t>(y) * pixels.width + x];
+    };
+    for (int y = ink.top; y < ink.bottom; ++y) {
+        for (int x = ink.left; x < ink.right; ++x) {
+            const float sample = coverage(x, y);
+            total += sample;
+            horizontal += std::abs(sample - coverage(ink.left + ink.right - 1 - x, y));
+            vertical += std::abs(sample - coverage(x, ink.top + ink.bottom - 1 - y));
+        }
+    }
+    // Compare visible ink rather than treating a very faint edge as a solid pixel.
+    return horizontal <= total * 0.12f && vertical <= total * 0.12f;
+}
 Ink Measure(const Pixels& pixels, D2D1_COLOR_F primary, D2D1_COLOR_F foreground) {
     Ink ink;
     if (pixels.bgra.empty()) return ink;
     ink.left = pixels.width; ink.top = pixels.height;
     ink.mask.resize(static_cast<size_t>(pixels.width) * pixels.height);
+    ink.coverage.resize(ink.mask.size());
     ink.background = Background(pixels);
     const auto* background = ink.background.data();
     const float base[3]{static_cast<float>(background[0]), static_cast<float>(background[1]), static_cast<float>(background[2])};
@@ -184,6 +241,7 @@ Ink Measure(const Pixels& pixels, D2D1_COLOR_F primary, D2D1_COLOR_F foreground)
             core &= std::abs(pixel[c] - expected) < 4;
         }
         const float alpha = denominator > 1 ? projection / denominator : 0;
+        ink.coverage[static_cast<size_t>(y) * pixels.width + x] = std::clamp(alpha, 0.0f, 1.0f);
         if (alpha > ink.peak) {
             ink.peak = alpha;
             std::copy_n(pixel, 4, ink.peak_pixel.begin());
@@ -280,16 +338,38 @@ int main() {
         const auto bounds = D2D1::RectF(0, 0, width, height);
         const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
         Check(!dark || (theme.text.r == 1 && theme.text.g == 1 && theme.text.b == 1), "ordinary dark foreground is white");
-        if (scale == 1) {
+        {
             ui::WindowViewModel vm;
             vm.dark = dark; vm.safe_mode = true; vm.can_group = true; vm.can_paste = true;
             vm.pane.loading = true; vm.pane.selected_count = 1;
+            vm.pane.view_mode = ui::ViewMode::Details;
             vm.toolbar_order.assign(ui::kDefaultToolbarOrder.begin(), ui::kDefaultToolbarOrder.end());
             renderer.SetToolbarOrder(vm.toolbar_order);
             auto* dc = compositor.Dc();
             dc->BeginDraw(); dc->Clear(D2D1::ColorF(0, 0)); renderer.Render(vm, bounds, theme);
-            Check(SUCCEEDED(dc->EndDraw()) && compositor.SaveSnapshot((root / (dark ? L"dark-toolbar.png" : L"light-toolbar.png")).c_str()),
-                "save restored commands alongside their toolbar neighbors");
+            Check(SUCCEEDED(dc->EndDraw()), "render the four pane-header controls");
+            const auto pane = renderer.ContentRect(width, height);
+            const std::pair<D2D1_RECT_F, const char*> icons[] = {
+                {renderer.PaneDetailsRect(pane), "details"},
+                {renderer.PaneMediumIconsRect(pane), "grid"},
+                {renderer.PaneSplitButtonRect(pane), "split"},
+                {renderer.PaneViewButtonRect(pane), "more"},
+            };
+            for (const auto& [button, name] : icons) {
+                const float cx = (button.left + button.right) / 2;
+                const float cy = (button.top + button.bottom) / 2;
+                const float sample_radius = 10 * scale;
+                const auto sample = ReadCrop(compositor, {cx - sample_radius, cy - sample_radius,
+                    cx + sample_radius, cy + sample_radius});
+                const auto foreground = std::string_view(name) == "details" ? theme.accent_ink : theme.text;
+                Check(HasMirrorSymmetry(sample, Measure(sample, foreground, foreground)),
+                    std::string("pane ") + name + " is symmetric at " + std::to_string(static_cast<int>(100 * scale)) + "%");
+            }
+            if (scale == 1 || scale == 1.75f) {
+                const auto filename = std::wstring(dark ? L"dark-" : L"light-") +
+                    (scale == 1 ? L"toolbar.png" : L"175-toolbar.png");
+                Check(compositor.SaveSnapshot((root / filename).c_str()), "save the toolbar and pane header at native resolution");
+            }
         }
         std::map<int, Ink> normal_ink;
         std::vector<Tile> tiles, failure_tiles;
@@ -306,6 +386,13 @@ int main() {
             };
             require(model.Add(id) && model.Order() == std::vector<int>{id}, "model Add/order");
             const auto icon = ui::toolbar_icons::Resolve(descriptor.glyph, descriptor.pictogram, id);
+            const int rounded = artwork.outline ? 0 : ExpectedRoundedArtwork(icon);
+            const bool center_divider = rounded == IDR_FILES_PANE_VERTICAL_SVG || rounded == IDR_FILES_PANE_HORIZONTAL_SVG ||
+                rounded == IDR_FLUENT_BOOK_OPEN_SVG || rounded == IDR_FLUENT_TABLE_SIMPLE_SVG;
+            const int canvas_pixels = static_cast<int>(std::lround(18 * scale));
+            const int odd_pixels = (canvas_pixels - 1) | 1;
+            const float artwork_size = rounded
+                ? static_cast<float>(center_divider ? odd_pixels : canvas_pixels) / scale : artwork.size;
             require(icon != ui::command_icons::Icon::None, "Resolve must return a real icon");
             ui::WindowViewModel vm;
             vm.dark = dark; vm.safe_mode = true; vm.can_group = true; vm.can_paste = true;
@@ -335,24 +422,28 @@ int main() {
             const auto ink = Measure(pixels, theme.text, theme.text);
             normal_ink[id] = ink;
             require(ink.count > 3, "normal ink pixel count > 3");
+            if (id == app::CmdLibraries || id == app::CmdLayoutFourGrid)
+                require(HasMirrorSymmetry(pixels, ink), "the two book pages or four panes are visually symmetric");
             const auto artwork_matches = [&](const Pixels& actual, int resource, D2D1_COLOR_F foreground, bool tinted) {
                 const auto expected = ExpectedIcon(compositor, actual, button, icon,
-                    foreground, scale, id == 186, theme, artwork.size, resource, tinted);
+                    foreground, scale, id == 186, theme, artwork_size, resource, tinted);
                 const auto match = CompareReference(actual, expected);
                 return match.compared > 0 && match.incorrect == 0;
             };
-            const int normal_resource = dark ? artwork.dark : artwork.light;
+            const bool tinted_artwork = rounded || (artwork.outline && !artwork.light);
+            const int normal_resource = rounded ? rounded
+                : tinted_artwork ? artwork.outline : dark ? artwork.dark : artwork.light;
             if (normal_resource) {
-                require(artwork_matches(pixels, normal_resource, theme.text, false), "normal renders original Files artwork and palette");
+                require(artwork_matches(pixels, normal_resource, theme.text, tinted_artwork), "normal renders the expected path and foreground");
             } else {
                 require(ink.core > 1, "normal exact primary core > 1");
                 require(ink.peak > 0.95f, "normal primary peak > 0.95");
             }
-            const float side = std::round(16 * scale);
+            const float side = std::round(18 * scale);
             const float slot_left = std::round(cx - side / 2), slot_top = std::round(cy - side / 2);
             require(ink.left + pixels.left >= slot_left - 1 && ink.right + pixels.left <= slot_left + side + 1 &&
                 ink.top + pixels.top >= slot_top - 1 && ink.bottom + pixels.top <= slot_top + side + 1,
-                "normal ink stays within the 16 DIP slot plus 1 physical pixel");
+                "normal ink stays within the 18 DIP slot plus 1 physical pixel");
             const auto normal_hit = hit();
             require(normal_hit.region == Region(id) && (Region(id) != ui::HitTestResult::CustomToolbarCommand || normal_hit.index == id),
                 "normal hit region and command ID");
@@ -362,7 +453,7 @@ int main() {
             const auto hover_pixels = ReadCrop(compositor, crop_bounds);
             const auto hover_ink = Measure(hover_pixels, theme.text, theme.text);
             if (normal_resource) {
-                require(artwork_matches(hover_pixels, normal_resource, theme.text, false), "hover retains original Files artwork and palette");
+                require(artwork_matches(hover_pixels, normal_resource, theme.text, tinted_artwork), "hover retains the expected path and foreground");
             } else {
                 require(hover_ink.core > 1, "hover exact primary core > 1");
                 require(hover_ink.peak > 0.95f, "hover primary peak > 0.95");
@@ -389,7 +480,7 @@ int main() {
                 disabled = Measure(disabled_pixels, theme.text, theme.text_disabled);
                 require(disabled.count > 0, "disabled ink count > 0");
                 reference_pixels = ExpectedIcon(compositor, disabled_pixels, button, icon,
-                    theme.text_disabled, scale, id == 186, theme, artwork.size, artwork.outline, true);
+                    theme.text_disabled, scale, id == 186, theme, artwork_size, rounded ? rounded : artwork.outline, true);
                 paired = CompareReference(disabled_pixels, reference_pixels);
                 require(paired.compared > 0 && paired.incorrect == 0,
                     "disabled RGB matches an independently selected expected brush on the same GPU within the original 4 RGB tolerance");
@@ -429,7 +520,7 @@ int main() {
                 if (!reference_pixels.bgra.empty()) failure_tiles.push_back({id, L"independent expected brush", reference_pixels});
                 if (!negative_pixels.bgra.empty()) failure_tiles.push_back({id, L"incorrect primary disabled", negative_pixels});
             }
-            Check(ok, label + " resolves, renders within 16 DIP, retains its artwork on hover and dims when disabled");
+            Check(ok, label + " resolves, renders within 18 DIP, retains its artwork on hover and dims when disabled");
         }
         const auto split = normal_ink.find(306), large = normal_ink.find(81);
         Check(split != normal_ink.end() && large != normal_ink.end() &&
@@ -437,7 +528,7 @@ int main() {
             std::abs(split->second.Height() - large->second.Height()) <= std::ceil(2 * scale),
             "actual split and large-icon ink have comparable physical dimensions at this theme and DPI");
         if (split != normal_ink.end()) {
-            for (const auto& [id, ink] : normal_ink) if (ExpectedArtwork(id).outline) {
+            for (const auto& [id, ink] : normal_ink) if (ExpectedArtwork(id).light) {
                 const int dimension = std::max(ink.Width(), ink.Height());
                 const int split_dimension = std::max(split->second.Width(), split->second.Height());
                 Check(std::abs(dimension - split_dimension) <= std::ceil(3 * scale),

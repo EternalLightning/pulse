@@ -13,6 +13,7 @@ void ShowDetailsColumnsMenu(AppState& s, POINT point, int pane_index) {
     if (vm.is_search) return;
     using K = model::DetailsColumnKind;
     auto prefs = tab->details_columns.configured ? tab->details_columns : model::DefaultDetailsColumns();
+    if (!vm.cloud_status_column && !prefs.show_cloud_on_local) std::erase(prefs.order, K::Cloud);
     std::vector<ui::FluentMenuItem> items;
     for (size_t index = 2; index < model::kDetailsColumnCount; ++index) {
         const auto kind = static_cast<K>(index);
@@ -20,12 +21,12 @@ void ShowDetailsColumnsMenu(AppState& s, POINT point, int pane_index) {
         item.text = ui::DetailsColumnLabel(kind);
         auto position = std::find(prefs.order.begin(), prefs.order.end(), kind);
         const bool visible = position != prefs.order.end();
-        for (const auto& action : {std::pair{1, l10n::Pick(L"显示", L"Show")},
+        const auto visibility_action = visible ? l10n::Pick(L"隐藏", L"Hide") : l10n::Pick(L"显示", L"Show");
+        for (const auto& action : {std::pair{1, visibility_action},
                                    std::pair{2, l10n::Pick(L"向前移动", L"Move earlier")},
                                    std::pair{3, l10n::Pick(L"向后移动", L"Move later")}}) {
             ui::FluentMenuItem child;
             child.text = action.second; child.command = static_cast<int>(index) * 10 + action.first;
-            child.checked = action.first == 1 && visible;
             child.enabled = action.first == 1 || (visible && (action.first == 2
                 ? position != prefs.order.begin() + 1 : position + 1 != prefs.order.end()));
             item.children.push_back(std::move(child));
@@ -43,7 +44,9 @@ void ShowDetailsColumnsMenu(AppState& s, POINT point, int pane_index) {
         const auto kind = static_cast<K>(action / 10);
         auto position = std::find(prefs.order.begin(), prefs.order.end(), kind);
         if (action % 10 == 1) {
-            if (position == prefs.order.end()) prefs.order.push_back(kind);
+            const bool show = position == prefs.order.end();
+            if (kind == K::Cloud) prefs.show_cloud_on_local = show && !vm.cloud_status_column;
+            if (show) prefs.order.push_back(kind);
             else prefs.order.erase(position);
         } else if (action % 10 == 2 && position != prefs.order.end() && position != prefs.order.begin() + 1)
             std::iter_swap(position, position - 1);

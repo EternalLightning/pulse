@@ -5,6 +5,8 @@
 #include "dialog_keyboard.h"
 #include "dialog_style.h"
 #include "edit_host.h"
+#include "file_picker_listing.h"
+#include "file_picker_tree.h"
 #include "fluent_menu.h"
 #include "typography.h"
 #include "window_helpers.h"
@@ -15,13 +17,11 @@
 
 #include <commctrl.h>
 #include <shlobj.h>
-#include <shlwapi.h>
 #include <uxtheme.h>
 #include <windowsx.h>
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cwctype>
 #include <memory>
@@ -33,110 +33,15 @@ namespace {
 using l10n::Get;
 using l10n::StringId;
 constexpr wchar_t kPickerClass[] = L"PulseFilePicker";
-constexpr UINT kListingReady = WM_APP + 0x39;
 constexpr UINT_PTR kWatchTimer = 1;
 constexpr UINT_PTR kScrollTimer = 2;
-constexpr float kWidth = 728.0f, kHeight = 512.0f;
+constexpr float kWidth = 1000.0f, kHeight = 680.0f;
 constexpr float kMinimumWidth = 500.0f, kMinimumHeight = 372.0f;
 
 enum Control {
-    None, Close, Back, Up, Address, Desktop, Downloads, Documents, Computer, PulseFolder,
+    None, Close, Back, Up, Address, Locations,
     Files, Name, Filter, WindowsDialog, Cancel, Primary, Count
 };
-
-struct Place {
-    Control id;
-    StringId label;
-    const wchar_t* glyph;
-    const KNOWNFOLDERID* folder = nullptr;
-};
-
-const Place kPlaces[]{
-    {Desktop, StringId::Desktop, L"\xE7F4", &FOLDERID_Desktop},
-    {Downloads, StringId::Downloads, L"\xE896", &FOLDERID_Downloads},
-    {Documents, StringId::KnownFolderDocuments, L"\xE8A5", &FOLDERID_Documents},
-    {Computer, StringId::ThisPc, L"\xE977"},
-    {PulseFolder, StringId::PickerPulseFolder, L"\xE8B7"},
-};
-
-struct ListingRequest {
-    HWND window = nullptr;
-    UINT_PTR token = 0;
-    std::wstring directory;
-    const KNOWNFOLDERID* known_folder = nullptr;
-    PickerMode mode = PickerMode::Open;
-    std::wstring filter;
-    bool show_hidden = false;
-    bool back = false;
-    std::atomic<bool> cancelled{false};
-    std::atomic<bool> ready{false};
-    bool succeeded = false;
-    bool filtered = false;
-    std::vector<fs::DirEntry> entries;
-};
-
-using Listing = std::shared_ptr<ListingRequest>;
-
-void ReadDirectory(ListingRequest& request) {
-    if (request.known_folder) {
-        PWSTR folder = nullptr;
-        const HRESULT hr = SHGetKnownFolderPath(*request.known_folder, KF_FLAG_DONT_VERIFY, nullptr, &folder);
-        if (folder) {
-            std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> owner(folder, &CoTaskMemFree);
-            if (SUCCEEDED(hr)) request.directory = folder;
-        }
-        if (request.directory.empty()) return;
-    }
-    auto& entries = request.entries;
-    if (request.directory.empty()) {
-        const DWORD drives = GetLogicalDrives();
-        for (DWORD i = 0; i < 26; ++i) {
-            if (!(drives & (DWORD{1} << i))) continue;
-            fs::DirEntry entry;
-            entry.name = {static_cast<wchar_t>(L'A' + i), L':', L'\\'};
-            entry.is_dir = true;
-            entries.push_back(std::move(entry));
-        }
-        request.succeeded = true;
-        return;
-    }
-
-    const auto cancelled = [&request] { return request.cancelled.load(std::memory_order_relaxed); };
-    if (!fs::EnumerateDirectory(request.directory, entries, cancelled)) return;
-    std::erase_if(entries, [&](const fs::DirEntry& entry) {
-        if (!request.show_hidden && (entry.attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))) return true;
-        if (entry.is_dir) return false;
-        if (request.mode == PickerMode::Folder) return true;
-        const bool excluded = !request.filter.empty() &&
-            PathMatchSpecExW(entry.name.c_str(), request.filter.c_str(), PMSF_MULTIPLE) != S_OK;
-        request.filtered |= excluded;
-        return excluded;
-    });
-    std::sort(entries.begin(), entries.end(), [](const fs::DirEntry& left, const fs::DirEntry& right) {
-        if (left.is_dir != right.is_dir) return left.is_dir;
-        const int order = CompareStringEx(LOCALE_NAME_USER_DEFAULT, NORM_IGNORECASE | SORT_DIGITSASNUMBERS,
-            left.name.c_str(), -1, right.name.c_str(), -1, nullptr, nullptr, 0);
-        return order == CSTR_LESS_THAN || ((!order || order == CSTR_EQUAL) && left.name < right.name);
-    });
-    request.directory = path::FriendlyPathText(fs::NormalizePath(std::move(request.directory)));
-    request.succeeded = true;
-}
-
-void CALLBACK LoadDirectory(PTP_CALLBACK_INSTANCE, void* argument) {
-    const std::unique_ptr<Listing> work(static_cast<Listing*>(argument));
-    auto& request = **work;
-    DWORD previous = 0;
-    const BOOL changed_error_mode = SetThreadErrorMode(SEM_FAILCRITICALERRORS, &previous);
-    try {
-        if (!request.cancelled.load(std::memory_order_relaxed)) ReadDirectory(request);
-    } catch (const std::exception&) {
-        request.succeeded = false;
-    }
-    if (changed_error_mode) SetThreadErrorMode(previous, nullptr);
-    request.ready.store(true, std::memory_order_release);
-    if (!request.cancelled.load(std::memory_order_relaxed))
-        PostMessageW(request.window, kListingReady, request.token, 0);
-}
 
 std::wstring EditValue(HWND edit) {
     std::wstring text(static_cast<size_t>(GetWindowTextLengthW(edit)) + 1, L'\0');
@@ -242,10 +147,9 @@ public:
         MONITORINFO monitor{sizeof(monitor)};
         GetMonitorInfoW(MonitorFromWindow(source, MONITOR_DEFAULTTONEAREST), &monitor);
         const int work_width = static_cast<int>(monitor.rcWork.right - monitor.rcWork.left);
-        const int width = std::clamp(work_width,
-            Pixels(kMinimumWidth), Pixels(kWidth));
-        const int height = std::clamp(static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top),
-            Pixels(kMinimumHeight), Pixels(kHeight));
+        const int work_height = static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top);
+        const int width = work_width > 0 ? std::min(Pixels(kWidth), work_width) : Pixels(kWidth);
+        const int height = work_height > 0 ? std::min(Pixels(kHeight), work_height) : Pixels(kHeight);
         if (!CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW, kPickerClass, title_.c_str(),
             WS_POPUP | WS_SYSMENU | WS_THICKFRAME, CW_USEDEFAULT, CW_USEDEFAULT,
             width, height, nullptr, nullptr, instance, this)) return false;
@@ -253,6 +157,7 @@ public:
         CenterOwnedWindow(window_, source, measured_width, height);
         if (spec_.should_close && spec_.should_close()) return false;
         if (!SetTimer(window_, kWatchTimer, 80, nullptr)) return false;
+        tree_.Initialize(window_, spec_.show_hidden, static_cast<bool>(spec_.current_pulse_directory), spec_.load_places);
         StartLoad(spec_.initial_path);
         ShowDialogWithFade(window_);
         Layout();
@@ -289,27 +194,22 @@ private:
             actions + Px(2 * (dialog_style::kMargin + dialog_style::kGap)))));
     }
 
-    void StartLoad(std::wstring directory, const KNOWNFOLDERID* known_folder = nullptr, bool back = false) {
+    void StartLoad(std::wstring directory, bool back = false) {
         if (waiting_) return;
         if (request_) request_->cancelled.store(true, std::memory_order_relaxed);
         request_.reset();
-        static std::atomic<UINT_PTR> next_token{1};
         auto request = std::make_shared<ListingRequest>();
         request->window = window_;
-        request->token = next_token.fetch_add(1, std::memory_order_relaxed);
         request->directory = std::move(directory);
-        request->known_folder = known_folder;
         request->mode = spec_.mode;
         request->show_hidden = spec_.show_hidden;
         request->back = back;
         if (HasFilter()) request->filter = spec_.filters[filter_index_].pattern;
-        auto work = std::make_unique<Listing>(request);
         notice_.clear();
         pressed_row_ = hover_row_ = -1;
         scroll_.Reset();
         ScheduleScroll();
-        if (TrySubmitThreadpoolCallback(LoadDirectory, work.get(), nullptr)) {
-            work.release();
+        if (SubmitPickerListing(request)) {
             request_ = std::move(request);
         } else {
             filter_index_ = applied_filter_;
@@ -334,6 +234,8 @@ private:
         filtered_ = request->filtered;
         applied_filter_ = filter_index_;
         loaded_ = true;
+        tree_.Navigate(directory_, Animate());
+        ScheduleScroll();
         selection_.clear();
         cursor_ = anchor_ = -1;
         pressed_row_ = hover_row_ = -1;
@@ -363,6 +265,7 @@ private:
 
     void Watch() {
         ApplyListing();
+        ApplyTreeListing();
         if (waiting_ && spec_.poll_submit) {
             if (auto reply = spec_.poll_submit()) {
                 if (reply->accepted) { CloseWindow(!cancelling_); return; }
@@ -540,6 +443,27 @@ private:
         StartLoad(directory_);
     }
 
+    void NavigateTree(std::optional<FilePickerTree::Target> target) {
+        if (!target || waiting_) return;
+        if (!target->pulse_folder) {
+            StartLoad(std::move(target->directory));
+            return;
+        }
+        auto path = spec_.current_pulse_directory();
+        if (!path.empty()) StartLoad(std::move(path));
+        else {
+            notice_ = Get(StringId::DirectoryUnavailable);
+            Invalidate();
+        }
+    }
+
+    void ApplyTreeListing(UINT_PTR token = 0) {
+        if (tree_.ApplyListing(token, Animate())) {
+            ScheduleScroll();
+            Invalidate();
+        }
+    }
+
     void Invoke(Control id) {
         if (id == Close || id == Cancel) { CancelPicker(); return; }
         if (id == WindowsDialog) {
@@ -554,26 +478,14 @@ private:
         if (waiting_) return;
         switch (id) {
         case Back:
-            if (!history_.empty()) StartLoad(history_.back(), nullptr, true);
+            if (!history_.empty()) StartLoad(history_.back(), true);
             break;
         case Up:
             if (!directory_.empty()) StartLoad(UpDirectory(directory_));
             break;
         case Primary: Submit(); break;
         case Filter: ChooseFilter(); break;
-        case PulseFolder:
-            if (spec_.current_pulse_directory) {
-                auto path = spec_.current_pulse_directory();
-                if (!path.empty()) StartLoad(std::move(path));
-                else {
-                    notice_ = Get(StringId::DirectoryUnavailable);
-                    Invalidate();
-                }
-            }
-            break;
-        default:
-            for (const auto& place : kPlaces) if (id == place.id) StartLoad({}, place.folder);
-            break;
+        default: break;
         }
     }
 
@@ -584,18 +496,23 @@ private:
     }
 
     void ScheduleScroll() {
-        if (!scroll_.Pending()) {
+        if (!scroll_.Pending() && !tree_.Pending()) {
             frame_.Cancel(window_);
             KillTimer(window_, kScrollTimer);
         } else if (frame_.Request(window_)) {
             KillTimer(window_, kScrollTimer);
         } else if (!SetTimer(window_, kScrollTimer, 15, nullptr)) {
-            scroll_.Tick(offset_, Maximum(), AnimationTimeMs(), false);
+            const auto now = AnimationTimeMs();
+            scroll_.Tick(offset_, Maximum(), now, false);
+            tree_.Tick(now, false);
         }
     }
 
     void ScrollFrame() {
-        if (scroll_.Tick(offset_, Maximum(), AnimationTimeMs(), Animate())) Invalidate();
+        const auto now = AnimationTimeMs();
+        const bool animate = Animate();
+        const bool list_changed = scroll_.Tick(offset_, Maximum(), now, animate);
+        if (tree_.Tick(now, animate) || list_changed) Invalidate();
         ScheduleScroll();
     }
 
@@ -694,14 +611,10 @@ private:
         const float list_top = top + control + Px(12.0f);
         const float name_top = footer - Px(44.0f);
         const float list_bottom = (has_name_ ? name_top : footer) - Px(28.0f);
-        const float sidebar_width = Px(width / scale_ < 550.0f ? 168.0f : 180.0f);
+        const float sidebar_width = Px(width / scale_ < 660.0f ? 176.0f : 244.0f);
         const float list_left = margin + sidebar_width + gap;
-        float place_y = list_top;
-        for (const auto& place : kPlaces) {
-            if (place.id == PulseFolder && !spec_.current_pulse_directory) continue;
-            controls_[place.id] = D2D1::RectF(margin, place_y, margin + sidebar_width, place_y + control);
-            place_y += control;
-        }
+        controls_[Locations] = D2D1::RectF(margin, list_top, margin + sidebar_width, list_bottom);
+        tree_.Layout(Bounds(Locations), scale_, Animate());
         controls_[Files] = D2D1::RectF(list_left, list_top, width - margin, list_bottom);
         rows_ = D2D1::RectF(list_left + 1, list_top + Px(28.0f), width - margin - 1, list_bottom - 1);
         notice_rect_ = D2D1::RectF(list_left, list_bottom + Px(1.0f), width - margin,
@@ -842,15 +755,8 @@ private:
         auto address = State(Address);
         address.focused = GetFocus() == address_;
         painter_.DrawTextFieldFrame(Bounds(Address), address, true);
-        for (const auto& place : kPlaces) if (place.id != PulseFolder || spec_.current_pulse_directory) {
-            fluent::SidebarItemSpec item{};
-            item.bounds = Bounds(place.id);
-            item.text = Get(place.label);
-            item.glyph = place.glyph;
-            item.state = State(place.id);
-            item.state.selected = place.id == Computer && directory_.empty() && loaded_ && !request_;
-            painter_.DrawSidebarItem(item);
-        }
+        tree_.Draw(compositor_, painter_, theme, Enabled(Locations),
+            focus_ == Locations && GetFocus() == window_, high_contrast);
         DrawRows(theme, high_contrast);
         if (has_name_) {
             painter_.DrawText(name_label_, name_label_rect_, compositor_.TextFormat(), theme.text);
@@ -878,6 +784,10 @@ private:
         targets.push_back({Close});
         MoveDialogFocus(window_, focus_, targets, backwards);
         if (focus_ == Files && cursor_ >= 0) RevealCursor();
+        if (focus_ == Locations) {
+            tree_.Focus(Animate());
+            ScheduleScroll();
+        }
     }
 
     bool Shortcut(WPARAM key, bool alt = false) {
@@ -928,6 +838,9 @@ private:
         if (id == Files) {
             scroll_.Reset();
             ScheduleScroll();
+        } else if (id == Locations) {
+            tree_.MouseDown(x, y, IsHighContrast());
+            ScheduleScroll();
         }
         pressed_row_ = HitRow(x, y);
         SetFocus(window_);
@@ -948,8 +861,12 @@ private:
         pressed_ = None;
         pressed_row_ = -1;
         dragging_ = false;
+        auto location = down == Locations ? tree_.MouseUp(x, y, Animate()) : std::nullopt;
         if (GetCapture() == window_) ReleaseCapture();
-        if (!drag && down != None && down == Hit(x, y)) {
+        if (down == Locations) {
+            NavigateTree(std::move(location));
+            ScheduleScroll();
+        } else if (!drag && down != None && down == Hit(x, y)) {
             if (down != Files) Invoke(down);
             else if (row >= 0 && row == HitRow(x, y)) Select(row, GetKeyState(VK_SHIFT) < 0, GetKeyState(VK_CONTROL) < 0);
         }
@@ -1032,12 +949,14 @@ private:
             MONITORINFO monitor{sizeof(monitor)};
             GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitor);
             const int work_width = static_cast<int>(monitor.rcWork.right - monitor.rcWork.left);
-            info.ptMinTrackSize = {std::min(MinimumTrackWidth(), std::max(Pixels(kMinimumWidth), work_width)),
-                Pixels(kMinimumHeight)};
+            const int work_height = static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top);
+            info.ptMinTrackSize = {
+                work_width > 0 ? std::min(MinimumTrackWidth(), work_width) : MinimumTrackWidth(),
+                work_height > 0 ? std::min(Pixels(kMinimumHeight), work_height) : Pixels(kMinimumHeight)};
             return 0;
         }
         case WM_SIZE:
-            if (wparam == SIZE_MINIMIZED) { scroll_.Reset(); ScheduleScroll(); return 0; }
+            if (wparam == SIZE_MINIMIZED) { scroll_.Reset(); tree_.Stop(); ScheduleScroll(); return 0; }
             if (compositor_.Dc()) { compositor_.Resize(LOWORD(lparam), HIWORD(lparam)); Layout(); }
             Invalidate();
             return 0;
@@ -1088,8 +1007,9 @@ private:
             if (wparam == kWatchTimer) Watch();
             else if (wparam == kScrollTimer) ScrollFrame();
             return 0;
-        case kListingReady:
+        case kPickerListingReady:
             if (request_ && request_->token == wparam) ApplyListing();
+            else ApplyTreeListing(wparam);
             return 0;
         case WM_ACTIVATE:
             if (LOWORD(wparam) == WA_INACTIVE) menu_.DismissForDeactivation(reinterpret_cast<HWND>(lparam));
@@ -1103,6 +1023,11 @@ private:
             if (wparam == VK_TAB) MoveFocus(GetKeyState(VK_SHIFT) < 0);
             else if (wparam == VK_ESCAPE) CancelPicker();
             else if (focus_ == Files) ListKey(wparam);
+            else if (focus_ == Locations && Enabled(Locations)) {
+                NavigateTree(tree_.Key(wparam, Animate()));
+                ScheduleScroll();
+                Invalidate();
+            }
             else if (wparam == VK_RETURN || wparam == VK_SPACE) Invoke(static_cast<Control>(focus_));
             return 0;
         case WM_CHAR:
@@ -1111,17 +1036,25 @@ private:
         case WM_MOUSEWHEEL: {
             POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
             ScreenToClient(window_, &point);
-            if (request_ || !ContainsRect(Bounds(Files), static_cast<float>(point.x), static_cast<float>(point.y)))
-                return 0;
             UINT lines = 3;
             SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &lines, 0);
+            const auto x = static_cast<float>(point.x), y = static_cast<float>(point.y);
+            const float wheel = -GET_WHEEL_DELTA_WPARAM(wparam) / static_cast<float>(WHEEL_DELTA);
+            if (ContainsRect(Bounds(Locations), x, y) && Enabled(Locations)) {
+                tree_.Scroll(wheel, lines, Animate());
+                ScheduleScroll();
+                Invalidate();
+                return 0;
+            }
+            if (request_ || !ContainsRect(Bounds(Files), x, y)) return 0;
             const float step = lines == WHEEL_PAGESCROLL ? Viewport() : row_height_ * static_cast<float>(lines);
-            if (step > 0.0f) ScrollBy(-GET_WHEEL_DELTA_WPARAM(wparam) / static_cast<float>(WHEEL_DELTA) * step);
+            if (step > 0.0f) ScrollBy(wheel * step);
             return 0;
         }
         case WM_MOUSEMOVE: {
             const float x = static_cast<float>(GET_X_LPARAM(lparam)), y = static_cast<float>(GET_Y_LPARAM(lparam));
             hover_ = Hit(x, y);
+            tree_.MouseMove(x, y, IsHighContrast());
             hover_row_ = HitRow(x, y);
             hover_scrollbar_ = OnScrollbar(x, y);
             if (dragging_) DragScrollbar(y);
@@ -1132,6 +1065,7 @@ private:
         }
         case WM_MOUSELEAVE:
             hover_ = None;
+            tree_.MouseLeave();
             hover_row_ = -1;
             hover_scrollbar_ = false;
             Invalidate();
@@ -1143,18 +1077,21 @@ private:
             MouseUp(static_cast<float>(GET_X_LPARAM(lparam)), static_cast<float>(GET_Y_LPARAM(lparam)));
             return 0;
         case WM_LBUTTONDBLCLK:
-            ActivateRow(HitRow(static_cast<float>(GET_X_LPARAM(lparam)), static_cast<float>(GET_Y_LPARAM(lparam))));
+            if (Hit(static_cast<float>(GET_X_LPARAM(lparam)), static_cast<float>(GET_Y_LPARAM(lparam))) == Locations)
+                MouseDown(static_cast<float>(GET_X_LPARAM(lparam)), static_cast<float>(GET_Y_LPARAM(lparam)));
+            else ActivateRow(HitRow(static_cast<float>(GET_X_LPARAM(lparam)), static_cast<float>(GET_Y_LPARAM(lparam))));
             return 0;
         case WM_CAPTURECHANGED:
         case WM_CANCELMODE:
             pressed_ = None;
             pressed_row_ = -1;
             dragging_ = false;
+            tree_.CancelPointer();
             Invalidate();
             return 0;
         case WM_CLOSE: CancelPicker(); return 0;
         case WM_SHOWWINDOW:
-            if (!wparam) { scroll_.Reset(); ScheduleScroll(); }
+            if (!wparam) { scroll_.Reset(); tree_.Stop(); ScheduleScroll(); }
             break;
         case WM_PAINT: {
             PAINTSTRUCT paint{};
@@ -1193,6 +1130,7 @@ private:
     Compositor compositor_;
     fluent::Painter painter_;
     FluentMenu menu_;
+    FilePickerTree tree_;
     EditFrameScheduler frame_;
     SmoothScroll scroll_;
     Listing request_;

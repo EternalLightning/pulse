@@ -343,7 +343,7 @@ private:
             if (!icon_stroke_.get()) command_icons::CreateStrokeStyle(dc, &icon_stroke_);
             if (icon_brush_.get()) {
                 icon_brush_->SetColor(color);
-                toolbar_icons::Draw(dc, icon_brush_.get(), icon_stroke_.get(),
+                toolbar_icons::Draw(painter_, dc, icon_brush_.get(), icon_stroke_.get(),
                     toolbar_icons::Resolve(action->glyph,action->pictogram,action->command), icon_bounds, scale_);
             }
         }

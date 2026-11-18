@@ -33,7 +33,6 @@ struct Workspace {
     int layout = 0;
     std::vector<std::wstring> pane_paths;
     std::vector<ViewMode> pane_views;
-    std::vector<std::pair<std::wstring, int>> frequent; // path, visit count
     int focused_pane = 0; // Index in the visible split-tree order.
 };
 
@@ -123,9 +122,6 @@ public:
     int FindNetwork(const std::wstring& unc) const;
     int PinNetwork(const std::wstring& unc, const std::wstring& name);
     void SetNetworkStatus(const std::wstring& unc, fs::NetStatus status, DWORD rtt_ms);
-
-    void RecordVisit(const std::wstring& path);
-    std::vector<std::wstring> FrequentChildren(int workspace_index, int limit = 8) const;
 
     bool ToggleTag(int tag_index, const std::wstring& path);
     bool SetTagged(int tag_index, const std::wstring& path, bool tagged);

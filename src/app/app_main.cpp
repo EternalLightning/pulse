@@ -746,7 +746,6 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             }
         }
         StartLoadingPath(*s, *s->pane->ActiveTab(), startPath, PathLoadReason::Navigate);
-        RememberPath(*s, startPath);
         if (!s->shot.active && (has_initial_external_target || !s->open_path.empty()))
             SelectLaunchedFile(*s, openTarget);
 

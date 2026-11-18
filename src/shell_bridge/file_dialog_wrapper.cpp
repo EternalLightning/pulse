@@ -95,22 +95,22 @@ public:
         result_index_ = 0;
         try {
             if (GetKeyState(VK_SHIFT) & 0x8000) return ShowNativeWithoutTakeover(owner);
-            if (native_only_ ||
-                (services_.enabled && !services_.enabled()) ||
+            if ((services_.enabled && !services_.enabled()) ||
                 (!services_.run_bridge && services_.executable.empty())) return native_->Show(owner);
+            if (native_only_) return ShowNative(owner);
             if (!services_.run_bridge && GetFileAttributesW(services_.executable.c_str()) == INVALID_FILE_ATTRIBUTES)
-                return native_->Show(owner);
+                return ShowNative(owner);
             if (owner) {
                 DWORD process = 0;
                 const DWORD thread = GetWindowThreadProcessId(owner, &process);
                 if (!thread || thread != GetCurrentThreadId() || process != GetCurrentProcessId())
-                    return native_->Show(owner);
+                    return ShowNative(owner);
             }
             const auto request = Prepare();
-            if (!request) return native_->Show(owner);
+            if (!request) return ShowNative(owner);
 
             cancel_.Reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-            if (!cancel_) return native_->Show(owner);
+            if (!cancel_) return ShowNative(owner);
             bridge_result_ = true;
             const auto response = services_.run_bridge ? services_.run_bridge(*request, owner, cancel_.Get()) :
                 wire::RunPickerClient(services_.executable, *request, owner, cancel_.Get());
@@ -126,7 +126,7 @@ public:
             if (result.status == wire::Status::Unsupported && result.error_source == wire::ErrorSource::Win32 &&
                 result.error_code == ERROR_NOT_SUPPORTED) {
                 bridge_result_ = false;
-                return native_->Show(owner);
+                return ShowNative(owner);
             }
             if (result.status == wire::Status::Failed || result.status == wire::Status::Unsupported)
                 return WireError(result);
@@ -372,6 +372,13 @@ private:
     }
     HRESULT ShowNativeWithoutTakeover(HWND owner) {
         const dialog_bridge::NativeFallbackScope bypass;
+        return native_->Show(owner);
+    }
+    HRESULT ShowNative(HWND owner) {
+        FILEOPENDIALOGOPTIONS options = 0;
+        const bool open = factory_ == DialogFactory::Open && native_->GetOptions(&options) == S_OK &&
+            !(options & FOS_PICKFOLDERS);
+        const dialog_bridge::NativeModeScope mode(owner ? GetAncestor(owner, GA_ROOT) : nullptr, open);
         return native_->Show(owner);
     }
 

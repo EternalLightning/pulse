@@ -2,6 +2,7 @@
 // Pulse project; see LICENSE and NOTICE for licensing and attribution.
 
 #include "native_dialog_takeover.h"
+#include "file_picker_places.h"
 #include "native_file_dialog_adapter.h"
 #include "../common/file_dialog_bridge_bypass.h"
 #include "../common/localization.h"
@@ -145,12 +146,14 @@ void RunPicker(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
         case NativeDialogKind::Folder: spec.mode = ui::PickerMode::Folder; break;
         }
         spec.title = source.title;
+        spec.ok_button_label = source.ok_button_label;
         spec.filename = source.filename;
         spec.filters = source.filters;
         spec.filter_index = source.filter_index;
         spec.allow_multiselect = source.allow_multiselect;
         spec.show_hidden = appearance.show_hidden;
         spec.software_device = true;
+        spec.load_places = LoadFilePickerPlaces;
         spec.begin_submit = [&](const ui::FilePickerResult& result) {
             return QueueAction(shared, session, {false, result});
         };

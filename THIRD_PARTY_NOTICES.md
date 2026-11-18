@@ -10,7 +10,7 @@ Pulse 自身的代码、脚本和文档采用根目录的 [Apache-2.0](LICENSE)�
 | LumaText 及其依赖 | MIT，以及 FreeType、HarfBuzz、Unicode 等各自条款 | [完整许可证目录](third_party/lumatext/share/LumaText/licenses) | `licenses/LumaText/` |
 | 7-Zip | LGPL-2.1-or-later，部分代码另含 BSD 和 unRAR 限制 | [许可证及版权](third_party/7zip/License.txt)、[来源](third_party/7zip/README.md) | `7zip/` |
 | Files 应用图标 | MIT；`src/app/pulse.ico`、`src/app/pulse-icon.png`、`assets/global-search-logo.png` | [许可证](third_party/files-icon/LICENSE-MIT.txt)、[来源](third_party/files-icon/README.md) | `licenses/FilesIcon/` |
-| Files 工具栏图标 | MIT；`assets/files_toolbar/` | [许可证](assets/files_toolbar/LICENSE-MIT) | `licenses/FilesToolbar/LICENSE-MIT` |
+| Files 工具栏图标 | MIT；`assets/files_toolbar/` | [许可证](assets/files_toolbar/LICENSE-MIT)、[XAML 来源](#files-工具栏图标来源) | `licenses/FilesToolbar/LICENSE-MIT` |
 | Fluent System Icons | MIT；`assets/fluent/` | [许可证](assets/fluent/LICENSE)、[来源](assets/fluent/SOURCES.md) | `licenses/FluentSystemIcons/` |
 | Microsoft OneDrive 产品图标 | Microsoft Fabric Assets License Agreement；不属于 Fluent System Icons 的 MIT 授权范围 | [协议原文](assets/microsoft_brand/LICENSE.pdf)、[使用范围及来源](assets/microsoft_brand/README.md) | `licenses/MicrosoftBrand/` |
 | d2d-mica 材质图适配 | MIT；`src/ui/window_material.cpp` 中的自定义背景材质图；Copyright (C) 2022 by wangwenx190 (Yuhang Zhao) | [许可证](third_party/d2d-mica/LICENSE)、[来源及修改](third_party/d2d-mica/README.pulse.md) | `licenses/d2d-mica/` |
@@ -18,3 +18,11 @@ Pulse 自身的代码、脚本和文档采用根目录的 [Apache-2.0](LICENSE)�
 7-Zip 是单独调用的程序，不能将其二进制按 Apache-2.0 再许可。发行包在 `7zip/7z2603-src.7z` 中附带官方 26.03 对应源码，并包含 LGPL 2.1、GPL 2 全文及 BSD、unRAR 声明；unRAR 限制禁止将相关代码用于开发 RAR 压缩器。版本、校验值及源码获取信息见其 README。更新任何依赖时，应同步更新对应源码、许可证和本索引。
 
 商标和产品名称属于各自权利人；此处列明来源不表示其对 Pulse 的认可或关联关系。本清单覆盖已识别的随程序分发的组件；构建工具和测试夹具若另行分发，也应保留其原有声明。
+
+## Files 工具栏图标来源
+
+这些图标由 Files Community 创作。Pulse 将采用 MIT 许可的 XAML 图形转为 SVG，部分图标调整了视口或填色。以下链接固定到本次引入圆角工具栏图标使用的上游提交。版权和许可全文随包分发。[Files Community MIT 许可证](assets/files_toolbar/LICENSE-MIT)
+
+- 浏览视图图标来自 [Icons.SizeLayout.xaml](https://github.com/files-community/Files/blob/3fbc10d0e47a538cc251138f47cec094b5e936a8/src/Files.App.Controls/ThemedIcon/Styles/Icons.SizeLayout.xaml)。
+- 窗格拆分图标来自 [Icons.TabPane.xaml](https://github.com/files-community/Files/blob/3fbc10d0e47a538cc251138f47cec094b5e936a8/src/Files.App.Controls/ThemedIcon/Styles/Icons.TabPane.xaml)，右侧面板图标来自 [Icons.Panel.xaml](https://github.com/files-community/Files/blob/3fbc10d0e47a538cc251138f47cec094b5e936a8/src/Files.App.Controls/ThemedIcon/Styles/Icons.Panel.xaml)。
+- 选择和常用命令的图标来自 [Icons.Common.xaml](https://github.com/files-community/Files/blob/3fbc10d0e47a538cc251138f47cec094b5e936a8/src/Files.App.Controls/ThemedIcon/Styles/Icons.Common.xaml)、[Icons.Action.xaml](https://github.com/files-community/Files/blob/3fbc10d0e47a538cc251138f47cec094b5e936a8/src/Files.App.Controls/ThemedIcon/Styles/Icons.Action.xaml)、[Icons.New.xaml](https://github.com/files-community/Files/blob/3fbc10d0e47a538cc251138f47cec094b5e936a8/src/Files.App.Controls/ThemedIcon/Styles/Icons.New.xaml) 和 [Icons.Open.xaml](https://github.com/files-community/Files/blob/3fbc10d0e47a538cc251138f47cec094b5e936a8/src/Files.App.Controls/ThemedIcon/Styles/Icons.Open.xaml)。

@@ -19,10 +19,11 @@ Copyright (C) 2022 by wangwenx190 (Yuhang Zhao), under the MIT License.
 Files Community toolbar artwork is used under the MIT License.
 The native file dialog adapter is adapted from the Apache-2.0 Pulse fork
 maintained by chenzai666 at commit fc6dae4a2737c2bc3014972fb24d30219bd7624f.
-Source: https://github.com/chenzai666/pulse
+Source: https://github.com/chenzai666/pulse/tree/fc6dae4a2737c2bc3014972fb24d30219bd7624f
 The file dialog Shell bridge, its private picker protocol and validation
 helpers are adapted from the Apache-2.0 upstream Pulse project at commit
 b32436831a066e18448b2810bef4bf989024fc68.
+Source: https://github.com/jimmgreen/pulse/tree/b32436831a066e18448b2810bef4bf989024fc68
 
 Project source files carry licensing and modification notices added by
 EternalLightning for this independent distribution. Existing third-party

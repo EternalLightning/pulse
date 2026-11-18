@@ -28,7 +28,7 @@ enum class Icon {
     Panel, PanelClose, Check, Eye, Info, Home, Tray, Pin, Link,
     Palette, Sliders, Warning, Lock, OpenExternal, StarFilled, More,
     Undo, SelectAll, InvertSelection, Terminal, NewFolder, Library, Applications,
-    LayoutSingle, LayoutStacked, LayoutThree, LayoutFour, Count
+    LayoutSingle, LayoutStacked, LayoutThree, LayoutFour, Details, Content, Count
 };
 
 inline Icon FromGlyph(std::wstring_view glyph) noexcept {
@@ -127,9 +127,10 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
     }
     const float pixel_scale = pixel_size > 0 ? pixel_size/kCanvas : 1;
     const float phase = std::fmod(pixel_stroke, 2.0f)*0.5f;
+    const float snap_center = std::round(pixel_size * 0.5f - phase) + phase;
     const auto point = [&](float x, float y) {
-        return pixel_size > 0 ? D2D1::Point2F(std::round(x*pixel_scale-phase)+phase,
-            std::round(y*pixel_scale-phase)+phase) : D2D1::Point2F(x,y);
+        return pixel_size > 0 ? D2D1::Point2F(snap_center + std::round((x - kCanvas * 0.5f) * pixel_scale),
+            snap_center + std::round((y - kCanvas * 0.5f) * pixel_scale)) : D2D1::Point2F(x,y);
     };
     const auto radius = [&](float r) { return pixel_size > 0 ? (std::max)(1.0f,std::round(r*pixel_scale)) : r; };
     const auto begin = [&](float x, float y) {
@@ -296,12 +297,18 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
         line(13.5f,5.5f,18.5f,10.5f); line(4,15,9,20); line(13,20.5f,21,20.5f); break;
     case Icon::Sort: line(5,4,5,20); path({{2,17},{5,20},{8,17}}); line(11,5,21,5); line(11,11,18,11); line(11,17,15,17); break;
     case Icon::Filter: path({{4,4.5f},{20,4.5f},{14,12},{14,18.5f},{10,20.5f},{10,12},{4,4.5f}}); break;
-    case Icon::List: line(9,5,21,5); line(9,12,21,12); line(9,19,21,19); dot(4,5); dot(4,12); dot(4,19); break;
-    case Icon::Grid: box(3,3,10,10,1.5f); box(14,3,21,10,1.5f); box(3,14,10,21,1.5f); box(14,14,21,21,1.5f); break;
-    case Icon::Split: box(3,4,21,20); line(12,4,12,20); break;
-    case Icon::Columns: box(3,4,21,20); line(9,4,9,20); line(15,4,15,20); break;
+    case Icon::List: case Icon::Content:
+        line(9,5,21,5); line(9,12,21,12); line(9,19,21,19); dot(4,5); dot(4,12); dot(4,19); break;
+    case Icon::Details:
+        for (const float y : {5.0f, 12.0f, 19.0f}) { line(3,y,10,y); line(14,y,21,y); }
+        break;
+    case Icon::Grid: case Icon::Applications:
+        box(3,3,10,10,2.5f); box(14,3,21,10,2.5f); box(3,14,10,21,2.5f); box(14,14,21,21,2.5f); break;
+    case Icon::Split: box(3,4,21,20,3); line(12,4,12,20); break;
+    case Icon::Columns: case Icon::LayoutThree:
+        box(3,4,21,20,3); line(9,4,9,20); line(15,4,15,20); break;
     case Icon::Panel: case Icon::PanelClose:
-        box(3,4,21,20); line(15,4,15,20);
+        box(3,4,21,20,3); line(15,4,15,20);
         if (icon == Icon::PanelClose) path({{7,9},{10,12},{7,15}});
         else path({{10,9},{7,12},{10,15}});
         break;
@@ -333,21 +340,22 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
         path({{8,4},{3,9},{8,14}}); line(3,9,15,9);
         begin(15,9); curve(23,9,23,20,15,20); to(11,20); end(); break;
     case Icon::SelectAll:
-        box(3,3,21,21,1); line(8,3,8,21); line(16,3,16,21); line(3,8,21,8); line(3,16,21,16); break;
+        box(3,3,21,21,3); line(8,3,8,21); line(16,3,16,21); line(3,8,21,8); line(3,16,21,16); break;
     case Icon::InvertSelection:
         circle(12,12,9); line(12,3,12,21); line(4,8,12,8); line(3,12,12,12); line(4,16,12,16); break;
     case Icon::Terminal:
-        box(3,4,21,20,1); path({{6,8},{10,12},{6,16}}); line(13,16,18,16); break;
+        box(3,4,21,20,3); path({{6,8},{10,12},{6,16}}); line(13,16,18,16); break;
     case Icon::NewFolder:
         folder(); line(12,11,12,17); line(9,14,15,14); break;
     case Icon::Library:
-        box(3,4,7,21,0); box(10,4,14,21,0); path({{17,4},{21,4},{23,20},{19,21},{17,4}}); break;
-    case Icon::Applications:
-        box(3,3,10,10,1); box(14,3,21,10,1); box(3,14,10,21,1); box(14,14,21,21,1); break;
-    case Icon::LayoutSingle: box(3,4,21,20,1); break;
-    case Icon::LayoutStacked: box(3,4,21,20,1); line(3,12,21,12); break;
-    case Icon::LayoutThree: box(3,4,21,20,1); line(9,4,9,20); line(15,4,15,20); break;
-    case Icon::LayoutFour: box(3,4,21,20,1); line(12,4,12,20); line(3,12,21,12); break;
+        begin(12,6); curve(10.5f,4.5f,9,4,7,4); to(4,4); curve(3.4f,4,3,4.4f,3,5);
+        to(3,18); curve(3,18.6f,3.4f,19,4,19); to(7,19); curve(9,19,10.5f,19.5f,12,21);
+        curve(13.5f,19.5f,15,19,17,19); to(20,19); curve(20.6f,19,21,18.6f,21,18);
+        to(21,5); curve(21,4.4f,20.6f,4,20,4); to(17,4); curve(15,4,13.5f,4.5f,12,6); end(true);
+        line(12,6,12,21); break;
+    case Icon::LayoutSingle: box(3,4,21,20,3); break;
+    case Icon::LayoutStacked: box(3,4,21,20,3); line(3,12,21,12); break;
+    case Icon::LayoutFour: box(3,4,21,20,3); line(12,4,12,20); line(3,12,21,12); break;
     case Icon::Warning: path({{12,3},{22,21},{2,21},{12,3}}); line(12,9,12,14); dot(12,17.5f); break;
     case Icon::Lock: box(4,10,20,21); arc(12,8,5,180,360); line(7,8,7,10); line(17,8,17,10); line(12,14,12,17); break;
     default: break;

@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #pragma once
+#include "../app/app_model.h"
 #include "../app/places.h"
 #include "../common/utf8_file.h"
 #include <algorithm>
@@ -79,7 +80,7 @@ inline int RunWorkspaceSnapshotChecks(const std::wstring& data_dir) {
         {"name":"pulse","root":"C:\\Projects\\pulse","panes":["C:\\Projects"],"views":["details"]},
         {"name":"Thesis","root":"C:\\Projects\\Thesis","panes":["C:\\Projects"],"views":["details"]},
         {"name":"Camp","root":"C:\\Projects\\Camp","panes":["C:\\Projects"],"views":["details"]},
-        {"name":"Split","root":"C:\\Projects\\Split","layout":1,"panes":["C:\\Other","C:\\Projects"],"views":["details","large-icons"]},
+        {"name":"Split","root":"C:\\Projects\\Split","layout":1,"panes":["C:\\Other","C:\\Projects"],"views":["details","large-icons"],"freq":["C:\\Projects\\Split\\dist\t5","C:\\Projects\\Split\\docs\t1"]},
         {"name":"Existing","root":"C:\\Projects\\Existing","layout":1,"panes":["C:\\Other","C:\\Projects\\Existing"],"views":["details","large-icons"]},
         {"name":"Explicit","root":"C:\\Projects\\Explicit","layout":1,"focused_pane":1,"panes":["C:\\Other","C:\\Projects\\Explicit\\child"],"views":["details","large-icons"]}
     ]})";
@@ -95,6 +96,18 @@ inline int RunWorkspaceSnapshotChecks(const std::wstring& data_dir) {
         check(split.focused_pane == 1 && split.pane_paths[0] == L"C:\\Other" &&
               split.pane_paths[1] == fs::NormalizePath(split.root) && split.pane_views[1] == ui::ViewMode::LargeIcons,
               "legacy split repair retains the other pane and the focused view mode");
+        app::Pane pane;
+        pane.NewTab(split.root);
+        pane.ActiveTab()->NavigateTo(split.root + L"\\docs");
+        const auto view = app::BuildWindowViewModel(pane, {}, true, false, false, &legacy_places);
+        const auto group = std::find_if(view.sidebar.begin(), view.sidebar.end(), [](const auto& section) {
+            return section.id == static_cast<int>(app::SidebarSectionId::Workspaces);
+        });
+        check(group != view.sidebar.end() && group->items.size() == legacy_places.workspaces.size() &&
+              group->items[3].path == app::MakeWorkspacePath(3),
+              "legacy frequent folders and normal descendant navigation leave only manually pinned workspace rows");
+        check(legacy_places.ToJson().find(L"\"freq\"") == std::wstring::npos,
+              "saving a legacy workspace omits retired visit records");
         check(legacy_places.workspaces[4].focused_pane == 1 &&
               legacy_places.workspaces[4].pane_paths[0] == L"C:\\Other",
               "a legacy scene already containing its root infers focus without rewriting other paths");

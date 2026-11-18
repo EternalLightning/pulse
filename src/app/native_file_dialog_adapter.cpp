@@ -3,6 +3,7 @@
 // Modified for this Pulse distribution. See LICENSE and NOTICE.
 
 #include "native_file_dialog_adapter.h"
+#include "../common/file_dialog_bridge_bypass.h"
 
 #include <objbase.h>
 #include <UIAutomation.h>
@@ -583,14 +584,19 @@ bool InspectNativeFileDialog(HWND window, NativeFileDialog& dialog, std::wstring
         (GetWindowLongPtrW(controls.filename, GWL_STYLE) & ES_READONLY) ||
         !WindowText(controls.filename, result.filename))
         return Fail(reason, L"找不到已核实的标准文件名或目录输入框。");
-    const auto word = ButtonWord(WindowText(controls.confirm));
+    auto confirm = WindowText(controls.confirm);
+    const auto word = ButtonWord(confirm);
     if (legacy) result.kind = NativeDialogKind::Folder;
     else if (word == L"save" || word == L"保存" || word == L"儲存") result.kind = NativeDialogKind::Save;
     else if (word == L"open" || word == L"打开" || word == L"開啟" || word == L"開啓") result.kind = NativeDialogKind::Open;
     else if (controls.direct && !controls.filter &&
         (word == L"selectfolder" || word == L"选择文件夹" || word == L"選擇資料夾" || word == L"選取資料夾"))
         result.kind = NativeDialogKind::Folder;
-    else return Fail(reason, L"无法可靠区分打开、保存与目录模式；保留原生对话框。");
+    else if (!word.empty() && controls.direct && controls.filter &&
+        dialog_bridge::HasNativeOpenMode(result.process_id, result.window_thread_id, GetWindow(window, GW_OWNER))) {
+        result.kind = NativeDialogKind::Open;
+        result.ok_button_label = std::move(confirm);
+    } else return Fail(reason, L"无法可靠区分打开、保存与目录模式；保留原生对话框。");
     if (controls.ambiguous_filter) return Fail(reason, L"存在多个文件类型控件；保留原生窗口。");
     if (result.kind != NativeDialogKind::Folder) {
         if (!IsSourceControl(controls.filter, result, L"ComboBox") ||

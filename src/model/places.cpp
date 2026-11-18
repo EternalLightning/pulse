@@ -272,20 +272,6 @@ bool PlacesCatalog::Load() {
                 w.pane_paths[static_cast<size_t>(parent_pane)] = root;
             }
         }
-        auto freq = pulse::json::ExtractStringArray(block_doc, L"freq");
-        for (const auto& row : freq) {
-            auto tab = row.find(L'\t');
-            std::pair<std::wstring, int> hit;
-            if (tab == std::wstring::npos) {
-                hit.first = row;
-                hit.second = 1;
-            } else {
-                hit.first = row.substr(0, tab);
-                hit.second = 0;
-                pulse::json::ParseInteger(std::wstring_view(row).substr(tab + 1), hit.second);
-            }
-            if (!hit.first.empty()) w.frequent.push_back(std::move(hit));
-        }
         if (!w.root.empty()) workspaces.push_back(std::move(w));
     }
 
@@ -592,12 +578,6 @@ std::wstring PlacesCatalog::SnapshotJson(const SaveSnapshot& snapshot) {
         for (ViewMode mode : w.pane_views) views.push_back(ViewModeName(mode));
         f << L",\"views\":";
         writeArr(views);
-        std::vector<std::wstring> freq;
-        freq.reserve(w.frequent.size());
-        for (const auto& hit : w.frequent)
-            freq.push_back(hit.first + L"\t" + std::to_wstring(hit.second));
-        f << L",\"freq\":";
-        writeArr(freq);
         f << L"}";
         if (i + 1 < snapshot.workspaces.size()) f << L",";
         f << L"\n";
@@ -811,35 +791,6 @@ void PlacesCatalog::SetNetworkStatus(const std::wstring& unc, fs::NetStatus stat
             return;
         }
     }
-}
-
-void PlacesCatalog::RecordVisit(const std::wstring& path) {
-    const std::wstring n = Norm(path);
-    if (n.empty() || fs::IsVirtualPath(n)) return;
-    for (auto& w : workspaces) {
-        const std::wstring root = Norm(w.root);
-        if (root.empty()) continue;
-        if (n.size() <= root.size()) continue;
-        if (!n.starts_with(root)) continue;
-        if (n.size() > root.size() && n[root.size()] != L'\\' && root.back() != L'\\') continue;
-        bool found = false;
-        for (auto& hit : w.frequent) {
-            if (hit.first == n) { ++hit.second; found = true; break; }
-        }
-        if (!found) w.frequent.push_back({ n, 1 });
-        std::sort(w.frequent.begin(), w.frequent.end(),
-                  [](const auto& a, const auto& b) { return a.second > b.second; });
-        if (w.frequent.size() > 24) w.frequent.resize(24);
-    }
-}
-
-std::vector<std::wstring> PlacesCatalog::FrequentChildren(int workspace_index, int limit) const {
-    std::vector<std::wstring> out;
-    if (workspace_index < 0 || workspace_index >= static_cast<int>(workspaces.size())) return out;
-    const auto& freq = workspaces[static_cast<size_t>(workspace_index)].frequent;
-    for (size_t i = 0; i < freq.size() && static_cast<int>(out.size()) < limit; ++i)
-        out.push_back(freq[i].first);
-    return out;
 }
 
 bool PlacesCatalog::PathHasTag(const std::wstring& path, int tag_index) const {

@@ -266,7 +266,6 @@ void OpenWorkspace(AppState& s, int index) {
             if (t && i < w.pane_views.size()) t->view_mode = w.pane_views[i];
             if (t) StartLoadingPath(s, *t, pth, PathLoadReason::RestoreSession);
         }
-        RememberPath(s, w.root);
     }
     if (!visible.empty()) FocusPane(s, visible[static_cast<size_t>(std::clamp(
         w.focused_pane, 0, static_cast<int>(visible.size()) - 1))]);
@@ -1859,7 +1858,6 @@ void NavigateTo(AppState& s, const std::wstring& path, ui::SurfaceMotion motion)
     RecordSearchHistory(s, normalized);
     StartLoadingPath(s, *tab, normalized);
     RestoreNavigationReturnSelection(s, *tab, returnedChild);
-    RememberPath(s, normalized);
     RecordRecentOpen(s, normalized, app::PlaceItemKind::Folder);
     s.timing.first_frame_recorded = false;
     InvalidateRect(s.hwnd, nullptr, FALSE);

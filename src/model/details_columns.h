@@ -18,6 +18,7 @@ struct DetailsColumnPrefs {
     // Name stays first; Path is managed by the search layout.
     std::vector<DetailsColumnKind> order;
     std::array<float, kDetailsColumnCount> widths{};
+    bool show_cloud_on_local = false;
     bool operator==(const DetailsColumnPrefs&) const = default;
 };
 

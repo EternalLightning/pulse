@@ -353,9 +353,10 @@ MainRenderer::DetailsColumnLayout MainRenderer::DetailsColumns(
         configured.count = 1;
         configured.kinds[0] = ColumnKind::Name;
         const auto automatic = AutoColumnWidths();
+        const bool show_cloud = vm.cloud_status_column || vm.details_columns.show_cloud_on_local;
         float metadata = 0.0f;
         for (const auto kind : vm.details_columns.order) {
-            if (kind == ColumnKind::Name || (kind == ColumnKind::Cloud && !vm.cloud_status_column)) continue;
+            if (kind == ColumnKind::Name || (kind == ColumnKind::Cloud && !show_cloud)) continue;
             float width = vm.details_columns.widths[static_cast<size_t>(kind)];
             if (width == 0.0f) {
                 switch (kind) {
@@ -1850,7 +1851,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
         // The target can already be off screen while its old visible position
         // is still moving out; let the viewport clip the composed commands.
         reflow.Paint(dc, motion_key, cell, [&] {
-        if (detailsView && detailsColumns.cloud_width > 0.0f && !e.record_only) {
+        if (detailsView && vm.cloud_status_column && detailsColumns.cloud_width > 0.0f && !e.record_only) {
             const auto sync = fs::CloudSyncProbe::Instance().Lookup(e.path, e.modified_value);
             const bool problem = sync == fs::CloudSync::Error;
             const bool busy = sync == fs::CloudSync::Syncing;

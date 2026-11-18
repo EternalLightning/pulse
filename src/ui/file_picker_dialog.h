@@ -29,6 +29,20 @@ struct PickerSubmitReply {
     std::wstring error;
 };
 
+struct PickerPlace {
+    std::wstring label;
+    std::wstring directory;
+    std::wstring glyph;
+};
+
+struct PickerPlaces {
+    std::vector<PickerPlace> onedrive;
+    std::vector<PickerPlace> quick_access;
+    std::vector<PickerPlace> network;
+};
+
+using PickerPlacesLoader = std::function<PickerPlaces(const std::function<bool()>& cancelled)>;
+
 struct FilePickerSpec {
     PickerMode mode = PickerMode::Open;
     std::wstring title;
@@ -41,6 +55,9 @@ struct FilePickerSpec {
     bool allow_multiselect = false;
     bool show_hidden = false;
     bool software_device = false;
+
+    // Called on a worker when opening the picker.
+    PickerPlacesLoader load_places;
 
     // Callback work must be nonblocking. An index of zero is the first filter.
     std::function<bool(const FilePickerResult&)> begin_submit;

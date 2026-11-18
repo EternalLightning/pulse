@@ -168,17 +168,19 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
     const auto layout = MakeToolbarLayout(rect.right,scale_,title_bar_height_,margin_,NewButtonWidthPx(compact),left,vm.pane.filter_expand,vm.archive_view,vm.pane.is_recycle,vm.toolbar_order);
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
     FillRect(dc,brStrokeDivider_.get(),left+margin_,title_bar_height_+44*scale_,rect.right-left-2*margin_,scale_);
+    constexpr float icon_slot_dip = 18.0f;
     const auto icon_bounds=[&](float cx,float cy) {
-        const float radius=8*scale_;
+        const float radius = icon_slot_dip * scale_ * 0.5f;
         return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
     };
     const bool high_contrast = IsHighContrast();
     const auto draw_command_icon = [&](int command, command_icons::Icon icon, D2D1_RECT_F bounds,
                                        bool enabled, D2D1_COLOR_F color) {
-        if (toolbar_icons::DrawArtwork(painter_, command, bounds, scale_, vm.dark, high_contrast || !enabled, color)) return;
+        if (toolbar_icons::DrawArtwork(painter_, command, bounds, scale_, vm.dark,
+            high_contrast || !enabled, color, icon_slot_dip)) return;
         if (!paneHeaderStroke_.get()) command_icons::CreateStrokeStyle(dc, &paneHeaderStroke_);
         MakeBrush(dc, color, brText_);
-        toolbar_icons::Draw(dc, brText_.get(), paneHeaderStroke_.get(), icon, bounds, scale_);
+        toolbar_icons::Draw(painter_, dc, brText_.get(), paneHeaderStroke_.get(), icon, bounds, scale_, icon_slot_dip);
     };
     if (layout.create.right > layout.create.left) {
         const std::wstring label=l10n::Get(l10n::StringId::New);
@@ -263,8 +265,9 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
             l10n::Get(l10n::StringId::EmptyRecycleBin).c_str(),vm.can_empty_recycle);
     }
     if (layout.has_overflow && layout.overflow.right > layout.overflow.left) {
-        DrawButton(layout.overflow,theme,IsHovered(vm,HitTestResult::ToolbarMore) ? theme.fill_hover : kTransparent,
-            L"\xE712",L"",theme.text,true,true);
+        const bool hovered = IsHovered(vm, HitTestResult::ToolbarMore);
+        DrawButton(layout.overflow, theme, hovered ? theme.fill_hover : kTransparent, L"", L"", theme.text, true, true);
+        draw_command_icon(0, Icon::More, layout.overflow, true, high_contrast && hovered ? theme.text_selected : theme.text);
     }
     const auto command = [&](D2D1_RECT_F bounds, const wchar_t* glyph, int files_icon,
                              l10n::StringId label, HitTestResult::Region region, bool dropdown, bool enabled = true) {
@@ -286,9 +289,11 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
             : IsHighContrast() && button.state.hovered ? theme.text_selected : theme.text;
         auto icon=icon_bounds(cx,cy);
         if (files_icon == IDR_TOOLBAR_CUSTOMIZE_SVG) {
-            const float side = icon.right-icon.left;
-            icon.left = std::round(icon.left); icon.top = std::round(icon.top);
-            icon.right = icon.left+side; icon.bottom = icon.top+side;
+            // Keep the 16 DIP artwork's one-pixel horizontal strokes aligned at 100%.
+            const float side = 16.0f * scale_;
+            const float left = std::round(cx - side * 0.5f);
+            const float top = std::round(cy - side * 0.5f);
+            icon = D2D1::RectF(left, top, left + side, top + side);
         }
         if (!DrawFluentSvg(files_icon,icon,1.0f,&foreground)) {
             DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,

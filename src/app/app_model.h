@@ -584,6 +584,7 @@ struct SidebarModel {
 };
 
 SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle = nullptr);
+std::vector<SidebarEntry> BuildOneDriveEntries();
 
 // ---------------------------------------------------------------------------
 // View-model builders.

@@ -19,6 +19,7 @@ struct NativeFileDialog {
     DWORD process_id = 0;
     NativeDialogKind kind = NativeDialogKind::Open;
     std::wstring title;
+    std::wstring ok_button_label;
     std::wstring initial_path;
     std::wstring filename;
     std::vector<ui::PickerFilter> filters;

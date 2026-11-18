@@ -81,7 +81,6 @@ bool ScrollbarGeometry(const AppState& s, const ui::PaneViewModel& pane,
 bool HorizontalScrollbarGeometry(const AppState& s, const ui::PaneViewModel& pane,
                                          D2D1_RECT_F& track, D2D1_RECT_F& thumb,
                                          float& maxScroll);
-void RememberPath(AppState& s, const std::wstring& path);
 void RecordRecentOpen(AppState& s, const std::wstring& path,
                              app::PlaceItemKind kind);
 void FillPaneSlots(AppState& s, ui::WindowViewModel& vm);

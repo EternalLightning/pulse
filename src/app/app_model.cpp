@@ -1862,16 +1862,6 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
                 it.badge = l10n::Get(unc ? l10n::StringId::CurrentServer
                                          : l10n::StringId::Current);
             workspaces.items.push_back(std::move(it));
-            for (const auto& child : places->FrequentChildren(i, 8)) {
-                ui::SidebarItem sub;
-                sub.label = TabTitle(child);
-                sub.path = child;
-                sub.indent = 1;
-                sub.icon_glyph = unc ? L"\xE968" : L"\xE8B7";
-                sub.fallback_text = L"Dir";
-                sub.icon_color = ui::HexColor(unc ? 0x38BDF8 : 0x94A3B8);
-                workspaces.items.push_back(std::move(sub));
-            }
         }
     }
 
