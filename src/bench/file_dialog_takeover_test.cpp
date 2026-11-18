@@ -40,6 +40,14 @@ HWND FindFilename(HWND picker, const wchar_t* expected) {
     return nullptr;
 }
 
+bool AboveSource(HWND picker, HWND source) {
+    for (HWND window = GetTopWindow(nullptr); window; window = GetWindow(window, GW_HWNDNEXT)) {
+        if (window == picker) return true;
+        if (window == source) return false;
+    }
+    return false;
+}
+
 template<class Check>
 bool WaitFor(Check check, DWORD timeout = 10000) {
     const auto deadline = GetTickCount64() + timeout;
@@ -159,10 +167,15 @@ bool WatcherCase(const std::wstring& folder, bool fallback) {
                 GetForegroundWindow() == native, recognized, reason.c_str());
         }
         if (success) {
+            success = WaitFor([&] {
+                return !(GetWindowLongPtrW(picker, GWL_EXSTYLE) & WS_EX_TOPMOST) &&
+                    (GetForegroundWindow() != native || AboveSource(picker, native));
+            }, 1500);
+            if (!success) std::puts("[DIAG] picker must stay above its source in the normal window stack");
             HWND edit = nullptr;
             const auto path = folder + L"\\sample.txt";
             DWORD_PTR changed = FALSE;
-            success = WaitFor([&] {
+            success = success && WaitFor([&] {
                 edit = FindFilename(picker, L"sample.txt");
                 return edit != nullptr;
             }, 3000) && SendMessageTimeoutW(edit, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(path.c_str()),

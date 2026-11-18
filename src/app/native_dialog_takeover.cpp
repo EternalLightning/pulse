@@ -165,7 +165,13 @@ void RunPicker(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
         };
         spec.on_ready = [&](HWND picker) {
             session->picker = picker;
-            if (GetForegroundWindow() == source.window) SetForegroundWindow(picker);
+            if (GetForegroundWindow() == source.window && !SetForegroundWindow(picker) &&
+                GetForegroundWindow() == source.window) {
+                // Move above the native dialog without taking focus or staying always on top.
+                constexpr UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+                if (SetWindowPos(picker, HWND_TOPMOST, 0, 0, 0, 0, flags))
+                    SetWindowPos(picker, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+            }
             SetEvent(shared->wake);
         };
         spec.current_pulse_directory = [&] {
