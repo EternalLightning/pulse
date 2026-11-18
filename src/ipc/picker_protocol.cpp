@@ -96,7 +96,7 @@ CodecError Validate(const Message& m) {
         for (const auto& f : r->filters)
             if (f.label.empty() || f.pattern.empty() || !ValidText(f.label) || !ValidText(f.pattern)) return CodecError::InvalidSemantics;
     } else if (const auto* response = std::get_if<Response>(&m.body)) {
-        if (!ValidOperation(response->operation) || response->status < Status::Accepted || response->status > Status::Failed ||
+        if (!ValidOperation(response->operation) || response->status < Status::Accepted || response->status > Status::UseNative ||
             response->error_source > ErrorSource::HResult || response->paths.size() > kMaxPaths || response->filter_index >= kMaxFilters)
             return CodecError::InvalidSemantics;
         const bool success = response->status == Status::Accepted;

@@ -94,22 +94,23 @@ public:
         result_count_ = 0;
         result_index_ = 0;
         try {
-            if (native_only_ || (GetKeyState(VK_SHIFT) & 0x8000) ||
+            if (GetKeyState(VK_SHIFT) & 0x8000) return ShowNativeWithoutTakeover(owner);
+            if (native_only_ ||
                 (services_.enabled && !services_.enabled()) ||
-                (!services_.run_bridge && services_.executable.empty())) return ShowNative(owner);
+                (!services_.run_bridge && services_.executable.empty())) return native_->Show(owner);
             if (!services_.run_bridge && GetFileAttributesW(services_.executable.c_str()) == INVALID_FILE_ATTRIBUTES)
-                return ShowNative(owner);
+                return native_->Show(owner);
             if (owner) {
                 DWORD process = 0;
                 const DWORD thread = GetWindowThreadProcessId(owner, &process);
                 if (!thread || thread != GetCurrentThreadId() || process != GetCurrentProcessId())
-                    return ShowNative(owner);
+                    return native_->Show(owner);
             }
             const auto request = Prepare();
-            if (!request) return ShowNative(owner);
+            if (!request) return native_->Show(owner);
 
             cancel_.Reset(CreateEventW(nullptr, TRUE, FALSE, nullptr));
-            if (!cancel_) return ShowNative(owner);
+            if (!cancel_) return native_->Show(owner);
             bridge_result_ = true;
             const auto response = services_.run_bridge ? services_.run_bridge(*request, owner, cancel_.Get()) :
                 wire::RunPickerClient(services_.executable, *request, owner, cancel_.Get());
@@ -118,10 +119,14 @@ public:
             if (!wire::ValidateResponse(*request, response)) return E_UNEXPECTED;
             const auto& result = std::get<wire::Response>(response.body);
             if (result.status == wire::Status::Cancelled) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+            if (result.status == wire::Status::UseNative) {
+                bridge_result_ = false;
+                return ShowNativeWithoutTakeover(owner);
+            }
             if (result.status == wire::Status::Unsupported && result.error_source == wire::ErrorSource::Win32 &&
                 result.error_code == ERROR_NOT_SUPPORTED) {
                 bridge_result_ = false;
-                return ShowNative(owner);
+                return native_->Show(owner);
             }
             if (result.status == wire::Status::Failed || result.status == wire::Status::Unsupported)
                 return WireError(result);
@@ -365,7 +370,7 @@ private:
         ComPtr<IUnknown> queried;
         return SUCCEEDED(native_->QueryInterface(iid, reinterpret_cast<void**>(queried.GetAddressOf())));
     }
-    HRESULT ShowNative(HWND owner) {
+    HRESULT ShowNativeWithoutTakeover(HWND owner) {
         const dialog_bridge::NativeFallbackScope bypass;
         return native_->Show(owner);
     }

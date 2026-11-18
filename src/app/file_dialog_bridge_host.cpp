@@ -263,7 +263,8 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner,
     ui::FilePickerResult result;
     const bool picked = !*cancelled && ui::ShowFilePicker(owner, spec, dark, accent, result);
     if (*cancelled) return Response(request, wire::Status::Cancelled);
-    if (use_windows || !picker) return Response(request, wire::Status::Unsupported, ERROR_NOT_SUPPORTED);
+    if (use_windows) return Response(request, wire::Status::UseNative);
+    if (!picker) return Response(request, wire::Status::Unsupported, ERROR_NOT_SUPPORTED);
     if (!picked || accepted.paths.empty()) return Response(request, wire::Status::Cancelled);
     auto reply = Response(request, wire::Status::Accepted);
     reply.filter_index = static_cast<uint32_t>(accepted.filter_index);

@@ -1396,7 +1396,11 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     add_executable(pulse_takeover_delivery_fixture_test src/bench/takeover_delivery_fixture_test.cpp)
     add_executable(pulse_empty_state_render_test src/bench/empty_state_render_test.cpp)
     add_executable(pulse_virtual_location_navigation_test src/bench/virtual_location_navigation_test.cpp)
-    add_executable(pulse_file_dialog_takeover_test src/bench/file_dialog_takeover_test.cpp)
+    add_executable(pulse_file_dialog_takeover_test
+        src/bench/file_dialog_takeover_test.cpp
+        src/shell_bridge/file_dialog_contract.cpp
+        src/shell_bridge/file_dialog_wrapper.cpp
+        src/shell_bridge/picker_shell_results.cpp)
     add_executable(pulse_upstream_adaptation_test src/bench/upstream_adaptation_test.cpp
         src/bench/window_transfer_regression_test.cpp src/bench/network_access_application_test.cpp)
     target_compile_definitions(pulse_quality_application_objects PRIVATE PULSE_FOLDER_SIZES_TESTING=1)

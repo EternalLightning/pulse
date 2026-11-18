@@ -45,7 +45,7 @@ enum Option : uint32_t { AllowMultiSelect = 1, ShowHidden = 2, OverwritePrompt =
                          SaveRequireUnencrypted = 2048, SaveSkipAccessValidation = 4096 };
 enum LabelFlag : uint32_t { LabelTitle = 1, LabelOkButton = 2, LabelFileName = 4 };
 constexpr uint32_t kMaxLabelUnits = 1024;
-enum class Status : uint32_t { Accepted = 1, Cancelled, Unsupported, Failed };
+enum class Status : uint32_t { Accepted = 1, Cancelled, Unsupported, Failed, UseNative };
 enum class ErrorSource : uint32_t { None, Protocol, Win32, HResult };
 enum class CodecError { None, Malformed, UnsupportedVersion, UnsupportedCapability, InvalidSemantics };
 using RequestId = std::array<uint8_t, 16>;

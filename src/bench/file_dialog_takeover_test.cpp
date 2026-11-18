@@ -4,6 +4,7 @@
 #include "../common/file_dialog_bridge_bypass.h"
 #include "../common/localization.h"
 #include "../ipc/picker_client.h"
+#include "../shell_bridge/file_dialog_wrapper.h"
 
 #include <ole2.h>
 #include <shobjidl.h>
@@ -55,24 +56,41 @@ int NativeFixture(const std::wstring& directory, bool fallback) {
     if (FAILED(OleInitialize(nullptr))) return 2;
     int result = 1;
     {
-        ComPtr<IFileOpenDialog> dialog;
+        ComPtr<IFileOpenDialog> native, dialog;
         ComPtr<IShellItem> folder;
         using Entry = HRESULT (WINAPI*)(REFCLSID, REFIID, void**);
         const HMODULE system_dialog = LoadLibraryExW(L"comdlg32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         const auto entry = system_dialog ? std::bit_cast<Entry>(GetProcAddress(system_dialog, "DllGetClassObject")) : nullptr;
         ComPtr<IClassFactory> factory;
         const COMDLG_FILTERSPEC filters[] = {{L"Text files (*.txt)", L"*.txt"}};
+        pulse::shell_bridge::FileDialogBridgeServices services;
+        bool host_called = false;
+        services.run_bridge = [&](const wire::Message& request, HWND, HANDLE) {
+            host_called = true;
+            wire::Response reply;
+            reply.operation = std::get<wire::Request>(request.body).operation;
+            if (fallback) {
+                reply.status = wire::Status::UseNative;
+            } else {
+                reply.status = wire::Status::Unsupported;
+                reply.error_source = wire::ErrorSource::Win32;
+                reply.error_code = ERROR_NOT_SUPPORTED;
+            }
+            return wire::Message{request.request_id, std::move(reply)};
+        };
         if (entry && SUCCEEDED(entry(CLSID_FileOpenDialog, IID_PPV_ARGS(&factory))) &&
-            SUCCEEDED(factory->CreateInstance(nullptr, IID_PPV_ARGS(&dialog))) &&
+            SUCCEEDED(factory->CreateInstance(nullptr, IID_PPV_ARGS(&native))) &&
+            SUCCEEDED(pulse::shell_bridge::WrapNativeFileDialog(pulse::shell_bridge::DialogFactory::Open,
+                native.Get(), services, IID_PPV_ARGS(&dialog))) &&
             SUCCEEDED(SHCreateItemFromParsingName(directory.c_str(), nullptr, IID_PPV_ARGS(&folder))) &&
             SUCCEEDED(dialog->SetOptions(FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM | FOS_DONTADDTORECENT)) &&
             SUCCEEDED(dialog->SetFileTypes(1, filters)) && SUCCEEDED(dialog->SetFolder(folder.Get())) &&
             SUCCEEDED(dialog->SetTitle(fallback ? kFallbackTitle : kOpenTitle)) &&
             SUCCEEDED(dialog->SetFileName(L"sample.txt"))) {
+            const HRESULT shown = dialog->Show(nullptr);
             if (fallback) {
-                pulse::dialog_bridge::NativeFallbackScope scope;
-                result = dialog->Show(nullptr) == HRESULT_FROM_WIN32(ERROR_CANCELLED) ? 0 : 1;
-            } else if (dialog->Show(nullptr) == S_OK) {
+                result = host_called && shown == HRESULT_FROM_WIN32(ERROR_CANCELLED) ? 0 : 1;
+            } else if (host_called && shown == S_OK) {
                 ComPtr<IShellItem> selected;
                 PWSTR path = nullptr;
                 if (SUCCEEDED(dialog->GetResult(&selected)) &&
@@ -246,13 +264,13 @@ int wmain(int argc, wchar_t** argv) {
     std::ofstream(folder / L"sample.txt") << "fixture";
     if (fallback_only) {
         const bool fallback = WatcherCase(folder.wstring(), true);
-        std::printf("[%s] Shell bridge fallback marker preserves the Windows dialog\n", fallback ? "PASS" : "FAIL");
+        std::printf("[%s] Explicit Windows choice bypasses window takeover\n", fallback ? "PASS" : "FAIL");
         return fallback ? 0 : 1;
     }
     bool ok = true;
     if (!host_only) {
         ok = WatcherCase(folder.wstring(), false);
-        std::printf("[%s] Window watcher submits to the real Windows Open dialog\n", ok ? "PASS" : "FAIL");
+        std::printf("[%s] Window watcher submits after the Shell bridge falls back automatically\n", ok ? "PASS" : "FAIL");
     }
     if (watcher_only) return ok ? 0 : 1;
     wchar_t executable[MAX_PATH]{};
