@@ -387,6 +387,7 @@ list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "content_(agent|index|search|task_se
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "filename_timing\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "image_open\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "device_fake\\.cpp$")
+list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "native_(dialog_takeover|file_dialog_adapter)\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "text_task_reader\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "content_timing\\.cpp$")
 list(FILTER PULSE_APP_SOURCES EXCLUDE REGEX "/(picker_(client|protocol|transport)|file_save_(model|access_policy|revalidation))\\.cpp$")
@@ -639,7 +640,8 @@ add_executable(pulse_shell_request_ownership_test EXCLUDE_FROM_ALL
     src/bench/shell_request_ownership_test.cpp src/shell_host/deletion_identity.cpp)
 target_compile_options(pulse_shell_request_ownership_test PRIVATE /Gy /Gw)
 target_link_options(pulse_shell_request_ownership_test PRIVATE /OPT:REF /INCREMENTAL:NO)
-target_link_libraries(pulse_shell_request_ownership_test PRIVATE ole32 shell32 uuid advapi32 user32 shlwapi)
+target_link_libraries(pulse_shell_request_ownership_test PRIVATE ole32 shell32 uuid advapi32 user32 shlwapi
+    pulse_localization pulse_shell_file_operations)
 
 # ---- Pulse.Preview.exe: thumbnail decoding / Shell provider isolation ----
 add_executable(pulse_preview WIN32 src/preview_host/main.cpp src/preview_host/video_codec.cpp
@@ -1395,7 +1397,8 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     add_executable(pulse_takeover_delivery_fixture_test src/bench/takeover_delivery_fixture_test.cpp)
     add_executable(pulse_empty_state_render_test src/bench/empty_state_render_test.cpp)
     add_executable(pulse_virtual_location_navigation_test src/bench/virtual_location_navigation_test.cpp)
-    add_executable(pulse_file_dialog_takeover_test src/bench/file_dialog_takeover_test.cpp)
+    add_executable(pulse_file_dialog_takeover_test src/bench/file_dialog_takeover_test.cpp
+        src/app/native_dialog_takeover.cpp src/app/native_file_dialog_adapter.cpp)
     add_executable(pulse_upstream_adaptation_test src/bench/upstream_adaptation_test.cpp
         src/bench/window_transfer_regression_test.cpp src/bench/network_access_application_test.cpp)
     target_compile_definitions(pulse_quality_application_objects PRIVATE PULSE_FOLDER_SIZES_TESTING=1)

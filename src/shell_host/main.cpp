@@ -268,8 +268,18 @@ void ExecuteRequest(std::unique_ptr<Request> req) {
         return;
     }
     if (req->type == REQ_DEVICE_OPERATION) {
-        const HRESULT hr = pulse::shell::ExecuteDeviceOperation(req->device_operation);
-        SendDone(req->id, hr, hr == HRESULT_FROM_WIN32(ERROR_CANCELLED), L"");
+        std::vector<std::wstring> names;
+        const auto& operation = req->device_operation;
+        const HRESULT hr = pulse::shell::ExecuteDeviceOperation(operation, names);
+        PayloadWriter writer;
+        writer.PutU32(static_cast<uint32_t>(hr));
+        writer.PutString(operation.folder);
+        writer.PutStringArray(names);
+        if (!SendMsg(RSP_DEVICE_OPERATION_DONE, req->id, writer.data())) {
+            g.running.store(false);
+            CancelIoEx(g.pipe, nullptr);
+            PostQuitMessage(0);
+        }
         return;
     }
     if (req->type == REQ_DELETE_RECYCLE || req->type == REQ_REALDELETE) {
@@ -485,7 +495,7 @@ DWORD WINAPI ReaderThreadImpl() {
                 uint64_t owner = 0;
                 auto& operation = request->device_operation;
                 if (!reader.GetU64(owner) || !reader.GetString(operation.verb) ||
-                    !reader.GetString(operation.name) || !reader.GetStringArray(operation.ids) ||
+                    !reader.GetString(operation.name) || !reader.GetStringArray(operation.ids) || !reader.GetString(operation.folder) ||
                     reader.remaining() != 0 || operation.ids.empty() || operation.ids.size() > 4096) {
                     SendDone(h.request_id, E_INVALIDARG, false, l10n::Get(l10n::StringId::ShellDeviceRequestMalformed).c_str());
                     break;

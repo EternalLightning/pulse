@@ -7,6 +7,7 @@
 #include "clipboard.h"
 #include "../common/shell_id.h"
 #include "../common/path_utils.h"
+#include "../common/portable_device_item.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -211,7 +212,9 @@ private:
 
 class ShellTransferProgress final : public IFileOperationProgressSink {
 public:
-    explicit ShellTransferProgress(const std::atomic_bool* cancelled) : cancelled_(cancelled) {}
+    ShellTransferProgress(const std::atomic_bool* cancelled, IShellItem* destination,
+                          std::vector<std::wstring>* completed_names)
+        : cancelled_(cancelled), destination_(destination), completed_names_(completed_names) {}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
@@ -227,18 +230,28 @@ public:
     HRESULT Check() const { return cancelled_ && cancelled_->load() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : S_OK; }
     HRESULT Result() const { return result_; }
     HRESULT Record(HRESULT result) { if (FAILED(result) && SUCCEEDED(result_)) result_ = result; return Check(); }
+    HRESULT Record(HRESULT result, IShellItem* folder, IShellItem* item) {
+        int order = 1;
+        if (completed_names_ && SUCCEEDED(result) && item && folder && destination_ &&
+            SUCCEEDED(folder->Compare(destination_, SICHINT_CANONICAL, &order)) && order == 0) {
+            auto name = portable_device::ShellItemName(item);
+            if (!name.empty() && std::find(completed_names_->begin(), completed_names_->end(), name) == completed_names_->end())
+                completed_names_->push_back(std::move(name));
+        }
+        return Record(result);
+    }
     HRESULT STDMETHODCALLTYPE StartOperations() override { return Check(); }
     HRESULT STDMETHODCALLTYPE FinishOperations(HRESULT result) override { return Record(result); }
     HRESULT STDMETHODCALLTYPE PreRenameItem(DWORD, IShellItem*, LPCWSTR) override { return Check(); }
     HRESULT STDMETHODCALLTYPE PostRenameItem(DWORD, IShellItem*, LPCWSTR, HRESULT result, IShellItem*) override { return Record(result); }
     HRESULT STDMETHODCALLTYPE PreMoveItem(DWORD, IShellItem*, IShellItem*, LPCWSTR) override { return Check(); }
-    HRESULT STDMETHODCALLTYPE PostMoveItem(DWORD, IShellItem*, IShellItem*, LPCWSTR, HRESULT result, IShellItem*) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE PostMoveItem(DWORD, IShellItem*, IShellItem* folder, LPCWSTR, HRESULT result, IShellItem* item) override { return Record(result, folder, item); }
     HRESULT STDMETHODCALLTYPE PreCopyItem(DWORD, IShellItem*, IShellItem*, LPCWSTR) override { return Check(); }
-    HRESULT STDMETHODCALLTYPE PostCopyItem(DWORD, IShellItem*, IShellItem*, LPCWSTR, HRESULT result, IShellItem*) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE PostCopyItem(DWORD, IShellItem*, IShellItem* folder, LPCWSTR, HRESULT result, IShellItem* item) override { return Record(result, folder, item); }
     HRESULT STDMETHODCALLTYPE PreDeleteItem(DWORD, IShellItem*) override { return Check(); }
     HRESULT STDMETHODCALLTYPE PostDeleteItem(DWORD, IShellItem*, HRESULT result, IShellItem*) override { return Record(result); }
     HRESULT STDMETHODCALLTYPE PreNewItem(DWORD, IShellItem*, LPCWSTR) override { return Check(); }
-    HRESULT STDMETHODCALLTYPE PostNewItem(DWORD, IShellItem*, LPCWSTR, LPCWSTR, DWORD, HRESULT result, IShellItem*) override { return Record(result); }
+    HRESULT STDMETHODCALLTYPE PostNewItem(DWORD, IShellItem* folder, LPCWSTR, LPCWSTR, DWORD, HRESULT result, IShellItem* item) override { return Record(result, folder, item); }
     HRESULT STDMETHODCALLTYPE UpdateProgress(UINT, UINT) override { return Check(); }
     HRESULT STDMETHODCALLTYPE ResetTimer() override { return Check(); }
     HRESULT STDMETHODCALLTYPE PauseTimer() override { return Check(); }
@@ -246,9 +259,27 @@ public:
 private:
     LONG refs_ = 1;
     const std::atomic_bool* cancelled_;
+    IShellItem* destination_;
+    std::vector<std::wstring>* completed_names_;
     HRESULT result_ = S_OK;
 };
 } // namespace
+
+HRESULT PerformShellOperation(IFileOperation* operation, IShellItem* destination, std::vector<std::wstring>* completed_names,
+                              const std::atomic_bool* cancelled) {
+    Microsoft::WRL::ComPtr<ShellTransferProgress> progress;
+    progress.Attach(new ShellTransferProgress(cancelled, destination, completed_names));
+    DWORD cookie = 0;
+    HRESULT hr = operation->Advise(progress.Get(), &cookie);
+    if (FAILED(hr)) return hr;
+    hr = operation->PerformOperations();
+    BOOL aborted = FALSE;
+    if (SUCCEEDED(hr)) hr = operation->GetAnyOperationsAborted(&aborted);
+    operation->Unadvise(cookie);
+    if (SUCCEEDED(hr) && FAILED(progress->Result())) hr = progress->Result();
+    if (aborted || (cancelled && cancelled->load())) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    return hr;
+}
 
 bool HasShellFileData(IDataObject* data) {
     if (!data) return false;
@@ -294,7 +325,8 @@ HRESULT ResolveShellClipboardItems(IDataObject* data, IShellItemArray** out) {
 }
 
 HRESULT PasteShellDataToFolder(IDataObject* data, IShellItem* destination, DWORD preferred_effect,
-                               const std::atomic_bool* cancelled, HWND owner) {
+                               const std::atomic_bool* cancelled, HWND owner,
+                               std::vector<std::wstring>* completed_names = nullptr) {
     if (cancelled && cancelled->load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     Microsoft::WRL::ComPtr<IDataObject> synchronous;
     synchronous.Attach(new SynchronousShellData(data, cancelled));
@@ -317,22 +349,12 @@ HRESULT PasteShellDataToFolder(IDataObject* data, IShellItem* destination, DWORD
         }
         if (same_folder && !PreferredEffectIsCut(preferred_effect)) flags |= FOF_RENAMEONCOLLISION;
         if (SUCCEEDED(hr)) hr = operation->SetOperationFlags(flags);
-        Microsoft::WRL::ComPtr<ShellTransferProgress> progress;
-        progress.Attach(new ShellTransferProgress(cancelled));
-        DWORD cookie = 0;
-        if (SUCCEEDED(hr)) hr = operation->Advise(progress.Get(), &cookie);
         if (SUCCEEDED(hr)) hr = PreferredEffectIsCut(preferred_effect)
             ? operation->MoveItems(items.Get(), destination)
             : operation->CopyItems(items.Get(), destination);
         // A drop target may return while a provider is still transferring data.
         // Keep the source alive and report only the file operation's terminal result.
-        if (SUCCEEDED(hr)) hr = operation->PerformOperations();
-        BOOL aborted = FALSE;
-        if (SUCCEEDED(hr)) hr = operation->GetAnyOperationsAborted(&aborted);
-        if (operation && cookie) operation->Unadvise(cookie);
-        if (SUCCEEDED(hr) && FAILED(progress->Result())) hr = progress->Result();
-        if (aborted || (cancelled && cancelled->load())) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
-        return hr;
+        return SUCCEEDED(hr) ? PerformShellOperation(operation.Get(), destination, completed_names, cancelled) : hr;
     }
     if (resolved != DV_E_FORMATETC) return resolved;
     IDropTarget* drop = nullptr;
@@ -400,12 +422,12 @@ bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
     return SUCCEEDED(PasteShellData(data.Get(), dir, ShellClipboardEffect(data.Get())));
 }
 
-HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner) {
+HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner, std::vector<std::wstring>& completed_names) {
     Microsoft::WRL::ComPtr<IDataObject> data;
     const HRESULT hr = OleGetClipboard(&data);
     if (FAILED(hr)) return hr;
     if (!data) return DV_E_FORMATETC;
-    return PasteShellDataToFolder(data.Get(), folder, ShellClipboardEffect(data.Get()), nullptr, owner);
+    return PasteShellDataToFolder(data.Get(), folder, ShellClipboardEffect(data.Get()), nullptr, owner, &completed_names);
 }
 
 #ifdef PULSE_CLIPBOARD_TESTING

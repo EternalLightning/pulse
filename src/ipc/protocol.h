@@ -94,7 +94,7 @@ enum MsgType : uint32_t {
     // Same plan fields followed by owner HWND(u64); Pulse owns fallback decisions.
     REQ_AUTHORIZED_RECYCLE = 16,
     REQ_SHELL_LAUNCH = 17, // versioned payload in shell_launch_protocol.h; never replayed
-    REQ_DEVICE_OPERATION = 18, // owner(u64), verb, name, absolute Shell IDs; never replayed
+    REQ_DEVICE_OPERATION = 18, // owner(u64), verb, name, absolute Shell IDs, folder; never replayed
     REQ_FILE_OPERATION = 19, // versioned file_operation_protocol.h; never replayed
     REQ_FILE_OPERATION_PAUSE = 20, // target id in header, paused(u32)
     // Explicit Pulse consent; same one-shot deletion plan, identities, then owner HWND.
@@ -107,6 +107,7 @@ enum MsgType : uint32_t {
     RSP_FILE_OPERATION_DONE = 105,
     RSP_FILE_OPERATION_BYTES = 106, // transferred(u64), total(u64)
     RSP_FILE_OPERATION_ITEMS = 107, // bounded result batch; followed by FILE_OPERATION_DONE
+    RSP_DEVICE_OPERATION_DONE = 108, // HRESULT(u32), folder(string), completed names(string array)
 };
 
 // REQ_CTX_QUERY flags.

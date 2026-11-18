@@ -80,7 +80,6 @@ std::vector<HitTestResult> MainRenderer::SettingsControls(const WindowViewModel&
         toggle(l.startup_tray_row, 31);
         toggle(l.explorer_takeover_row, 24);
         toggle(l.file_dialog_bridge_row, 38, !vm.settings_system_pending);
-        toggle(l.file_dialog_takeover_row, 37);
         toggle(l.last_tab_row, 32);
         toggle(l.startup_row[2], 21, !vm.settings_system_pending);
         for (int i = 0; i < 2; ++i) toggle(l.startup_row[i], i + 1);

@@ -359,8 +359,11 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                    vm.settings_explorer_takeover, 24);
             toggle(lay.file_dialog_bridge_row, I::SettingsFileDialogBridge, I::SettingsFileDialogBridgeDesc,
                    L"\xE8E5", vm.settings_file_dialog_bridge, 38);
-            toggle(lay.file_dialog_takeover_row, I::SettingsFileDialogTakeover, I::SettingsFileDialogTakeoverDesc,
-                   L"\xE8A7", vm.settings_file_dialog_takeover, 37);
+            const auto takeover = lay.file_dialog_takeover_row;
+            const auto& takeover_description = l10n::Get(I::SettingsFileDialogTakeoverDesc);
+            label(takeover, l10n::Get(I::SettingsFileDialogTakeover), takeover_description, L"\xE8A7",
+                  takeover.right - 16*scale_, SettingsCaptionHeight(takeover_description,
+                      takeover.right-takeover.left-70*scale_, scale_, &painter_)/scale_);
 
             if (lay.system_status.bottom > lay.system_status.top) {
                 const auto r = lay.system_status;

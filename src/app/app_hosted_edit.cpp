@@ -393,13 +393,14 @@ void LayoutRenameOverlay(AppState& s) {
     PlaceHostedEdit(s.hwndRenameEdit, s.hwnd, field, s.scale, 4, 4);
 }
 void ShowRenameOverlay(AppState& s) {
-    if (BuildCommandContext(s).shell_selection) return;
+    const auto context = BuildCommandContext(s);
+    if (context.shell_selection || (context.device_selection && !app::IsCommandEnabled(app::CmdRename, context))) return;
     if(DeferContentSelection(s,[](AppState& v){ShowRenameOverlay(v);})) return;
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot || tab->selected_index < 0) return;
     if (tab->selected_index < static_cast<int>(tab->EntryCount()) &&
         tab->EntryAt(static_cast<size_t>(tab->selected_index)).change_record_only) return;
-    if (tab->net_readonly || IsRecycleTab(tab)) return;
+    if ((!context.device_selection && tab->net_readonly) || IsRecycleTab(tab)) return;
     if (tab->SelectedCount() >= 2) {
         ShowBatchRename(s);
         return;
@@ -460,7 +461,10 @@ void HideRenameOverlay(AppState& s, bool commit) {
             const bool drive = path::IsDriveRootPath(full);
             const auto entry = tab->EntryAt(index);
             const auto old_name = drive ? app::DriveLabelFromDisplayName(full, entry.name) : entry.name;
-            if (!full.empty() && (drive || buf[0]) && buf != old_name) {
+            if (fs::IsDevicePath(entry.full_path)) {
+                if (app::IsDeviceTab(tab) && (entry.device_actions & fs::DeviceRename) && buf[0] && buf != old_name)
+                    app::QueueDeviceOperation(s, L"rename", {entry.shell_id}, buf);
+            } else if (!full.empty() && (drive || buf[0]) && buf != old_name) {
                 ops::OpRequest req;
                 req.type = ops::OpType::Rename;
                 req.sources.push_back(full);

@@ -13,6 +13,8 @@ struct Tab;
 struct DeviceOperationResult {
     HRESULT error = S_OK;
     bool cancelled = false;
+    std::wstring folder;
+    std::vector<std::wstring> names;
 };
 bool IsDeviceTab(const Tab* tab);
 bool HasDeviceSelection(const Tab& tab);

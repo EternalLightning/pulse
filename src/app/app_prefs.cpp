@@ -81,7 +81,6 @@ void AppPrefs::ResetToDefaults() {
     take_over_win_e = false;
     take_over_this_pc = false;
     experimental_explorer_takeover = false;
-    experimental_file_dialog_takeover = false;
     file_dialog_bridge_registered = false;
     verify_copies = false;
     show_status_performance = false;
@@ -151,8 +150,6 @@ std::wstring AppPrefs::ToJson() const {
     out += take_over_this_pc ? L"true" : L"false";
     out += L",\n  \"experimental_explorer_takeover\":";
     out += experimental_explorer_takeover ? L"true" : L"false";
-    out += L",\n  \"experimental_file_dialog_takeover\":";
-    out += experimental_file_dialog_takeover ? L"true" : L"false";
     out += L",\n  \"verify_copies\":";
     out += verify_copies ? L"true" : L"false";
     out += L",\n  \"show_status_performance\":";
@@ -288,7 +285,6 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     take_over_win_e = pulse::json::ExtractBool(doc, L"take_over_win_e", false);
     take_over_this_pc = pulse::json::ExtractBool(doc, L"take_over_this_pc", false);
     experimental_explorer_takeover = pulse::json::ExtractBool(doc, L"experimental_explorer_takeover", false);
-    experimental_file_dialog_takeover = pulse::json::ExtractBool(doc, L"experimental_file_dialog_takeover", false);
     verify_copies = pulse::json::ExtractBool(doc, L"verify_copies", false);
     show_status_performance = pulse::json::ExtractBool(doc, L"show_status_performance", false);
     text_compare_enabled = pulse::json::ExtractBool(doc, L"text_compare_enabled", true);

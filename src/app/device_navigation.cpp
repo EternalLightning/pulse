@@ -63,29 +63,35 @@ std::wstring DeviceParent(const std::wstring& path) {
 
 void QueueDeviceOperation(AppState& state, std::wstring verb,
         std::vector<std::wstring> ids, std::wstring name) {
-    if (ids.empty()) return;
+    if (ids.empty() || std::any_of(ids.begin(), ids.end(), [](const auto& id) { return id.empty(); })) return;
     if (!state.device_shell_owner) {
         ipc::ShellClient::Callbacks callbacks;
         callbacks.done = [mailbox = state.device_operation_mailbox](uint32_t, uint32_t hr,
                 bool cancelled, std::wstring) {
             if (mailbox) mailbox->Publish({static_cast<HRESULT>(hr), cancelled});
         };
+        callbacks.device_done = [mailbox = state.device_operation_mailbox](HRESULT hr,
+                std::wstring folder, std::vector<std::wstring> names) {
+            if (mailbox) mailbox->Publish({hr, hr == HRESULT_FROM_WIN32(ERROR_CANCELLED),
+                std::move(folder), std::move(names)});
+        };
         state.device_shell_owner = ipc::ShellClient::Instance().Acquire(std::move(callbacks));
     }
     const auto owner = state.device_shell_owner;
     const auto mailbox = state.device_operation_mailbox;
     const HWND window = state.hwnd;
+    const auto* tab = ActiveTab(state);
+    const std::wstring folder = IsDeviceTab(tab) ? tab->current_path : L"";
     const bool queued = state.worker.EnqueueIo([window, owner, mailbox, verb = std::move(verb),
-            ids = std::move(ids), name = std::move(name)] {
-        if (!ipc::ShellClient::Instance().DeviceOperation(window, verb, ids, name, owner) && mailbox)
+            ids = std::move(ids), name = std::move(name), folder] {
+        if (!ipc::ShellClient::Instance().DeviceOperation(window, verb, ids, name, folder, owner) && mailbox)
             mailbox->Publish({HRESULT_FROM_WIN32(ERROR_NOT_READY), false});
     });
     if (!queued && mailbox) mailbox->Publish({HRESULT_FROM_WIN32(ERROR_NOT_READY), false});
 }
 
 void ApplyDeviceOperationResult(AppState& state, const DeviceOperationResult& result) {
-    if (result.cancelled) return;
-    if (FAILED(result.error)) {
+    if (FAILED(result.error) && !result.cancelled) {
         wchar_t code[32]{};
         swprintf_s(code, L" (0x%08lX)", static_cast<unsigned long>(result.error));
         ui::ConfirmDialogSpec spec;
@@ -96,8 +102,14 @@ void ApplyDeviceOperationResult(AppState& state, const DeviceOperationResult& re
     }
     std::vector<std::wstring> paths;
     ForEachPane(state, [&](Pane& pane) {
-        if (const auto* tab = pane.ActiveTab(); tab &&
-            (IsDeviceTab(tab) || !fs::IsVirtualPath(tab->current_path))) paths.push_back(tab->current_path);
+        auto* tab = pane.ActiveTab();
+        if (!tab) return;
+        if (IsDeviceTab(tab) && !result.names.empty() && tab->current_path == result.folder) {
+            tab->pending_created_name = result.names.front();
+            tab->pending_created_names = result.names;
+        }
+        if ((IsDeviceTab(tab) || !fs::IsVirtualPath(tab->current_path)) &&
+            std::find(paths.begin(), paths.end(), tab->current_path) == paths.end()) paths.push_back(tab->current_path);
     });
     for (const auto& path : paths) RefreshPath(state, path, RefreshReason::OperationCompleted);
 }

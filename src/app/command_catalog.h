@@ -23,6 +23,9 @@ struct CommandContext {
     bool filesystem_folder = false;
     bool selection_filesystem = false;
     bool device_selection = false;
+    bool device_cut = false;
+    bool device_delete = false;
+    bool device_rename = false;
     bool selection_has_drive_root = false;
     bool can_group_selection = false;
     bool can_dissolve_selection = false;

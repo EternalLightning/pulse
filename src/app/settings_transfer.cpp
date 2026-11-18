@@ -296,7 +296,7 @@ bool IsMachineLocalPref(std::wstring_view key) noexcept {
         L"integration_recycle_bin", L"integration_folders_compat",
         L"take_over_explorer_windows", L"take_over_win_e", L"take_over_this_pc",
         L"take_over_recycle_bin", L"shell_tag_menu",
-        L"experimental_explorer_takeover", L"experimental_file_dialog_takeover",
+        L"experimental_explorer_takeover",
         // History and one-time state.
         L"picker_folders", L"recent_tags", L"tips_seen", L"last_seen_version",
         L"duplicate_scan_folder", L"duplicate_scan_drive",

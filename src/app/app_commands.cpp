@@ -148,6 +148,13 @@ app::CommandContext BuildCommandContext(AppState& s) {
         context.device_selection = true;
         context.selection_filesystem = !app::DeviceSelectedIds(*tab).empty();
         context.selection_has_drive_root = false;
+        if (context.selection_filesystem && app::IsDeviceTab(tab)) {
+            uint8_t actions = fs::DeviceCut | fs::DeviceDelete | fs::DeviceRename;
+            for (const int index : tab->SelectedIndices()) actions &= tab->EntryAt(static_cast<size_t>(index)).device_actions;
+            context.device_cut = (actions & fs::DeviceCut) != 0;
+            context.device_delete = (actions & fs::DeviceDelete) != 0;
+            context.device_rename = (actions & fs::DeviceRename) != 0;
+        }
     }
     if (app::IsDeviceTab(tab)) {
         context.filesystem_folder = app::DeviceRegistry::Instance().FolderWritable(tab->current_path);
@@ -608,8 +615,7 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         if (cmd == app::CmdProperties) {
             app::QueueDeviceOperation(s, L"properties", app::DeviceSelectedIds(*tab)); return;
         }
-        if (cmd == app::CmdCut || cmd == app::CmdDelete || cmd == app::CmdRename ||
-            cmd == app::CmdBatchRename || cmd == app::CmdCopyPath || cmd == app::CmdOpenPath ||
+        if (cmd == app::CmdBatchRename || cmd == app::CmdCopyPath || cmd == app::CmdOpenPath ||
             cmd == app::CmdOpenTerminal || cmd == app::CmdCopyToTarget || cmd == app::CmdMoveToTarget) return;
     }
     const bool needs_files=cmd==app::CmdProperties || cmd==app::CmdOpenPath || cmd==app::CmdOpenInNewTab || cmd==app::CmdRename || cmd==app::CmdOpenTerminal;

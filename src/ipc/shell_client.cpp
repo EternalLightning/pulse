@@ -410,13 +410,14 @@ uint32_t ShellClient::Launch(const ShellLaunchRequest& request, LaunchReply repl
 }
 
 uint32_t ShellClient::DeviceOperation(HWND window, const std::wstring& verb,
-        const std::vector<std::wstring>& ids, const std::wstring& name, const Owner& owner) {
+        const std::vector<std::wstring>& ids, const std::wstring& name, const std::wstring& folder, const Owner& owner) {
     if (ids.empty()) return 0;
     PayloadWriter writer;
     writer.PutU64(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(window)));
     writer.PutString(verb);
     writer.PutString(name);
     writer.PutStringArray(ids);
+    writer.PutString(folder);
     return Submit(REQ_DEVICE_OPERATION, writer.data(), {}, owner);
 }
 
@@ -609,6 +610,23 @@ void ShellClient::ReaderThread() {
                     }
                 }
                 if (pending) FireRequestDone(REQ_SHELL_LAUNCH, h.request_id, hr, cancelled != 0, error);
+            } else if (h.type == RSP_DEVICE_OPERATION_DONE) {
+                uint32_t hr = 0;
+                std::wstring folder;
+                std::vector<std::wstring> names;
+                if (!r.GetU32(hr) || !r.GetString(folder) || !r.GetStringArray(names) || r.remaining()) break;
+                bool pending = false;
+                {
+                    std::lock_guard lock(pending_mutex_);
+                    const auto found = pending_.find(h.request_id);
+                    if (found != pending_.end() && found->second.type == REQ_DEVICE_OPERATION) {
+                        pending_.erase(found);
+                        pending = true;
+                    }
+                }
+                if (pending) Dispatch(h.request_id, true, [&](Callbacks& cb) {
+                    if (cb.device_done) cb.device_done(static_cast<HRESULT>(hr), std::move(folder), std::move(names));
+                });
             } else if (h.type == RSP_DONE) {
                 bool pending = false, deletion = false;
                 {

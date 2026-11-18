@@ -510,7 +510,6 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             vm.settings_take_over_win_e = s.appPrefs.take_over_win_e;
             vm.settings_take_over_this_pc = s.appPrefs.take_over_this_pc;
             vm.settings_explorer_takeover = s.appPrefs.experimental_explorer_takeover;
-            vm.settings_file_dialog_takeover = s.appPrefs.experimental_file_dialog_takeover;
             vm.settings_file_dialog_bridge = s.appPrefs.file_dialog_bridge_registered;
             vm.settings_system_pending = s.systemIntegration.pending();
             vm.settings_system_status = vm.settings_system_pending

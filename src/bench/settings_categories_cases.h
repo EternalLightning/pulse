@@ -8,6 +8,8 @@
 #include "../common/user_storage.h"
 #include "../app/app_navigation.h"
 #include "../app/app_input.h"
+#include <chrono>
+#include <thread>
 
 int RunSettingsCategories() {
     using namespace pulse;
@@ -65,7 +67,6 @@ int RunSettingsCategories() {
         {7,&ui::SettingsLayout::window_size_lock_row,H::SettingsToggle,34,I::SettingsLockWindowSize},
         {8,&ui::SettingsLayout::explorer_takeover_row,H::SettingsToggle,24,I::SettingsExplorerTakeover},
         {8,&ui::SettingsLayout::file_dialog_bridge_row,H::SettingsToggle,38,I::SettingsFileDialogBridge},
-        {8,&ui::SettingsLayout::file_dialog_takeover_row,H::SettingsToggle,37,I::SettingsFileDialogTakeover},
         {8,&ui::SettingsLayout::text_compare_row,H::None,0,I::SettingsTextCompare},
         {8,&ui::SettingsLayout::startup_tray_row,H::SettingsToggle,31,I::StartToTray},
         {9,&ui::SettingsLayout::staging_tray_row,H::SettingsToggle,36,I::SettingsStagingTray},
@@ -83,10 +84,12 @@ int RunSettingsCategories() {
             OpenSettingsTab(state,page);
             auto vm=BuildVm(state,false);vm.settings_scroll=0;vm.settings_expanded=0;
             auto layout=ui::MakeSettingsLayout(vm,rect,scale,state.renderer.TitleBarHeight(),28*scale,&measuring);
-            if (layout.section_count < 2 || layout.section_count > 3)
+            const bool valid_section_count = page==8 ? layout.section_count==4 :
+                layout.section_count>=2 && layout.section_count<=3;
+            if (!valid_section_count)
                 std::cout << "[INFO] category sections: page=" << page << " count=" << layout.section_count
                     << " width=" << width << " height=" << height << " scale=" << scale << '\n';
-            check(layout.section_count>=2 && layout.section_count<=3,"only populated category sections appear");
+            check(valid_section_count,"only populated category sections appear");
             float previous=layout.nav.top;
             for(int nav:ui::kSettingsNavOrder) {
                 const auto row=layout.nav_row[nav];
@@ -140,6 +143,13 @@ int RunSettingsCategories() {
                 const I titles[]={I::ListSmartDate,I::ListZebraRows,I::ListSizeBar};
                 for(int i=0;i<3;++i) segments.push_back({layout.list_style_row[i],H::SettingsToggle,17+i,titles[i]});
             } else if(page==8) {
+                const auto paused = layout.file_dialog_takeover_row;
+                vm.settings_scroll = std::max(0.0f, paused.top-layout.content.top-24*scale);
+                const auto visible = ui::MakeSettingsLayout(vm, rect, scale, state.renderer.TitleBarHeight(), 28*scale, &measuring);
+                const auto row = visible.file_dialog_takeover_row;
+                const auto hit = state.renderer.HitTest(vm, rect, (row.left+row.right)/2, (row.top+row.bottom)/2);
+                check(row.bottom>row.top && row.top>=visible.content.top && row.bottom<=visible.content.bottom &&
+                    hit.region!=H::SettingsToggle, "paused file dialog takeover is visible and has no activation target");
                 segments={{layout.startup_row[0],H::SettingsToggle,1,I::SettingsLaunch},
                     {layout.startup_row[1],H::SettingsToggle,2,I::SettingsKeepRunning},
                     {layout.startup_row[2],H::SettingsToggle,21,I::SettingsDefaultManager},
@@ -159,6 +169,11 @@ int RunSettingsCategories() {
                 const auto theme=ui::MakeTheme(dark,ui::HexColor(0x0078D4));
                 state.compositor.Dc()->BeginDraw();state.renderer.Render(vm,rect,theme);
                 check(SUCCEEDED(state.compositor.Dc()->EndDraw()),"production category renders successfully");
+                if (page==8 && !dark) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    state.compositor.Dc()->BeginDraw();state.renderer.Render(vm,rect,theme);
+                    check(SUCCEEDED(state.compositor.Dc()->EndDraw()),"integration page settles before capture");
+                }
                 const auto filename=std::wstring(language)+L"-"+std::to_wstring(page)+L"-"+
                     std::to_wstring(static_cast<int>(width))+L"-"+std::to_wstring(static_cast<int>(scale*100))+
                     (dark?L"-dark.png":L"-light.png");

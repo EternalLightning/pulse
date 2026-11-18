@@ -27,7 +27,6 @@ struct AppPrefs {
     bool take_over_win_e = false;
     bool take_over_this_pc = false;
     bool experimental_explorer_takeover = false;
-    bool experimental_file_dialog_takeover = false;
     bool file_dialog_bridge_registered = false; // Read from this user's Shell registration.
     bool verify_copies = false;
     bool show_status_performance = false;

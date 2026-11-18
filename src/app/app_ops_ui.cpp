@@ -196,10 +196,28 @@ void PasteIntoCurrent(AppState& s) {
 }
 
 void DeleteSelected(AppState& s, bool permanent) {
-    if (BuildCommandContext(s).shell_selection) return;
+    const auto context = BuildCommandContext(s);
+    if (context.shell_selection) return;
     if(DeferContentSelection(s,[=](AppState& v){DeleteSelected(v,permanent);})) return;
     app::Tab* tab = ActiveTab(s);
-    if (!tab || tab->net_readonly || app::HasDeviceSelection(*tab)) return;
+    if (!tab) return;
+    if (context.device_selection) {
+        if (!app::IsCommandEnabled(app::CmdDelete, context)) return;
+        const auto ids = app::DeviceSelectedIds(*tab);
+        ops::DeleteConfirmation confirmation;
+        for (const int index : tab->SelectedIndices()) {
+            ops::DeleteTarget target;
+            target.path = tab->EntryAt(static_cast<size_t>(index)).name;
+            target.disposition = ops::DeleteDisposition::Permanent;
+            confirmation.plan.targets.push_back(std::move(target));
+        }
+        const auto spec = BuildDeleteConfirmationSpec(confirmation);
+        if (ui::ShowConfirmDialog(s.hwnd, spec, s.darkMode, s.accentColor) &&
+            ActiveTab(s) == tab && app::DeviceSelectedIds(*tab) == ids)
+            app::QueueDeviceOperation(s, L"delete", ids);
+        return;
+    }
+    if (tab->net_readonly) return;
     if (IsRecycleTab(tab)) {
         ops::OpRequest req;
         req.type = ops::OpType::RealDelete;
@@ -255,7 +273,8 @@ void CollectToTray(AppState& s, bool move_intent) {
     app::Tab* tab = ActiveTab(s);
     if (!tab || !tab->snapshot || IsRecycleTab(tab)) return;
     if (app::HasDeviceSelection(*tab)) {
-        if (!move_intent) app::QueueDeviceOperation(s, L"copy", app::DeviceSelectedIds(*tab));
+        if (!move_intent || app::IsCommandEnabled(app::CmdCut, BuildCommandContext(s)))
+            app::QueueDeviceOperation(s, move_intent ? L"cut" : L"copy", app::DeviceSelectedIds(*tab));
         return;
     }
     std::vector<std::wstring> paths = SelectedFullPaths(*tab);

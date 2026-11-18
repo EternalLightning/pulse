@@ -316,6 +316,7 @@ private:
         painter_.FillRoundedRect(viewport, theme.radius_control*scale_, theme.fill_input);
         painter_.StrokeRoundedRect(viewport, theme.radius_control*scale_, theme.stroke_card, scale_);
         auto* dc = compositor_.Dc();
+        const bool high_contrast = IsHighContrast();
         dc->PushAxisAlignedClip(viewport, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         const size_t count = current ? model_.Order().size() : rows_.size();
         for (size_t i = 0; i < count; ++i) {
@@ -334,14 +335,16 @@ private:
             row.state.keyboard_focus = row.state.selected && GetFocus() == hwnd_ && focus_ == (current ? kCurrent : kAvailable);
             if (!current && model_.Contains(action->command)) row.shortcut = L"✓";
             painter_.DrawMenuItem(row);
+            const auto color = high_contrast && (row.state.selected || row.state.hovered)
+                ? theme.text_selected : theme.text;
+            const auto icon_bounds = D2D1::RectF(bounds.left+10*scale_,bounds.top,bounds.left+30*scale_,bounds.bottom);
+            if (toolbar_icons::DrawArtwork(painter_, action->command, icon_bounds, scale_, dark_, high_contrast, color)) continue;
             if (!icon_brush_.get()) dc->CreateSolidColorBrush(theme.text, &icon_brush_);
             if (!icon_stroke_.get()) command_icons::CreateStrokeStyle(dc, &icon_stroke_);
             if (icon_brush_.get()) {
-                icon_brush_->SetColor(IsHighContrast() && (row.state.selected || row.state.hovered)
-                    ? theme.text_selected : theme.text);
+                icon_brush_->SetColor(color);
                 toolbar_icons::Draw(dc, icon_brush_.get(), icon_stroke_.get(),
-                    toolbar_icons::Resolve(action->glyph,action->pictogram,action->command),
-                    {bounds.left+10*scale_,bounds.top,bounds.left+30*scale_,bounds.bottom},scale_);
+                    toolbar_icons::Resolve(action->glyph,action->pictogram,action->command), icon_bounds, scale_);
             }
         }
         if (current && dragging_) {

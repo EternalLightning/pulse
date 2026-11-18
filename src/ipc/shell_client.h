@@ -41,6 +41,7 @@ public:
         std::function<void(uint32_t id, float percent, std::wstring item,
                            uint32_t items_done, uint32_t total_items)> progress;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error)> done;
+        std::function<void(HRESULT, std::wstring, std::vector<std::wstring>)> device_done;
         std::function<void(uint32_t id, uint32_t hr, bool cancelled, std::wstring error)> launch_done;
         std::function<void(uint32_t id, ShellOperationResult result)> on_file_operation_done;
         std::function<void(uint32_t id, uint64_t done, uint64_t total)> transfer_bytes;
@@ -71,7 +72,7 @@ public:
         const std::function<void(uint32_t)>& before_send = {});
     void SetFileOperationPaused(uint32_t id, bool paused);
     uint32_t DeviceOperation(HWND window, const std::wstring& verb,
-        const std::vector<std::wstring>& ids, const std::wstring& name = {}, const Owner& owner = {});
+        const std::vector<std::wstring>& ids, const std::wstring& name, const std::wstring& folder, const Owner& owner);
     void Cancel(uint32_t id);
     void Abort(uint32_t id);
     bool Ping();

@@ -263,8 +263,8 @@ void Painter::SetCompositor(Compositor* compositor) noexcept {
     }
     scratch_brush_.reset();
     round_stroke_.reset();
-    rename_svg_dc_.reset();
-    for (auto& svg : rename_svgs_) svg.reset();
+    svg_dc_.reset();
+    svgs_.clear();
     body_format_.reset();
     nav_format_.reset();
     caption_format_.reset();
@@ -593,16 +593,23 @@ void Painter::DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
 }
 
 bool Painter::DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color) {
-    if (!dc_ || !theme_) return false;
-    if (!rename_svg_dc_.get() && FAILED(dc_->QueryInterface(IID_PPV_ARGS(&rename_svg_dc_)))) return false;
+    if (!theme_) return false;
     const auto disabled = theme_->text_disabled;
     const bool monochrome = high_contrast_ ||
         (color.r == disabled.r && color.g == disabled.g && color.b == disabled.b);
-    const size_t variant = monochrome ? 0 : dark_ ? 2 : 1;
-    auto& svg = rename_svgs_[variant];
-    if (!svg.get()) {
-        const int resource_id = monochrome ? IDR_FILES_RENAME_SVG :
-            dark_ ? IDR_FILES_RENAME_COLOR_DARK_SVG : IDR_FILES_RENAME_COLOR_SVG;
+    const int resource = monochrome ? IDR_FILES_RENAME_SVG :
+        dark_ ? IDR_FILES_RENAME_COLOR_DARK_SVG : IDR_FILES_RENAME_COLOR_SVG;
+    return DrawSvgResource(resource, command_icons::CenteredBounds(bounds, Px(20.0f)),
+                           monochrome ? &color : nullptr);
+}
+
+bool Painter::DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
+                              const D2D1_COLOR_F* foreground) {
+    if (!dc_) return false;
+    if (!svg_dc_.get() && FAILED(dc_->QueryInterface(IID_PPV_ARGS(&svg_dc_)))) return false;
+    auto [it, added] = svgs_.try_emplace(resource_id);
+    auto& svg = it->second;
+    if (added) {
         const HMODULE module = GetModuleHandleW(nullptr);
         const HRSRC resource = FindResourceW(module, MAKEINTRESOURCEW(resource_id), RT_RCDATA);
         const HGLOBAL loaded = resource ? LoadResource(module, resource) : nullptr;
@@ -611,24 +618,24 @@ bool Painter::DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& 
         if (!bytes || !size) return false;
         ComPtr<IStream> stream;
         stream.p = SHCreateMemStream(static_cast<const BYTE*>(bytes), size);
-        if (!stream.get() || FAILED(rename_svg_dc_->CreateSvgDocument(stream.get(),
+        if (!stream.get() || FAILED(svg_dc_->CreateSvgDocument(stream.get(),
             D2D1::SizeF(24, 24), &svg))) return false;
     }
-    if (monochrome) {
+    if (!svg.get()) return false;
+    if (foreground) {
         ComPtr<ID2D1SvgElement> root;
         svg->GetRoot(&root);
         ComPtr<ID2D1SvgPaint> fill;
         if (root.get() && SUCCEEDED(root->GetAttributeValue(L"fill", IID_PPV_ARGS(&fill))) && fill.get())
-            fill->SetColor(&color);
+            fill->SetColor(foreground);
     }
-    const auto icon = command_icons::CenteredBounds(bounds, Px(20.0f));
     D2D1_MATRIX_3X2_F previous{};
-    rename_svg_dc_->GetTransform(&previous);
-    rename_svg_dc_->SetTransform(D2D1::Matrix3x2F::Scale(
-        (icon.right - icon.left) / 24.0f, (icon.bottom - icon.top) / 24.0f) *
-        D2D1::Matrix3x2F::Translation(icon.left, icon.top) * previous);
-    rename_svg_dc_->DrawSvgDocument(svg.get());
-    rename_svg_dc_->SetTransform(previous);
+    svg_dc_->GetTransform(&previous);
+    svg_dc_->SetTransform(D2D1::Matrix3x2F::Scale(
+        (bounds.right - bounds.left) / 24.0f, (bounds.bottom - bounds.top) / 24.0f) *
+        D2D1::Matrix3x2F::Translation(bounds.left, bounds.top) * previous);
+    svg_dc_->DrawSvgDocument(svg.get());
+    svg_dc_->SetTransform(previous);
     return true;
 }
 

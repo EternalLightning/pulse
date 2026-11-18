@@ -28,6 +28,9 @@ inline std::vector<ui::FluentMenuItem> BuildDeviceItemMenu(
     }
     items.back().separator_after = true;
     items.push_back(BuildCommandMenuItem(CmdCopy, context));
+    items.push_back(BuildCommandMenuItem(CmdCut, context));
+    items.push_back(BuildCommandMenuItem(CmdRename, context));
+    items.push_back(BuildCommandMenuItem(CmdDelete, context));
     items.push_back(BuildCommandMenuItem(CmdProperties, context));
     return items;
 }

@@ -9,6 +9,7 @@
 #include "device_source.h"
 
 #include "../common/shell_id.h"
+#include "../common/portable_device_item.h"
 
 #include <windows.h>
 #include <cfgmgr32.h>
@@ -43,21 +44,6 @@ std::wstring DisplayName(IShellItem* item, SIGDN form) {
     std::wstring name(raw);
     CoTaskMemFree(raw);
     return name;
-}
-
-// File names keep their extension (System.FileName); the display name may
-// hide it when Explorer hides known extensions.
-std::wstring ItemName(IShellItem* item) {
-    ComPtr<IShellItem2> item2;
-    if (SUCCEEDED(item->QueryInterface(IID_PPV_ARGS(&item2)))) {
-        PWSTR raw = nullptr;
-        if (SUCCEEDED(item2->GetString(PKEY_FileName, &raw)) && raw) {
-            std::wstring name(raw);
-            CoTaskMemFree(raw);
-            if (!name.empty()) return name;
-        }
-    }
-    return DisplayName(item, SIGDN_NORMALDISPLAY);
 }
 
 uint64_t UInt64Property(IShellItem* item, const PROPERTYKEY& key) {
@@ -104,18 +90,6 @@ DeviceError EnumerationFailure(HRESULT error) {
     return DeviceError::Failed;
 }
 
-// MTP / PTP devices in This PC: folders that are not file system items and
-// whose parsing name carries the device interface path.
-bool IsPortableDeviceItem(IShellItem* item, std::wstring* parsing) {
-    SFGAOF attrs = 0;
-    if (FAILED(item->GetAttributes(SFGAO_FILESYSTEM | SFGAO_FOLDER, &attrs))) return false;
-    if ((attrs & SFGAO_FILESYSTEM) || !(attrs & SFGAO_FOLDER)) return false;
-    *parsing = DisplayName(item, SIGDN_DESKTOPABSOLUTEPARSING);
-    const std::wstring lower = Lower(*parsing);
-    return lower.find(L"\\\\?\\usb#") != std::wstring::npos ||
-           lower.find(L"\\\\?\\swd#wpdbusenum") != std::wstring::npos;
-}
-
 class ShellDeviceSource final : public DeviceSource {
 public:
     std::vector<DeviceInfo> ListDevices() override {
@@ -128,7 +102,7 @@ public:
         bool discovery_error = false;
         const HRESULT listed = ForEachChild(computer.Get(), nullptr, [&](IShellItem* child) {
             std::wstring parsing;
-            if (!IsPortableDeviceItem(child, &parsing)) return true;
+            if (!portable_device::IsDevice(child, parsing)) return true;
             DeviceInfo device;
             device.id = parsing;
             device.key = DeviceKeyFor(parsing);
@@ -183,11 +157,16 @@ public:
         bool stopped = false;
         const HRESULT listed = ForEachChild(item.Get(), &cancel, [&](IShellItem* child) {
             DirEntry entry;
-            entry.name = ItemName(child);
+            entry.name = portable_device::ShellItemName(child);
             if (entry.name.empty()) return true;
             SFGAOF attrs = 0;
             const HRESULT attrs_hr = child->GetAttributes(
-                SFGAO_FOLDER | SFGAO_STREAM | SFGAO_HIDDEN | SFGAO_CANDELETE | SFGAO_CANRENAME, &attrs);
+                SFGAO_FOLDER | SFGAO_STREAM | SFGAO_HIDDEN | SFGAO_CANMOVE | SFGAO_CANDELETE | SFGAO_CANRENAME, &attrs);
+            if (SUCCEEDED(attrs_hr)) {
+                if (attrs & SFGAO_CANMOVE) entry.device_actions |= DeviceCut;
+                if (attrs & SFGAO_CANDELETE) entry.device_actions |= DeviceDelete;
+                if (attrs & SFGAO_CANRENAME) entry.device_actions |= DeviceRename;
+            }
             entry.is_dir = (attrs & SFGAO_FOLDER) && !(attrs & SFGAO_STREAM);
             entry.attrs = entry.is_dir ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
             if (attrs & SFGAO_HIDDEN) entry.attrs |= FILE_ATTRIBUTE_HIDDEN;
@@ -276,7 +255,7 @@ private:
             ComPtr<IShellItem> found;
             const bool storage_level = i == 0;
             const HRESULT listed = ForEachChild(item.Get(), nullptr, [&](IShellItem* child) {
-                const std::wstring name = storage_level ? DisplayName(child, SIGDN_NORMALDISPLAY) : ItemName(child);
+                const std::wstring name = storage_level ? DisplayName(child, SIGDN_NORMALDISPLAY) : portable_device::ShellItemName(child);
                 if (_wcsicmp(name.c_str(), segments[i]->c_str()) != 0) return true;
                 found = child;
                 return false;

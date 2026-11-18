@@ -28,7 +28,7 @@ struct Allocation {
     void* address = nullptr;
     unsigned releases = 0;
 };
-std::array<Allocation, 8> allocations;
+std::array<Allocation, 9> allocations;
 size_t allocation_count = 0;
 bool observing = false;
 int failures = 0;
@@ -63,6 +63,7 @@ void RunCase(uint32_t type, const char* label, bool authorized = false, bool thr
     request->device_operation.verb.assign(80, L'v');
     request->device_operation.name.assign(80, L'n');
     request->device_operation.ids.emplace_back(80, L'i');
+    request->device_operation.folder.assign(80, L'f');
     if (authorized) {
         FILETIME created{}, exited{}, kernel{}, user{};
         if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
@@ -86,6 +87,7 @@ void RunCase(uint32_t type, const char* label, bool authorized = false, bool thr
     Observe(request->device_operation.name.data());
     Observe(request->device_operation.ids.data());
     Observe(request->device_operation.ids.front().data());
+    Observe(request->device_operation.folder.data());
     Observe(request->expected_identities.data());
     const int device_before = device_calls, recycle_before = recycle_calls, com_before = com_calls;
     device_throws = throws;
@@ -123,7 +125,7 @@ namespace pulse::shell {
 // These side-effect boundaries do not touch devices, recycle bins, or helper processes.
 ContextSessionProcesses::~ContextSessionProcesses() = default;
 ShellLaunchProcesses::~ShellLaunchProcesses() = default;
-HRESULT ExecuteDeviceOperation(const DeviceOperation&) {
+HRESULT ExecuteDeviceOperation(const DeviceOperation&, std::vector<std::wstring>&) {
     ++device_calls;
     if (device_throws) throw 1;
     return device_result;

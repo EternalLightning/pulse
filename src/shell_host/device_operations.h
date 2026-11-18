@@ -14,7 +14,8 @@ struct DeviceOperation {
     std::wstring verb;
     std::wstring name;
     std::vector<std::wstring> ids;
+    std::wstring folder;
 };
 // Called on the host STA; clipboard objects stay on that apartment.
-HRESULT ExecuteDeviceOperation(const DeviceOperation& request);
+HRESULT ExecuteDeviceOperation(const DeviceOperation& request, std::vector<std::wstring>& completed_names);
 }

@@ -12,6 +12,7 @@
 #include <functional>
 #include <cstddef>
 #include <string_view>
+#include <unordered_map>
 
 namespace pulse::ui::fluent {
 
@@ -399,6 +400,8 @@ public:
                         HorizontalAlignment alignment = HorizontalAlignment::Left);
     void DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                    const D2D1_COLOR_F& color);
+    bool DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
+                         const D2D1_COLOR_F* foreground = nullptr);
     void DrawPaneLayoutIcon(const D2D1_RECT_F& bounds, MenuPictogram kind,
                             const D2D1_COLOR_F& color);
     void DrawFocusRing(const D2D1_RECT_F& bounds, float radius);
@@ -535,8 +538,8 @@ private:
     std::array<ComPtr<ID2D1SolidColorBrush>, static_cast<size_t>(BrushId::Count)> brushes_{};
     ComPtr<ID2D1SolidColorBrush> scratch_brush_;
     ComPtr<ID2D1StrokeStyle> round_stroke_;
-    ComPtr<ID2D1DeviceContext5> rename_svg_dc_;
-    std::array<ComPtr<ID2D1SvgDocument>, 3> rename_svgs_;
+    ComPtr<ID2D1DeviceContext5> svg_dc_;
+    std::unordered_map<int, ComPtr<ID2D1SvgDocument>> svgs_;
     ComPtr<IDWriteTextFormat> body_format_;
     ComPtr<IDWriteTextFormat> nav_format_;
     ComPtr<IDWriteTextFormat> caption_format_;

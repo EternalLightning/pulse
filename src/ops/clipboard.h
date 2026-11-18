@@ -14,6 +14,7 @@
 struct IDataObject;
 struct IShellItem;
 struct IShellItemArray;
+struct IFileOperation;
 
 namespace pulse::ops {
 
@@ -47,7 +48,10 @@ inline bool ClipboardHasShellFiles() {
 
 bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence);
 // The broker STA is already OLE-initialized and has resolved the device PIDL.
-HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner);
+HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner, std::vector<std::wstring>& completed_names);
+HRESULT PerformShellOperation(IFileOperation* operation, IShellItem* destination = nullptr,
+                              std::vector<std::wstring>* completed_names = nullptr,
+                              const std::atomic_bool* cancelled = nullptr);
 
 bool HasShellFileData(IDataObject* data);
 // STA worker only. Returns after the transfer completes; cancellation/failure

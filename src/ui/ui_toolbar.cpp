@@ -172,10 +172,13 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float radius=8*scale_;
         return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
     };
-    const auto draw_command_icon = [&](command_icons::Icon icon, D2D1_RECT_F bounds, D2D1_COLOR_F color) {
+    const bool high_contrast = IsHighContrast();
+    const auto draw_command_icon = [&](int command, command_icons::Icon icon, D2D1_RECT_F bounds,
+                                       bool enabled, D2D1_COLOR_F color) {
+        if (toolbar_icons::DrawArtwork(painter_, command, bounds, scale_, vm.dark, high_contrast || !enabled, color)) return;
         if (!paneHeaderStroke_.get()) command_icons::CreateStrokeStyle(dc, &paneHeaderStroke_);
         MakeBrush(dc, color, brText_);
-        return toolbar_icons::Draw(dc, brText_.get(), paneHeaderStroke_.get(), icon, bounds, scale_);
+        toolbar_icons::Draw(dc, brText_.get(), paneHeaderStroke_.get(), icon, bounds, scale_);
     };
     if (layout.create.right > layout.create.left) {
         const std::wstring label=l10n::Get(l10n::StringId::New);
@@ -196,7 +199,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float icon_y=(layout.create.top+layout.create.bottom)*0.5f;
         const auto create_color=!create.state.enabled ? theme.text_disabled
             : IsHighContrast() && create.state.hovered ? theme.text_selected : theme.text;
-        draw_command_icon(command_icons::Icon::Add,icon_bounds(icon_x,icon_y),create_color);
+        draw_command_icon(186,command_icons::Icon::Add,icon_bounds(icon_x,icon_y),create.state.enabled,create_color);
     }
     if (layout.create.right > layout.create.left && layout.commands[0].right > layout.create.right) {
         MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
@@ -222,7 +225,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const auto foreground = !enabled ? theme.text_disabled
             : IsHighContrast() && (selected || IsHovered(vm,hits[i])) ? theme.text_selected
             : selected ? theme.accent_ink : theme.text;
-        draw_command_icon(icons[i],layout.commands[i],foreground);
+        draw_command_icon(kLegacyToolbarCommands[i],icons[i],layout.commands[i],enabled,foreground);
     }
     for (const auto& placed : layout.placed_commands) {
         if (placed.command == 186 || std::find(kLegacyToolbarCommands.begin(), kLegacyToolbarCommands.end(),
@@ -238,7 +241,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         button.skip_glyph = true;
         button.state.enabled = item->enabled; button.state.hovered = hovered;
         painter_.DrawButton(button);
-        draw_command_icon(toolbar_icons::Resolve(item->glyph,item->pictogram,item->command),placed.bounds,
+        draw_command_icon(placed.command,toolbar_icons::Resolve(item->glyph,item->pictogram,item->command),placed.bounds,item->enabled,
             !item->enabled ? theme.text_disabled : IsHighContrast() && hovered ? theme.text_selected : theme.text);
     }
     const auto contextual_button = [&](const D2D1_RECT_F& bounds, HitTestResult::Region hit,

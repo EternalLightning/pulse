@@ -1,8 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "toolbar_icons.h"
+#include "../common/resource_ids.h"
 #include <map>
 
 namespace pulse::ui::toolbar_icons {
+bool DrawArtwork(fluent::Painter& painter, int command, D2D1_RECT_F bounds, float scale,
+                 bool dark, bool monochrome, const D2D1_COLOR_F& foreground) {
+    struct Artwork {
+        int command, outline, light, dark;
+        float size;
+    };
+    // The full-bleed SVGs need a smaller canvas to match the neighboring icon ink.
+    constexpr Artwork artwork[] = {
+        {186, IDR_FILES_NEW_SVG, IDR_FILES_NEW_COLOR_SVG, IDR_FILES_NEW_COLOR_DARK_SVG, 14},
+        {2, IDR_FILES_CUT_SVG, IDR_FILES_CUT_COLOR_SVG, IDR_FILES_CUT_COLOR_DARK_SVG, 16},
+        {3, IDR_FILES_COPY_SVG, IDR_FILES_COPY_COLOR_SVG, IDR_FILES_COPY_COLOR_DARK_SVG, 16},
+        {4, IDR_FILES_PASTE_SVG, IDR_FILES_PASTE_COLOR_SVG, IDR_FILES_PASTE_COLOR_DARK_SVG, 16},
+        {6, IDR_FILES_RENAME_SVG, IDR_FILES_RENAME_COLOR_SVG, IDR_FILES_RENAME_COLOR_DARK_SVG, 14},
+        {5, IDR_FILES_DELETE_SVG, IDR_FILES_DELETE_COLOR_SVG, IDR_FILES_DELETE_COLOR_DARK_SVG, 14},
+        {7, IDR_FILES_PROPERTIES_SVG, IDR_FILES_PROPERTIES_COLOR_SVG, IDR_FILES_PROPERTIES_COLOR_DARK_SVG, 14},
+    };
+    const auto* icon = std::find_if(std::begin(artwork), std::end(artwork),
+        [command](const Artwork& item) { return item.command == command; });
+    if (icon == std::end(artwork)) return false;
+    const float size = std::round((std::min)({icon->size * scale, bounds.right - bounds.left, bounds.bottom - bounds.top}));
+    const float cx = (bounds.left + bounds.right) * 0.5f;
+    const float cy = (bounds.top + bounds.bottom) * 0.5f;
+    // The New icon's two plus strokes intersect on the canvas center.
+    const float left = command == 186 ? std::floor(cx) + 0.5f - size * 0.5f : std::round(cx - size * 0.5f);
+    const float top = command == 186 ? std::floor(cy) + 0.5f - size * 0.5f : std::round(cy - size * 0.5f);
+    const auto art = D2D1::RectF(left, top, left + size, top + size);
+    if (!monochrome && painter.DrawSvgResource(dark ? icon->dark : icon->light, art)) return true;
+    return painter.DrawSvgResource(icon->outline, art, &foreground);
+}
+
 command_icons::Icon Resolve(std::wstring_view glyph, fluent::MenuPictogram pictogram, int command) {
     using I = command_icons::Icon;
     using P = fluent::MenuPictogram;

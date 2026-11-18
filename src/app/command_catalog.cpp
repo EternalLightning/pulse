@@ -139,6 +139,11 @@ const CommandDescriptor* FindCommandDescriptor(int command) {
 }
 
 bool IsCommandEnabled(int command, const CommandContext& context) {
+    if (context.device_selection && context.selection_filesystem) {
+        if (command == CmdCut) return context.device_cut;
+        if (command == CmdDelete) return context.device_delete;
+        if (command == CmdRename) return context.device_rename && context.selected_count == 1;
+    }
     const auto* descriptor = FindCommandDescriptor(command);
     return descriptor && Enabled(descriptor->availability, context);
 }

@@ -4,6 +4,8 @@
 #include "../ui/toolbar_customization.h"
 #include "../ui/toolbar_layout.h"
 #include "../app/command_catalog.h"
+#include "../app/context_menu.h"
+#include "../common/resource_ids.h"
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
@@ -85,9 +87,27 @@ PairedColor CompareReference(const Pixels& actual, const Pixels& reference) {
     }
     return result;
 }
-Pixels ExpectedDisabled(ui::Compositor& compositor, const Pixels& actual,
-                        D2D1_RECT_F button, ui::command_icons::Icon icon,
-                        D2D1_COLOR_F foreground, float scale, bool create) {
+struct Artwork {
+    int outline, light, dark;
+    float size;
+};
+Artwork ExpectedArtwork(int command) {
+    using namespace pulse::app;
+    switch (command) {
+    case CmdNewMenu: return {IDR_FILES_NEW_SVG, IDR_FILES_NEW_COLOR_SVG, IDR_FILES_NEW_COLOR_DARK_SVG, 14};
+    case CmdCut: return {IDR_FILES_CUT_SVG, IDR_FILES_CUT_COLOR_SVG, IDR_FILES_CUT_COLOR_DARK_SVG, 16};
+    case CmdCopy: return {IDR_FILES_COPY_SVG, IDR_FILES_COPY_COLOR_SVG, IDR_FILES_COPY_COLOR_DARK_SVG, 16};
+    case CmdPaste: return {IDR_FILES_PASTE_SVG, IDR_FILES_PASTE_COLOR_SVG, IDR_FILES_PASTE_COLOR_DARK_SVG, 16};
+    case CmdRename: return {IDR_FILES_RENAME_SVG, IDR_FILES_RENAME_COLOR_SVG, IDR_FILES_RENAME_COLOR_DARK_SVG, 14};
+    case CmdDelete: return {IDR_FILES_DELETE_SVG, IDR_FILES_DELETE_COLOR_SVG, IDR_FILES_DELETE_COLOR_DARK_SVG, 14};
+    case CmdProperties: return {IDR_FILES_PROPERTIES_SVG, IDR_FILES_PROPERTIES_COLOR_SVG, IDR_FILES_PROPERTIES_COLOR_DARK_SVG, 14};
+    default: return {};
+    }
+}
+Pixels ExpectedIcon(ui::Compositor& compositor, const Pixels& actual,
+                    D2D1_RECT_F button, ui::command_icons::Icon icon,
+                    D2D1_COLOR_F foreground, float scale, bool create, const ui::Theme& theme,
+                    float artwork_size = 0, int artwork_resource = 0, bool tinted = false) {
     if (actual.bgra.empty()) return {};
     auto* dc = compositor.Dc();
     ui::ComPtr<ID2D1Image> previous;
@@ -114,7 +134,18 @@ Pixels ExpectedDisabled(ui::Compositor& compositor, const Pixels& actual,
     dc->BeginDraw(); dc->Clear(D2D1::ColorF(background[2] / 255.0f, background[1] / 255.0f, background[0] / 255.0f));
     // Preserve the production viewport and world coordinates: hardware AA can change on a translated small target.
     // Brush selection is independent of VM state and the UI path.
-    const bool drawn = ui::toolbar_icons::Draw(dc, brush.get(), stroke.get(), icon, slot, scale);
+    bool drawn;
+    if (artwork_resource) {
+        const float size = std::round(artwork_size * scale);
+        const float left = create ? std::floor(cx) + 0.5f - size / 2 : std::round(cx - size / 2);
+        const float top = create ? std::floor(cy) + 0.5f - size / 2 : std::round(cy - size / 2);
+        ui::fluent::Painter painter(&compositor);
+        painter.BeginFrame(theme);
+        drawn = painter.DrawSvgResource(artwork_resource, {left, top, left + size, top + size},
+                                        tinted ? &foreground : nullptr);
+    } else {
+        drawn = ui::toolbar_icons::Draw(dc, brush.get(), stroke.get(), icon, slot, scale);
+    }
     const HRESULT result = dc->EndDraw();
     Pixels pixels;
     if (drawn && SUCCEEDED(result)) pixels = ReadCrop(compositor,
@@ -229,7 +260,7 @@ int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     OleInitialize(nullptr); l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const auto root = std::filesystem::absolute(L"../bench_data/toolbar-catalog-icons-2026-11-17");
+    const auto root = std::filesystem::absolute(L"../bench_data/toolbar-catalog-artwork");
     std::filesystem::create_directories(root);
     std::ofstream metrics(root / L"metrics.csv");
     metrics << "command,dark,dpi,width,height,pixels,core,peak,hover_core,disabled_core,disabled_peak,negative_core,negative_peak,disabled_background,disabled_peak_pixel,paired_pixels,paired_incorrect,paired_max_error,negative_incorrect\n";
@@ -249,10 +280,22 @@ int main() {
         const auto bounds = D2D1::RectF(0, 0, width, height);
         const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
         Check(!dark || (theme.text.r == 1 && theme.text.g == 1 && theme.text.b == 1), "ordinary dark foreground is white");
+        if (scale == 1) {
+            ui::WindowViewModel vm;
+            vm.dark = dark; vm.safe_mode = true; vm.can_group = true; vm.can_paste = true;
+            vm.pane.loading = true; vm.pane.selected_count = 1;
+            vm.toolbar_order.assign(ui::kDefaultToolbarOrder.begin(), ui::kDefaultToolbarOrder.end());
+            renderer.SetToolbarOrder(vm.toolbar_order);
+            auto* dc = compositor.Dc();
+            dc->BeginDraw(); dc->Clear(D2D1::ColorF(0, 0)); renderer.Render(vm, bounds, theme);
+            Check(SUCCEEDED(dc->EndDraw()) && compositor.SaveSnapshot((root / (dark ? L"dark-toolbar.png" : L"light-toolbar.png")).c_str()),
+                "save restored commands alongside their toolbar neighbors");
+        }
         std::map<int, Ink> normal_ink;
         std::vector<Tile> tiles, failure_tiles;
         for (const auto& descriptor : app::GetCommandCatalog()) {
             const int id = descriptor.command;
+            const auto artwork = ExpectedArtwork(id);
             const std::string label = "command " + std::to_string(id) + (dark ? " dark " : " light ") +
                 std::to_string(static_cast<int>(scale * 100)) + "%";
             ui::ToolbarCustomizationModel model(spec);
@@ -292,8 +335,19 @@ int main() {
             const auto ink = Measure(pixels, theme.text, theme.text);
             normal_ink[id] = ink;
             require(ink.count > 3, "normal ink pixel count > 3");
-            require(ink.core > 1, "normal exact primary core > 1");
-            require(ink.peak > 0.95f, "normal primary peak > 0.95");
+            const auto artwork_matches = [&](const Pixels& actual, int resource, D2D1_COLOR_F foreground, bool tinted) {
+                const auto expected = ExpectedIcon(compositor, actual, button, icon,
+                    foreground, scale, id == 186, theme, artwork.size, resource, tinted);
+                const auto match = CompareReference(actual, expected);
+                return match.compared > 0 && match.incorrect == 0;
+            };
+            const int normal_resource = dark ? artwork.dark : artwork.light;
+            if (normal_resource) {
+                require(artwork_matches(pixels, normal_resource, theme.text, false), "normal renders original Files artwork and palette");
+            } else {
+                require(ink.core > 1, "normal exact primary core > 1");
+                require(ink.peak > 0.95f, "normal primary peak > 0.95");
+            }
             const float side = std::round(16 * scale);
             const float slot_left = std::round(cx - side / 2), slot_top = std::round(cy - side / 2);
             require(ink.left + pixels.left >= slot_left - 1 && ink.right + pixels.left <= slot_left + side + 1 &&
@@ -307,9 +361,22 @@ int main() {
             require(render(theme), "hover render EndDraw");
             const auto hover_pixels = ReadCrop(compositor, crop_bounds);
             const auto hover_ink = Measure(hover_pixels, theme.text, theme.text);
-            require(hover_ink.core > 1, "hover exact primary core > 1");
-            require(hover_ink.peak > 0.95f, "hover primary peak > 0.95");
+            if (normal_resource) {
+                require(artwork_matches(hover_pixels, normal_resource, theme.text, false), "hover retains original Files artwork and palette");
+            } else {
+                require(hover_ink.core > 1, "hover exact primary core > 1");
+                require(hover_ink.peak > 0.95f, "hover primary peak > 0.95");
+            }
             require(hit().region == Region(id), "hover hit region");
+            if (artwork.outline && dark && scale == 1) {
+                ui::HighContrastFrameScope contrast(true);
+                auto hc = ui::MakeHighContrastTheme();
+                hc.fill_hover = ui::HexColor(0xFFFFFF);
+                hc.text_selected = ui::HexColor(0x000000);
+                require(render(hc), "high-contrast hovered render EndDraw");
+                require(artwork_matches(ReadCrop(compositor, crop_bounds), artwork.outline, hc.text_selected, true),
+                    "high-contrast hover draws the original outline with HighlightText");
+            }
             Ink disabled, negative_ink;
             PairedColor paired, negative_paired;
             Pixels disabled_pixels, negative_pixels, reference_pixels;
@@ -321,12 +388,12 @@ int main() {
                 disabled_pixels = ReadCrop(compositor, crop_bounds);
                 disabled = Measure(disabled_pixels, theme.text, theme.text_disabled);
                 require(disabled.count > 0, "disabled ink count > 0");
-                reference_pixels = ExpectedDisabled(compositor, disabled_pixels, button, icon,
-                    theme.text_disabled, scale, id == 186);
+                reference_pixels = ExpectedIcon(compositor, disabled_pixels, button, icon,
+                    theme.text_disabled, scale, id == 186, theme, artwork.size, artwork.outline, true);
                 paired = CompareReference(disabled_pixels, reference_pixels);
                 require(paired.compared > 0 && paired.incorrect == 0,
                     "disabled RGB matches an independently selected expected brush on the same GPU within the original 4 RGB tolerance");
-                require(disabled.peak < ink.peak - 0.15f, "disabled peak dims by more than 0.15");
+                if (!normal_resource) require(disabled.peak < ink.peak - 0.15f, "disabled peak dims by more than 0.15");
                 require(hit().region != Region(id), "disabled command rejects hit");
                 auto incorrect_disabled_theme = theme;
                 incorrect_disabled_theme.text_disabled = theme.text;
@@ -336,8 +403,8 @@ int main() {
                 negative_paired = CompareReference(negative_pixels, reference_pixels);
                 require(negative_paired.compared > 0 && negative_paired.incorrect > 0,
                     "disabled negative control: independent expected-brush reference rejects the wrong primary foreground");
-                require(!(negative_ink.peak < ink.peak - 0.15f),
-                    "disabled negative control: an incorrectly primary-colored disabled icon must fail the unchanged dimming predicate");
+                if (!normal_resource) require(!(negative_ink.peak < ink.peak - 0.15f),
+                    "disabled negative control: an incorrectly primary-colored disabled icon must fail the dimming predicate");
             }
             if (id == 181) {
                 require(icon == ui::command_icons::Icon::Columns && MiddleRuns(pixels, ink) >= 4,
@@ -362,13 +429,21 @@ int main() {
                 if (!reference_pixels.bgra.empty()) failure_tiles.push_back({id, L"independent expected brush", reference_pixels});
                 if (!negative_pixels.bgra.empty()) failure_tiles.push_back({id, L"incorrect primary disabled", negative_pixels});
             }
-            Check(ok, label + " resolves, renders within 16 DIP, keeps primary hover ink, hits and dims when disabled");
+            Check(ok, label + " resolves, renders within 16 DIP, retains its artwork on hover and dims when disabled");
         }
         const auto split = normal_ink.find(306), large = normal_ink.find(81);
         Check(split != normal_ink.end() && large != normal_ink.end() &&
             std::abs(split->second.Width() - large->second.Width()) <= std::ceil(2 * scale) &&
             std::abs(split->second.Height() - large->second.Height()) <= std::ceil(2 * scale),
             "actual split and large-icon ink have comparable physical dimensions at this theme and DPI");
+        if (split != normal_ink.end()) {
+            for (const auto& [id, ink] : normal_ink) if (ExpectedArtwork(id).outline) {
+                const int dimension = std::max(ink.Width(), ink.Height());
+                const int split_dimension = std::max(split->second.Width(), split->second.Height());
+                Check(std::abs(dimension - split_dimension) <= std::ceil(3 * scale),
+                    "restored Files artwork keeps comparable visible dimensions to the pane icon");
+            }
+        }
         if (!failure_tiles.empty()) {
             const auto file = std::wstring(dark ? L"dark-" : L"light-") + std::to_wstring(static_cast<int>(scale * 100)) + L"-failed-states.png";
             Check(SaveOverview(compositor, root / file, failure_tiles, scale, theme), "save failed normal, hover, disabled and negative-control crops without rescaling");

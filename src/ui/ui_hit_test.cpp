@@ -234,7 +234,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                 if(ContainsPt(lay.startup_tray_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=31;return r;}
                 if(ContainsPt(lay.explorer_takeover_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=24;return r;}
                 if(!vm.settings_system_pending && ContainsPt(lay.file_dialog_bridge_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=38;return r;}
-                if(ContainsPt(lay.file_dialog_takeover_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=37;return r;}
                 if(ContainsPt(lay.last_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=32;return r;}
                 if(!vm.settings_system_pending) {
                     if(ContainsPt(lay.startup_row[2],x,y)) {r.region=HitTestResult::SettingsToggle;r.index=21;return r;}

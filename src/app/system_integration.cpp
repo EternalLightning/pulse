@@ -6,7 +6,6 @@
 #include "system_integration.h"
 #include "shell_window_registry.h"
 #include "explorer_window_takeover.h"
-#include "native_dialog_takeover.h"
 #include "shell_selection.h"
 #include "app_internal.h"
 #include "app_runtime.h"
@@ -65,7 +64,6 @@ struct SystemIntegration::Shared {
     bool pending = false;
     ShellWindowRegistry registry;
     ExplorerWindowTakeover takeover;
-    NativeDialogTakeover file_dialog_takeover;
     SystemTakeoverTestCallbacks test_takeover;
     bool registry_started = false;
     bool takeover_started = false;
@@ -98,7 +96,6 @@ struct SystemIntegration::UiState {
     uint64_t next_key = 1;
     ULONGLONG next_publish = 0;
     HRESULT reported_service_error = S_OK;
-    bool picker_unavailable = false;
     std::wstring error;
 };
 namespace {
@@ -113,16 +110,6 @@ void AcknowledgeTakeover(const std::shared_ptr<SystemIntegration::Shared>& share
 }
 DefaultManagerOptions Options(const AppPrefs& prefs) {
     return {prefs.open_folders_in_pulse, prefs.take_over_win_e, prefs.take_over_this_pc};
-}
-bool ConfigureFileDialogs(SystemIntegration::Shared& shared, AppState& state) {
-    if (!shared.services_enabled) return true;
-    std::wstring folder;
-    if (auto* active = state.core.windows.Lookup(GetForegroundWindow())) {
-        if (const auto* tab = ActiveTab(*active); tab && !fs::IsVirtualPath(tab->current_path))
-            folder = ShellPathText(tab->current_path);
-    }
-    return shared.file_dialog_takeover.Configure(state.appPrefs.experimental_file_dialog_takeover,
-        state.darkMode, state.accentColor, state.appPrefs.show_hidden_files, std::move(folder));
 }
 void Submit(const std::shared_ptr<SystemIntegration::Shared>& shared,
             SystemIntegration::Shared::Task task) {
@@ -265,7 +252,6 @@ void SystemIntegration::Start(AppState& s) {
     try { shared_->worker = std::thread(SystemWorker, shared_); }
     catch (...) { shared_.reset(); ui_->error = l10n::Get(l10n::StringId::DefaultFileManagerError); return; }
     Submit(shared_, {Options(s.appPrefs), false, s.appPrefs.experimental_explorer_takeover, true});
-    ConfigureFileDialogs(*shared_, s);
 }
 bool SystemIntegration::StartForTesting(AppState& s, DefaultManagerRegistry registry,
                                          SystemTakeoverTestCallbacks takeover) {
@@ -293,18 +279,6 @@ void SystemIntegration::Toggle(AppState& s, int control) {
     if (!shared_) {
         if (!s.isolatedTest && s.appPrefs.persist)
             ui_->error = l10n::Get(l10n::StringId::DefaultFileManagerError);
-        return;
-    }
-    if (control == 37) {
-        auto& enabled = s.appPrefs.experimental_file_dialog_takeover;
-        enabled = !enabled;
-        if (!s.appPrefs.Save()) {
-            enabled = !enabled;
-            ui_->error = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
-            return;
-        }
-        ui_->error.clear();
-        ConfigureFileDialogs(*shared_, s);
         return;
     }
     if (pending()) return;
@@ -418,14 +392,6 @@ bool SystemIntegration::Tick(AppState& s) {
         AcknowledgeTakeover(shared_, token, false);
     if (now >= ui_->next_publish) {
         Publish(s);
-        const bool picker_unavailable = !ConfigureFileDialogs(*shared_, s);
-        if (picker_unavailable != ui_->picker_unavailable) {
-            ui_->picker_unavailable = picker_unavailable;
-            const auto& error_text = l10n::Get(l10n::StringId::PickerUnavailable);
-            if (picker_unavailable) ui_->error = error_text;
-            else if (ui_->error == error_text) ui_->error.clear();
-            changed = true;
-        }
         ui_->next_publish = now + 250;
     }
     for (auto& request : shared_->registry.DrainSelections()) {
@@ -531,7 +497,6 @@ bool SystemIntegration::Tick(AppState& s) {
 }
 void SystemIntegration::Stop() {
     if (!shared_) return;
-    shared_->file_dialog_takeover.Stop();
     {
         std::lock_guard lock(shared_->mutex);
         for (const auto& [token, deadline] : shared_->pending_takeover_tokens) {
