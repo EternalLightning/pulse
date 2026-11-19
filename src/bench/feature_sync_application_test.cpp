@@ -71,6 +71,9 @@ int CheckFileDrag(pulse::AppState& s) {
         check(ignored({source_file}, file_point, 0), "file rejects a drop onto its own row");
         check(ignored({source_folder, source_file}, blank_point, MK_CONTROL),
             "the source directory's blank space rejects an explicit copy");
+        check(ResolveDropTarget(s, {source_file}, blank_point, MK_CONTROL | MK_SHIFT, allowed) == DROPEFFECT_LINK &&
+            ignored({source_file}, file_point, MK_CONTROL | MK_SHIFT),
+            "same-directory links are allowed on empty space but still reject a self drop");
         check(ResolveDropTarget(s, {source_file}, folder_point, 0, allowed) == DROPEFFECT_MOVE &&
             s.dropRow == 0 && !s.dropBadge.empty() && s.springRow == 0,
             "another folder still accepts the drag and displays its action");

@@ -6,6 +6,8 @@
 #include "file_picker_places.h"
 #include "app_commands.h"
 #include "app_prefs.h"
+#include "link_resolve.h"
+#include "../common/display_path.h"
 #include "../common/localization.h"
 #include "../common/picker_user_storage.h"
 #include "../common/user_storage.h"
@@ -62,26 +64,26 @@ bool Supports(const wire::Request& request) {
     if (request.operation == wire::Operation::OpenFiles)
         return request.default_extension.empty() &&
             (request.options & (wire::ValidateLocalOpenAccessV1 | wire::SkipAccessValidation));
-    return (request.options & wire::ValidateLocalSaveAccessV1) && (request.options & wire::OverwritePrompt);
+    return (request.options & wire::ValidateLocalSaveAccessV1) && (request.options & wire::OverwritePrompt) &&
+        !(request.options & wire::SaveNoTestFileCreate);
 }
 
 bool CheckOpenFile(const std::wstring& source, uint32_t options, const std::atomic_bool& cancelled) {
     picker_user_storage::Path storage;
     if (!picker_user_storage::Parse(source, storage)) return false;
-    const auto attributes = GetFileAttributesW(storage.value.c_str());
+    const auto normalized = fs::NormalizePath(storage.value);
+    const auto attributes = GetFileAttributesW(normalized.c_str());
     if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
-    const auto extension = std::filesystem::path(storage.value).extension().wstring();
-    if (!(options & wire::NoDereferenceLinks) && _wcsicmp(extension.c_str(), L".lnk") == 0) return false;
     const bool probe = (options & wire::ValidateLocalOpenAccessV1) != 0;
     const auto error = picker_user_storage::CheckAncestors(storage, probe,
         [](const std::wstring& root) { return GetDriveTypeW(root.c_str()); },
         [](const std::wstring& part, DWORD& attrs) {
-            attrs = GetFileAttributesW(part.c_str());
+            attrs = GetFileAttributesW(fs::NormalizePath(part).c_str());
             return attrs == INVALID_FILE_ATTRIBUTES ? GetLastError() : DWORD{ERROR_SUCCESS};
         }, [&] { return cancelled.load(); });
     if (error || cancelled) return false;
     if (!probe) return true;
-    wire::PipeHandle file(CreateFileW(storage.value.c_str(), GENERIC_READ,
+    wire::PipeHandle file(CreateFileW(normalized.c_str(), GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
         FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
     if (!file || GetFileType(file.Get()) != FILE_TYPE_DISK) return false;
@@ -144,13 +146,20 @@ Validation ValidateSelection(const wire::Request& request, ui::FilePickerResult 
         }
         selection.paths = {current.snapshot->Path()};
     } else {
-        for (const auto& path : selection.paths) {
+        for (auto& selected_path : selection.paths) {
             if (cancelled) return result;
             if (request.operation == wire::Operation::PickFolder) {
-                const DWORD attributes = GetFileAttributesW(path.c_str());
+                const DWORD attributes = GetFileAttributesW(fs::NormalizePath(selected_path).c_str());
                 if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY)) return result;
-            } else if (!CheckOpenFile(path, request.options, cancelled)) {
-                return result;
+            } else {
+                if (!(request.options & wire::NoDereferenceLinks) &&
+                    _wcsicmp(std::filesystem::path(selected_path).extension().c_str(), L".lnk") == 0) {
+                    fs::DirEntry shortcut;
+                    if (!ResolveLink(fs::NormalizePath(selected_path), shortcut, [&] { return cancelled.load(); }))
+                        return result;
+                    selected_path = path::FriendlyPathText(shortcut.link_target);
+                }
+                if (cancelled || !CheckOpenFile(selected_path, request.options, cancelled)) return result;
             }
         }
     }
@@ -208,7 +217,7 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner,
     bool active_prompt = false;
     HWND picker = nullptr;
     std::shared_ptr<PendingValidation> pending;
-    ui::FilePickerResult accepted;
+    std::optional<wire::Response> accepted;
     const auto start = [&](const ui::FilePickerResult& choice, std::optional<ui::SaveConfirmationSnapshot> consent) {
         if (*cancelled) return false;
         try {
@@ -228,13 +237,17 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner,
     };
     spec.on_ready = [&](HWND window) { picker = window; };
     spec.should_close = [&] { return cancelled->load(); };
+    spec.begin_cancel = [&] {
+        cancelled->store(true);
+        return true;
+    };
     spec.on_use_windows = [&] { use_windows = true; };
     spec.begin_submit = [&](const ui::FilePickerResult& choice) {
         if (active_prompt || pending) return false;
         return start(choice, std::nullopt);
     };
     spec.poll_submit = [&]() -> std::optional<ui::PickerSubmitReply> {
-        if (!pending) return std::nullopt;
+        if (*cancelled || !pending) return std::nullopt;
         std::optional<Validation> outcome;
         {
             std::lock_guard lock(pending->mutex);
@@ -258,7 +271,14 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner,
             return ui::PickerSubmitReply{false, true, {}};
         }
         if (outcome->accepted) {
-            accepted = std::move(outcome->selection);
+            auto reply = Response(request, wire::Status::Accepted);
+            reply.filter_index = static_cast<uint32_t>(outcome->selection.filter_index);
+            for (const auto& path : outcome->selection.paths) reply.paths.emplace_back(path.begin(), path.end());
+            std::vector<uint8_t> encoded;
+            if (wire::Encode({wire::RequestId{1}, reply}, encoded) != wire::CodecError::None)
+                return ui::PickerSubmitReply{false, true, l10n::Pick(
+                    L"选择的文件路径过长或过多，请减少所选文件。", L"The selection is too large. Select fewer files.")};
+            accepted = std::move(reply);
             return ui::PickerSubmitReply{true, false, {}};
         }
         return ui::PickerSubmitReply{false, true, l10n::Get(I::PickerSubmitFailed)};
@@ -268,11 +288,7 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner,
     if (*cancelled) return Response(request, wire::Status::Cancelled);
     if (use_windows) return Response(request, wire::Status::UseNative);
     if (!picker) return Response(request, wire::Status::Unsupported, ERROR_NOT_SUPPORTED);
-    if (!picked || accepted.paths.empty()) return Response(request, wire::Status::Cancelled);
-    auto reply = Response(request, wire::Status::Accepted);
-    reply.filter_index = static_cast<uint32_t>(accepted.filter_index);
-    for (const auto& path : accepted.paths) reply.paths.emplace_back(path.begin(), path.end());
-    return reply;
+    return picked && accepted ? std::move(*accepted) : Response(request, wire::Status::Cancelled);
 }
 } // namespace
 

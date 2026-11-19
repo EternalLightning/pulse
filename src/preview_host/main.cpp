@@ -32,6 +32,7 @@
 #include <cwctype>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace pulse;
@@ -223,7 +224,7 @@ bool MakeTextOrHex(const std::wstring& path, DWORD attrs, ipc::PreviewContentKin
 
 struct PreviewPropertyValue { std::wstring label, value; };
 
-void AddProperty(IPropertyStore* store, REFPROPERTYKEY key, const wchar_t* label,
+void AddProperty(IPropertyStore* store, REFPROPERTYKEY key, l10n::StringId label,
                  std::vector<PreviewPropertyValue>& out) {
     if (!store || out.size() >= ipc::kPreviewMaxPropertyCount) return;
     PROPVARIANT value{};
@@ -234,7 +235,7 @@ void AddProperty(IPropertyStore* store, REFPROPERTYKEY key, const wchar_t* label
             formatted && *formatted) {
             std::wstring display = IsEqualPropertyKey(key, PKEY_Video_Compression)
                 ? preview::VideoCodecDisplayName(formatted) : std::wstring(formatted);
-            if (!display.empty()) out.push_back({ label, display });
+            if (!display.empty()) out.push_back({ l10n::Get(label, l10n::Language::EnUS), std::move(display) });
         }
         CoTaskMemFree(formatted);
     }
@@ -262,29 +263,29 @@ std::vector<PreviewPropertyValue> ReadProperties(const std::wstring& path) {
                                                  IID_PPV_ARGS(&store)))) return out;
     const std::wstring extension = ExtensionOf(path);
     if (IsOneOf(extension, {L".jpg", L".jpeg", L".png", L".gif", L".bmp", L".tif", L".tiff", L".webp", L".heic"})) {
-        AddProperty(store.Get(), PKEY_Image_Dimensions, l10n::Get(l10n::StringId::PreviewPropertyDimensions).c_str(), out);
-        AddProperty(store.Get(), PKEY_Photo_DateTaken, l10n::Get(l10n::StringId::PreviewPropertyDateTaken).c_str(), out);
-        AddProperty(store.Get(), PKEY_Photo_CameraModel, l10n::Get(l10n::StringId::PreviewPropertyCamera).c_str(), out);
+        AddProperty(store.Get(), PKEY_Image_Dimensions, l10n::StringId::PreviewPropertyDimensions, out);
+        AddProperty(store.Get(), PKEY_Photo_DateTaken, l10n::StringId::PreviewPropertyDateTaken, out);
+        AddProperty(store.Get(), PKEY_Photo_CameraModel, l10n::StringId::PreviewPropertyCamera, out);
     } else if (IsOneOf(extension, {L".mp4", L".mkv", L".mov", L".avi", L".webm", L".wmv", L".m4v"})) {
-        AddProperty(store.Get(), PKEY_Media_Duration, l10n::Get(l10n::StringId::PreviewPropertyDuration).c_str(), out);
+        AddProperty(store.Get(), PKEY_Media_Duration, l10n::StringId::PreviewPropertyDuration, out);
         uint32_t width = 0, height = 0;
         if (ReadUintProperty(store.Get(), PKEY_Video_FrameWidth, width) &&
             ReadUintProperty(store.Get(), PKEY_Video_FrameHeight, height) &&
             width > 0 && height > 0) {
             wchar_t dims[64];
             swprintf_s(dims, L"%u x %u", width, height);
-            out.push_back({ l10n::Get(l10n::StringId::PreviewPropertyResolution).c_str(), dims });
+            out.push_back({ l10n::Get(l10n::StringId::PreviewPropertyResolution, l10n::Language::EnUS), dims });
         }
-        AddProperty(store.Get(), PKEY_Video_FrameRate, l10n::Get(l10n::StringId::PreviewPropertyFrameRate).c_str(), out);
-        AddProperty(store.Get(), PKEY_Video_Compression, l10n::Get(l10n::StringId::PreviewPropertyCodec).c_str(), out);
+        AddProperty(store.Get(), PKEY_Video_FrameRate, l10n::StringId::PreviewPropertyFrameRate, out);
+        AddProperty(store.Get(), PKEY_Video_Compression, l10n::StringId::PreviewPropertyCodec, out);
     } else if (IsOneOf(extension, {L".mp3", L".wav", L".flac", L".m4a", L".aac"})) {
-        AddProperty(store.Get(), PKEY_Media_Duration, l10n::Get(l10n::StringId::PreviewPropertyDuration).c_str(), out);
-        AddProperty(store.Get(), PKEY_Music_Artist, l10n::Get(l10n::StringId::PreviewPropertyArtist).c_str(), out);
-        AddProperty(store.Get(), PKEY_Music_AlbumTitle, l10n::Get(l10n::StringId::PreviewPropertyAlbum).c_str(), out);
+        AddProperty(store.Get(), PKEY_Media_Duration, l10n::StringId::PreviewPropertyDuration, out);
+        AddProperty(store.Get(), PKEY_Music_Artist, l10n::StringId::PreviewPropertyArtist, out);
+        AddProperty(store.Get(), PKEY_Music_AlbumTitle, l10n::StringId::PreviewPropertyAlbum, out);
     } else if (IsOneOf(extension, {L".pdf", L".doc", L".docx", L".xls", L".xlsx", L".ppt", L".pptx", L".odt", L".ods", L".odp"})) {
-        AddProperty(store.Get(), PKEY_Title, l10n::Get(l10n::StringId::PreviewPropertyTitle).c_str(), out);
-        AddProperty(store.Get(), PKEY_Author, l10n::Get(l10n::StringId::PreviewPropertyAuthor).c_str(), out);
-        AddProperty(store.Get(), PKEY_Document_PageCount, l10n::Get(l10n::StringId::PreviewPropertyPageCount).c_str(), out);
+        AddProperty(store.Get(), PKEY_Title, l10n::StringId::PreviewPropertyTitle, out);
+        AddProperty(store.Get(), PKEY_Author, l10n::StringId::PreviewPropertyAuthor, out);
+        AddProperty(store.Get(), PKEY_Document_PageCount, l10n::StringId::PreviewPropertyPageCount, out);
     }
     return out;
 }

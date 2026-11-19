@@ -29,11 +29,11 @@ struct ClipboardData {
 };
 
 // Writes paths as CF_HDROP + CFSTR_PREFERREDDROPEFFECT so Explorer can paste them.
-// Must be called on the UI thread (OpenClipboard affinity).
-bool WriteClipboard(const std::vector<std::wstring>& paths, bool cut);
+// Callers on a worker supply the owner HWND explicitly.
+bool WriteClipboard(const std::vector<std::wstring>& paths, bool cut, HWND owner = nullptr);
 
-// Writes plain text (Ctrl+Shift+C "copy path"). UI thread only.
-bool WriteClipboardText(const std::wstring& text);
+// Writes plain text (Ctrl+Shift+C "copy path").
+bool WriteClipboardText(const std::wstring& text, HWND owner = nullptr);
 
 // Reads an Explorer copy/cut (CF_HDROP). Returns false if no files present.
 bool ReadClipboard(ClipboardData& out);
@@ -54,7 +54,8 @@ HRESULT PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence,
                             const std::atomic_bool& cancelled, HWND owner,
                             const std::function<bool()>& begin_transfer);
 // The broker STA is already OLE-initialized and has resolved the device PIDL.
-HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner, std::vector<std::wstring>& completed_names);
+HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner, std::vector<std::wstring>& completed_names,
+    uint32_t expected_sequence);
 HRESULT PerformShellOperation(IFileOperation* operation, IShellItem* destination = nullptr,
                               std::vector<std::wstring>* completed_names = nullptr,
                               const std::atomic_bool* cancelled = nullptr);
@@ -73,5 +74,7 @@ bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t 
 // Clears a completed cut only if the clipboard still contains the exact cut
 // captured by ReadClipboard. This never clears a newer clipboard value.
 bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& expected_paths, HWND owner = nullptr);
+bool CutPasteMovedAllPaths(const std::vector<std::wstring>& expected_normalized,
+                          const std::vector<std::wstring>& moved_normalized);
 
 } // namespace pulse::ops

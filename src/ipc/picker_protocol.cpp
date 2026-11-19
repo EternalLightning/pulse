@@ -50,17 +50,6 @@ bool ValidText(const std::u16string& s) {
     return true;
 }
 bool ValidOperation(Operation op) { return op >= Operation::OpenFiles && op <= Operation::SaveFile; }
-bool ValidPaths(const std::vector<std::u16string>& paths) {
-    return paths.size() <= kMaxPaths && std::all_of(paths.begin(), paths.end(), [](const auto& path) {
-        return !path.empty() && ValidText(path);
-    });
-}
-bool ValidSnapshot(const EventSnapshot& s) {
-    return s.generation && s.window && s.filter_index < kMaxFilters && !s.folder.empty() &&
-        ValidText(s.folder) && ValidText(s.filename) && ValidPaths(s.selections) && ValidPaths(s.candidates);
-}
-bool FailedHResult(uint32_t hr) { return (hr & 0x80000000u) != 0; }
-bool ValidCommandKind(CommandKind kind) { return kind >= CommandKind::Query && kind <= CommandKind::Close; }
 CodecError Validate(const Message& m) {
     if (std::all_of(m.request_id.begin(), m.request_id.end(), [](uint8_t b) { return b == 0; }))
         return CodecError::InvalidSemantics;
@@ -109,33 +98,6 @@ CodecError Validate(const Message& m) {
         if (!hello->min_version || hello->min_version > hello->max_version) return CodecError::InvalidSemantics;
     } else if (const auto* welcome = std::get_if<SessionWelcome>(&m.body)) {
         if (!welcome->version && (welcome->features || welcome->capabilities)) return CodecError::InvalidSemantics;
-    } else if (const auto* event = std::get_if<SessionEvent>(&m.body)) {
-        if (!event->event_id || event->kind < EventKind::Ready || event->kind > EventKind::FileOk ||
-            !ValidSnapshot(event->snapshot) || !ValidText(event->proposed_folder) ||
-            (event->kind == EventKind::FolderChanging ? event->proposed_folder.empty() : !event->proposed_folder.empty()) ||
-            (event->kind == EventKind::FileOk && event->snapshot.candidates.empty())) return CodecError::InvalidSemantics;
-    } else if (const auto* event_reply = std::get_if<EventReply>(&m.body)) {
-        if (!event_reply->event_id || !event_reply->generation) return CodecError::InvalidSemantics;
-    } else if (const auto* command = std::get_if<SessionCommand>(&m.body)) {
-        if (!command->command_id || !ValidCommandKind(command->kind) ||
-            (command->kind == CommandKind::Close ? command->expected_generation != 0 : command->hresult != 0))
-            return CodecError::InvalidSemantics;
-    } else if (const auto* reply = std::get_if<CommandReply>(&m.body)) {
-        if (!reply->command_id || !ValidCommandKind(reply->kind) || (reply->hresult && !FailedHResult(reply->hresult)) ||
-            ((reply->kind == CommandKind::Close || reply->hresult) ? reply->snapshot != EventSnapshot{} : !ValidSnapshot(reply->snapshot)))
-            return CodecError::InvalidSemantics;
-    } else if (const auto* terminal = std::get_if<SessionTerminal>(&m.body)) {
-        if (terminal->status < TerminalKind::Accepted || terminal->status > TerminalKind::Failed ||
-            terminal->ui_shown > 1 || bool(terminal->ui_shown) != bool(terminal->generation) ||
-            terminal->filter_index >= kMaxFilters || !ValidPaths(terminal->paths)) return CodecError::InvalidSemantics;
-        if (terminal->status == TerminalKind::Accepted) {
-            if (terminal->hresult || !terminal->ui_shown || terminal->paths.empty()) return CodecError::InvalidSemantics;
-        } else {
-            if (!terminal->paths.empty() || terminal->filter_index ||
-                (terminal->status == TerminalKind::Cancelled && terminal->hresult != 0x800704c7) ||
-                (terminal->status == TerminalKind::Closed && !terminal->ui_shown) ||
-                (terminal->status == TerminalKind::Failed && !FailedHResult(terminal->hresult))) return CodecError::InvalidSemantics;
-        }
     }
     return CodecError::None;
 }
@@ -150,15 +112,7 @@ struct Writer {
         Number(static_cast<uint32_t>(s.size()));
         for (const auto c : s) Number(c, 2);
     }
-    void Wide(uint64_t n) { Number(static_cast<uint32_t>(n)); Number(static_cast<uint32_t>(n >> 32)); }
-    void Paths(const std::vector<std::u16string>& paths) {
-        Number(static_cast<uint32_t>(paths.size()));
-        for (const auto& path : paths) Text(path);
-    }
-    void Snapshot(const EventSnapshot& s) {
-        Wide(s.generation); Wide(s.window); Number(s.filter_index); Text(s.folder); Text(s.filename);
-        Paths(s.selections); Paths(s.candidates);
-    }
+
 };
 struct Reader {
     std::span<const uint8_t> data;
@@ -179,23 +133,7 @@ struct Reader {
         if (!ValidText(s)) ok = false;
         return s;
     }
-    uint64_t Wide() {
-        const uint64_t low = Number();
-        return low | (static_cast<uint64_t>(Number()) << 32);
-    }
-    std::vector<std::u16string> Paths() {
-        const auto count = Number();
-        if (!ok || count > kMaxPaths) { ok = false; return {}; }
-        std::vector<std::u16string> paths;
-        for (uint32_t i = 0; i < count && ok; ++i) paths.push_back(Text());
-        return paths;
-    }
-    EventSnapshot Snapshot() {
-        EventSnapshot s;
-        s.generation = Wide(); s.window = Wide(); s.filter_index = Number();
-        s.folder = Text(); s.filename = Text(); s.selections = Paths(); s.candidates = Paths();
-        return s;
-    }
+
 };
 }
 
@@ -228,18 +166,6 @@ CodecError Encode(const Message& m, std::vector<uint8_t>& output) {
         w.Number(hello->required_features); w.Number(hello->required_capabilities);
     } else if (const auto* welcome = std::get_if<SessionWelcome>(&m.body)) {
         w.Number(welcome->version); w.Number(welcome->features); w.Number(welcome->capabilities);
-    } else if (const auto* event = std::get_if<SessionEvent>(&m.body)) {
-        w.Wide(event->event_id); w.Number(static_cast<uint32_t>(event->kind)); w.Snapshot(event->snapshot); w.Text(event->proposed_folder);
-    } else if (const auto* event_reply = std::get_if<EventReply>(&m.body)) {
-        w.Wide(event_reply->event_id); w.Wide(event_reply->generation); w.Number(event_reply->hresult);
-    } else if (const auto* command = std::get_if<SessionCommand>(&m.body)) {
-        w.Wide(command->command_id); w.Number(static_cast<uint32_t>(command->kind));
-        w.Wide(command->expected_generation); w.Number(command->hresult);
-    } else if (const auto* reply = std::get_if<CommandReply>(&m.body)) {
-        w.Wide(reply->command_id); w.Number(static_cast<uint32_t>(reply->kind)); w.Number(reply->hresult); w.Snapshot(reply->snapshot);
-    } else if (const auto* terminal = std::get_if<SessionTerminal>(&m.body)) {
-        w.Number(static_cast<uint32_t>(terminal->status)); w.Number(terminal->hresult); w.Number(terminal->ui_shown);
-        w.Wide(terminal->generation); w.Number(terminal->filter_index); w.Paths(terminal->paths);
     }
     if (!w.ok) return CodecError::Malformed;
     const auto length = static_cast<uint32_t>(w.data.size() - 28);
@@ -254,7 +180,7 @@ CodecError Decode(std::span<const uint8_t> bytes, Message& output) {
     if (r.Number() != kMagic) return CodecError::Malformed;
     if (r.Number(2) != kVersion) return CodecError::UnsupportedVersion;
     const auto kind = r.Number(2);
-    if (kind < 1 || kind > 10 || r.Number() != bytes.size() - 28) return CodecError::Malformed;
+    if (kind < 1 || kind > 5 || r.Number() != bytes.size() - 28) return CodecError::Malformed;
     Message m;
     for (auto& b : m.request_id) b = static_cast<uint8_t>(r.Number(1));
     if (kind == 1) {
@@ -284,21 +210,6 @@ CodecError Decode(std::span<const uint8_t> bytes, Message& output) {
     } else if (kind == 3) m.body = Cancel{};
     else if (kind == 4) m.body = SessionHello{r.Number(), r.Number(), r.Number(), r.Number()};
     else if (kind == 5) m.body = SessionWelcome{r.Number(), r.Number(), r.Number()};
-    else if (kind == 6) {
-        SessionEvent event;
-        event.event_id = r.Wide(); event.kind = static_cast<EventKind>(r.Number());
-        event.snapshot = r.Snapshot(); event.proposed_folder = r.Text(); m.body = std::move(event);
-    } else if (kind == 7) m.body = EventReply{r.Wide(), r.Wide(), r.Number()};
-    else if (kind == 8) m.body = SessionCommand{r.Wide(), static_cast<CommandKind>(r.Number()), r.Wide(), r.Number()};
-    else if (kind == 9) {
-        CommandReply reply;
-        reply.command_id = r.Wide(); reply.kind = static_cast<CommandKind>(r.Number());
-        reply.hresult = r.Number(); reply.snapshot = r.Snapshot(); m.body = std::move(reply);
-    } else {
-        SessionTerminal terminal;
-        terminal.status = static_cast<TerminalKind>(r.Number()); terminal.hresult = r.Number(); terminal.ui_shown = r.Number();
-        terminal.generation = r.Wide(); terminal.filter_index = r.Number(); terminal.paths = r.Paths(); m.body = std::move(terminal);
-    }
     if (!r.ok || r.pos != bytes.size()) return CodecError::Malformed;
     const auto error = Validate(m);
     if (error == CodecError::None) output = std::move(m);

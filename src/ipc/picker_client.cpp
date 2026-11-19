@@ -74,7 +74,12 @@ Message Exchange(const std::wstring& executable, const std::wstring& desktop,
     if (transport) transport = NegotiatePickerSession(channel, request, {cancel, 10000});
     if (transport) transport = channel.Send(request, {cancel, 10000});
     Message response;
-    if (transport) transport = channel.Receive(response, {cancel, INFINITE});
+    if (transport) {
+        transport = channel.Receive(response, {cancel, INFINITE});
+        if (!transport && transport.error == ERROR_CANCELLED &&
+            channel.Send({request.request_id, Cancel{}}, {nullptr, 1000}))
+            WaitForSingleObject(child.process.Get(), 4000);
+    }
     if (!transport) return Terminal(request, transport.error == ERROR_CANCELLED ? Status::Cancelled : Status::Failed,
                                     transport.error == ERROR_CANCELLED ? ERROR_SUCCESS : transport.error);
     if (!ValidateResponse(request, response)) return Terminal(request, Status::Failed, ERROR_INVALID_DATA);

@@ -21,6 +21,7 @@
 #include "index_delta.h"
 #include "change_tracking.h"
 #include "change_feed_history.h"
+#include "../common/localization.h"
 #include <atomic>
 #include <bit>
 #include <cstdint>
@@ -41,6 +42,10 @@
 #include <winioctl.h>
 
 namespace pulse::index {
+struct IndexStatusText {
+    std::wstring english;
+    std::wstring chinese;
+};
 
 #pragma pack(push, 1)
 struct Node {
@@ -139,7 +144,7 @@ public:
     FileFeedPage ReadFeed(bool changes, const std::wstring& root, uint64_t epoch, uint64_t cursor) const;
     std::vector<IndexedFolderSize> FolderSizes(const std::vector<std::wstring>& paths,
         const std::function<bool(const std::wstring&)>& authorize = {});
-    std::wstring Status() const;
+    IndexStatusText StatusTranslations() const;
     std::vector<VolumeInfo> Volumes() const;
     void RequestRebuild();
     ChangeState ChangeCoverage(const std::wstring& path) const;
@@ -406,7 +411,8 @@ private:
                          bool folders_only, bool use_attrs) const;
     void UpdateVolumeVisibilityLocked(const std::vector<VolumeInfo>& active, bool only_hide = false);
     void InvalidateFilterLocked() { ++filter_epoch_; if (!folder_size_usn_update_) folder_sizes_.Reset(); }
-    void SetStatus(std::wstring s);
+    void SetStatus(IndexStatusText text);
+    void SetStatus(l10n::StringId id);
     bool IsExcludedPath(std::wstring_view path) const;
     static bool ShouldSkipName(std::wstring_view name);
     void RefreshSubtreeVisibilityLocked(int32_t root, DeltaLog* delta);
@@ -434,7 +440,7 @@ private:
     mutable std::shared_mutex mutex_;
     mutable std::mutex query_mu_;
     mutable std::mutex status_mu_;
-    std::wstring status_;
+    IndexStatusText status_;
 
     std::unique_ptr<MappedFile> map_;
 #if defined(PULSE_INDEX_LEGACY_QUERY_SHARDS)

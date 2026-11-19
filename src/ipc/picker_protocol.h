@@ -97,54 +97,9 @@ struct SessionWelcome {
     uint32_t capabilities = kRequestCapabilities;
     bool operator==(const SessionWelcome&) const = default;
 };
-enum class EventKind : uint32_t { Ready = 1, FolderChanging, FolderChanged, SelectionChanged, TypeChanged, FileOk };
-enum class CommandKind : uint32_t { Query = 1, GetWindow, Close };
-enum class TerminalKind : uint32_t { Accepted = 1, Cancelled, Closed, Failed };
-struct EventSnapshot {
-    uint64_t generation = 0, window = 0;
-    uint32_t filter_index = 0;
-    std::u16string folder, filename;
-    std::vector<std::u16string> selections, candidates;
-    bool operator==(const EventSnapshot&) const = default;
-};
-struct SessionEvent {
-    uint64_t event_id = 0;
-    EventKind kind = EventKind::Ready;
-    EventSnapshot snapshot;
-    std::u16string proposed_folder;
-    bool operator==(const SessionEvent&) const = default;
-};
-struct EventReply {
-    uint64_t event_id = 0, generation = 0;
-    uint32_t hresult = 0;
-    bool operator==(const EventReply&) const = default;
-};
-struct SessionCommand {
-    uint64_t command_id = 0;
-    CommandKind kind = CommandKind::Query;
-    uint64_t expected_generation = 0;
-    uint32_t hresult = 0;
-    bool operator==(const SessionCommand&) const = default;
-};
-struct CommandReply {
-    uint64_t command_id = 0;
-    CommandKind kind = CommandKind::Query;
-    uint32_t hresult = 0;
-    EventSnapshot snapshot;
-    bool operator==(const CommandReply&) const = default;
-};
-struct SessionTerminal {
-    TerminalKind status = TerminalKind::Cancelled;
-    uint32_t hresult = 0x800704c7, ui_shown = 0;
-    uint64_t generation = 0;
-    uint32_t filter_index = 0;
-    std::vector<std::u16string> paths;
-    bool operator==(const SessionTerminal&) const = default;
-};
 struct Message {
     RequestId request_id{};
-    std::variant<Request, Response, Cancel, SessionHello, SessionWelcome, SessionEvent, EventReply,
-        SessionCommand, CommandReply, SessionTerminal> body;
+    std::variant<Request, Response, Cancel, SessionHello, SessionWelcome> body;
     bool operator==(const Message&) const = default;
 };
 // Output is unchanged on failure. Decode validates wire semantics; callers must

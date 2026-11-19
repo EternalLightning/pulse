@@ -15,21 +15,21 @@ HRESULT RunRequest(PickerFileOperations& session, PickerFileOperation& operation
                    OpRequest request, HWND owner, bool verify_copies, const ClipboardData* clipboard = nullptr) {
     if (operation.cancelled.load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     for (auto& path : request.sources) path = fs::NormalizePath(std::move(path));
-    auto& manager = session.Start(owner, verify_copies);
-    const auto path_order = [](const std::wstring& a, const std::wstring& b) {
-        return _wcsicmp(a.c_str(), b.c_str()) < 0;
-    };
     std::vector<std::wstring> cut_sources;
     const bool cut = clipboard && clipboard->cut;
     if (cut) {
         cut_sources = request.sources;
-        std::sort(cut_sources.begin(), cut_sources.end(), path_order);
+        request.cut_clipboard_sequence = clipboard->sequence;
     }
     if ((clipboard && clipboard->sequence != GetClipboardSequenceNumber()) ||
         !operation.BeginMutation() || operation.cancelled.load())
         return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    auto& manager = session.Start(owner, verify_copies);
+    if (clipboard && clipboard->sequence != GetClipboardSequenceNumber())
+        return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     const auto task = manager.Submit(std::move(request));
     if (!task) return E_FAIL;
+    operation.refresh = true;
 
     bool cancel_sent = false;
     bool permanent_declined = false;
@@ -41,10 +41,10 @@ HRESULT RunRequest(PickerFileOperations& session, PickerFileOperation& operation
             manager.DrainDeleteOutcomes();
             if (cut && status.phase == OpPhase::Completed) {
                 std::vector<std::wstring> moved;
-                for (auto& entry : completed) if (entry.type == OpType::Move)
-                    std::move(entry.sources.begin(), entry.sources.end(), std::back_inserter(moved));
-                std::sort(moved.begin(), moved.end(), path_order);
-                if (std::includes(moved.begin(), moved.end(), cut_sources.begin(), cut_sources.end(), path_order))
+                for (auto& entry : completed)
+                    if (entry.type == OpType::Move && entry.cut_clipboard_sequence == clipboard->sequence)
+                        std::move(entry.sources.begin(), entry.sources.end(), std::back_inserter(moved));
+                if (CutPasteMovedAllPaths(cut_sources, moved))
                     CompleteCutClipboard(clipboard->sequence, clipboard->paths, owner);
             }
             if (permanent_declined) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
@@ -73,7 +73,10 @@ HRESULT Paste(PickerFileOperations& session, PickerFileOperation& operation,
     if (operation.cancelled.load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     if (captured == S_FALSE) {
         return PasteShellClipboard(paste.directory, paste.sequence, operation.cancelled, owner,
-            [&] { return operation.BeginMutation(); });
+            [&] {
+                operation.refresh = operation.BeginMutation();
+                return operation.refresh;
+            });
     }
     if (FAILED(captured)) return captured;
     OpRequest request;
@@ -99,10 +102,22 @@ void CALLBACK Run(PTP_CALLBACK_INSTANCE, void* argument) {
         if (auto* paste = std::get_if<PickerClipboardPaste>(&work->request)) {
             operation.result = Paste(session, operation, std::move(*paste), work->owner, work->verify_copies);
         } else if (auto* properties = std::get_if<PickerProperties>(&work->request)) {
-            auto& manager = session.Start(work->owner, work->verify_copies);
             if (operation.BeginMutation()) {
-                manager.ShowProperties(properties->paths);
+                session.Start(work->owner, work->verify_copies).ShowProperties(properties->paths);
                 operation.result = S_OK;
+            }
+        } else if (auto* clipboard = std::get_if<PickerClipboardWrite>(&work->request)) {
+            if (operation.BeginMutation()) {
+                if (clipboard->text) {
+                    std::wstring text;
+                    for (const auto& path : clipboard->paths) {
+                        if (!text.empty()) text += L"\r\n";
+                        text += path;
+                    }
+                    operation.result = WriteClipboardText(text, work->owner) ? S_OK : E_FAIL;
+                } else {
+                    operation.result = WriteClipboard(clipboard->paths, clipboard->cut, work->owner) ? S_OK : E_FAIL;
+                }
             }
         } else {
             operation.result = RunRequest(session, operation, std::move(std::get<OpRequest>(work->request)),
@@ -153,12 +168,7 @@ bool PickerFileOperation::Cancel(PickerFileOperations& session) {
 }
 
 std::shared_ptr<PickerFileOperations> CreatePickerFileOperations() {
-    return std::shared_ptr<PickerFileOperations>(new PickerFileOperations, [](PickerFileOperations* session) {
-        // The last owner may be the dialog thread. Stop the broker off that thread.
-        if (!TrySubmitThreadpoolCallback([](PTP_CALLBACK_INSTANCE, void* argument) {
-                delete static_cast<PickerFileOperations*>(argument);
-            }, session, nullptr)) delete session;
-    });
+    return std::make_shared<PickerFileOperations>();
 }
 
 bool SubmitPickerFileOperation(const std::shared_ptr<PickerFileOperations>& session,

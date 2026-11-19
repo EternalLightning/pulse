@@ -431,7 +431,6 @@ private:
         context.caller_validation_supported = true;
         context.save_caller_validation_supported = true;
         context.native_save_defaults_supported = true;
-        context.save_no_test_create_supported = (options & FOS_PATHMUSTEXIST) != 0;
         const auto policy = factory_ == DialogFactory::Open ? AccessPolicy::LocalOpenV1 : AccessPolicy::LocalSaveV1;
         const auto decision = PrepareFileDialogContract(factory_, calls_, id, policy, context);
         if (decision.effective_options != options) return std::nullopt;

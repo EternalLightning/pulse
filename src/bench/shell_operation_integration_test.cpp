@@ -300,9 +300,18 @@ void MergeConflicts(const fs::path& root, HWND owner) {
     Session moved(move_root, owner);
     Write(move_root / L"source/tree/inner/leaf.txt", "merged move");
     fs::create_directories(move_root / L"destination/tree/inner");
-    status = moved.Run(Request(OpType::Move, {move_root / L"source/tree"}, move_root / L"destination"));
+    auto cut_move = Request(OpType::Move, {move_root / L"source/tree"}, move_root / L"destination");
+    const auto cut_source = cut_move.sources.front();
+    constexpr uint32_t clipboard_sequence = 17;
+    cut_move.cut_clipboard_sequence = clipboard_sequence;
+    status = moved.Run(std::move(cut_move));
     Check(status.phase == OpPhase::Completed && !fs::exists(move_root / L"source/tree") && moved.manager.CanUndo(),
         "merged move removes only its empty source containers and retains undo");
+    const auto completed = moved.manager.DrainCompletions();
+    Check(std::any_of(completed.begin(), completed.end(), [&](const auto& entry) {
+        return entry.type == OpType::Move && entry.cut_clipboard_sequence == clipboard_sequence &&
+            std::find(entry.sources.begin(), entry.sources.end(), cut_source) != entry.sources.end();
+    }), "merged cut publishes removal of the original clipboard root");
     const auto before_undo = moved.manager.Status().completed_ops;
     moved.manager.Undo();
     const bool undone = Wait([&] { return moved.manager.Status().completed_ops > before_undo &&

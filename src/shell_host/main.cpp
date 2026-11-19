@@ -274,6 +274,15 @@ void ExecuteRequest(std::unique_ptr<Request> req) {
         PayloadWriter writer;
         writer.PutU32(static_cast<uint32_t>(hr));
         writer.PutString(operation.folder);
+        size_t remaining = kMaxPayload - writer.data().size() - sizeof(uint32_t);
+        size_t count = 0;
+        for (const auto& name : names) {
+            const size_t cost = sizeof(std::wstring) + name.size() * sizeof(wchar_t);
+            if (cost > remaining) break;
+            remaining -= cost;
+            ++count;
+        }
+        names.resize(count);
         writer.PutStringArray(names);
         if (!SendMsg(RSP_DEVICE_OPERATION_DONE, req->id, writer.data())) {
             g.running.store(false);
@@ -390,6 +399,13 @@ DWORD WINAPI ReaderThreadImpl() {
             if (h.payload_size && !ReadRaw(payload.data(), h.payload_size)) break;
 
             switch (h.type) {
+            case REQ_SET_LANGUAGE: {
+                PayloadReader reader(payload.data(), payload.size());
+                std::wstring locale;
+                if (!h.request_id && reader.GetString(locale) && !reader.remaining() && l10n::IsLanguageId(locale))
+                    l10n::SetLanguage(locale);
+                break;
+            }
             case REQ_PING: {
                 SendMsg(RSP_PONG, h.request_id, {});
                 break;
@@ -496,6 +512,7 @@ DWORD WINAPI ReaderThreadImpl() {
                 auto& operation = request->device_operation;
                 if (!reader.GetU64(owner) || !reader.GetString(operation.verb) ||
                     !reader.GetString(operation.name) || !reader.GetStringArray(operation.ids) || !reader.GetString(operation.folder) ||
+                    (operation.verb == L"paste" && (!reader.GetU32(operation.paste_sequence) || !operation.paste_sequence)) ||
                     reader.remaining() != 0 || operation.ids.empty() || operation.ids.size() > 4096) {
                     SendDone(h.request_id, E_INVALIDARG, false, l10n::Get(l10n::StringId::ShellDeviceRequestMalformed).c_str());
                     break;
@@ -1308,6 +1325,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
     }
 #endif
     pulse::crash::Initialize({pulse::crash::ProcessRole::Shell, false, {}});
+    const wchar_t* locale = __argc == 3 ? __wargv[2] : __argc == 5 ? __wargv[4] : L"system";
+    pulse::l10n::Initialize(nullptr, locale);
 #ifdef PULSE_OPERATION_ELEVATION_HOST
     if (__argc > 1 && wcscmp(__wargv[1], L"--file-operation-worker") == 0)
         return pulse::ops::OperationElevationAdapter::RunWorker(__argc, __wargv);
@@ -1318,7 +1337,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
         return parent && session ? pulse::shell::RunShellQueryWorker(parent, session) : 1;
     }
 
-    if (__argc == 4 && wcscmp(__wargv[1], L"--launch-worker") == 0) {
+    if ((__argc == 4 || __argc == 5) && wcscmp(__wargv[1], L"--launch-worker") == 0) {
         const DWORD parent = static_cast<DWORD>(_wcstoui64(__wargv[2], nullptr, 10));
         const uint32_t request = static_cast<uint32_t>(_wcstoui64(__wargv[3], nullptr, 10));
         return parent && request ? pulse::shell::RunShellLaunchWorker(parent, request) : 1;
@@ -1326,7 +1345,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int) {
 
     DWORD ui_pid = GetCurrentProcessId();
     uint32_t worker_session = 0;
-    if (__argc == 4 && wcscmp(__wargv[1], L"--context-worker") == 0) {
+    if ((__argc == 4 || __argc == 5) && wcscmp(__wargv[1], L"--context-worker") == 0) {
         g_context_worker = true;
         ui_pid = static_cast<DWORD>(_wcstoui64(__wargv[2], nullptr, 10));
         worker_session = static_cast<uint32_t>(_wcstoui64(__wargv[3], nullptr, 10));

@@ -604,7 +604,7 @@ bool Painter::DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& 
 }
 
 bool Painter::DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
-                              const D2D1_COLOR_F* foreground) {
+                              const D2D1_COLOR_F* foreground, D2D1_SIZE_F viewport, float opacity) {
     if (!dc_) return false;
     if (!svg_dc_.get() && FAILED(dc_->QueryInterface(IID_PPV_ARGS(&svg_dc_)))) return false;
     auto [it, added] = svgs_.try_emplace(resource_id);
@@ -619,7 +619,7 @@ bool Painter::DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
         ComPtr<IStream> stream;
         stream.p = SHCreateMemStream(static_cast<const BYTE*>(bytes), size);
         if (!stream.get() || FAILED(svg_dc_->CreateSvgDocument(stream.get(),
-            D2D1::SizeF(24, 24), &svg))) return false;
+            viewport, &svg))) return false;
     }
     if (!svg.get()) return false;
     if (foreground) {
@@ -632,9 +632,14 @@ bool Painter::DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
     D2D1_MATRIX_3X2_F previous{};
     svg_dc_->GetTransform(&previous);
     svg_dc_->SetTransform(D2D1::Matrix3x2F::Scale(
-        (bounds.right - bounds.left) / 24.0f, (bounds.bottom - bounds.top) / 24.0f) *
+        (bounds.right - bounds.left) / viewport.width, (bounds.bottom - bounds.top) / viewport.height) *
         D2D1::Matrix3x2F::Translation(bounds.left, bounds.top) * previous);
+    if (opacity != 1.0f) {
+        dc_->PushLayer(D2D1::LayerParameters(D2D1::InfiniteRect(), nullptr,
+            D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::IdentityMatrix(), opacity), nullptr);
+    }
     svg_dc_->DrawSvgDocument(svg.get());
+    if (opacity != 1.0f) dc_->PopLayer();
     svg_dc_->SetTransform(previous);
     return true;
 }

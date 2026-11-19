@@ -279,6 +279,17 @@ int wmain() {
         return 2;
     }
 
+    const uint32_t stale_sequence = GetClipboardSequenceNumber() == 1 ? 2 : 1;
+    std::vector<std::wstring> device_names;
+    Check(pulse::ops::PasteShellClipboardToFolder(nullptr, nullptr, device_names, stale_sequence) ==
+        HRESULT_FROM_WIN32(ERROR_CANCELLED) && device_names.empty(),
+        "device paste rejects a replaced clipboard before obtaining provider data");
+    Check(pulse::ops::CutPasteMovedAllPaths({L"C:\\SRC\\a.txt", L"C:\\src\\A.txt", L"C:\\src\\b.txt"},
+            {L"C:\\src\\a.txt", L"C:\\src\\B.txt"}) &&
+        !pulse::ops::CutPasteMovedAllPaths({L"C:\\src\\a.txt", L"C:\\src\\b.txt"},
+            {L"C:\\src\\a.txt"}),
+        "cut completion matches case-insensitively and requires every distinct source");
+
     constexpr char payload[] = "virtual file from test IDataObject";
     auto* valid = new VirtualFileData(payload);
     const bool pasted = pulse::ops::PasteShellDataForTest(valid, root.wstring(), DROPEFFECT_COPY);

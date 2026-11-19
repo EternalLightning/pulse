@@ -12,6 +12,25 @@
 
 namespace pulse::ui {
 namespace {
+// Older preview hosts may return translated labels.
+l10n::StringId PreviewPropertyId(std::wstring_view label) {
+    using Id = l10n::StringId;
+    struct Labels { Id id; std::wstring english; std::wstring chinese; };
+    static const auto known = [] {
+        constexpr Id ids[]{Id::PreviewPropertyDimensions, Id::PreviewPropertyDateTaken, Id::PreviewPropertyCamera,
+            Id::PreviewPropertyDuration, Id::PreviewPropertyResolution, Id::PreviewPropertyFrameRate,
+            Id::PreviewPropertyCodec, Id::PreviewPropertyArtist, Id::PreviewPropertyAlbum,
+            Id::PreviewPropertyTitle, Id::PreviewPropertyAuthor, Id::PreviewPropertyPageCount};
+        std::array<Labels, std::size(ids)> result;
+        for (size_t i = 0; i < std::size(ids); ++i)
+            result[i] = {ids[i], l10n::Get(ids[i], l10n::Language::EnUS), l10n::Get(ids[i], l10n::Language::ZhCN)};
+        return result;
+    }();
+    for (const auto& item : known) {
+        if (label == item.english || label == item.chinese) return item.id;
+    }
+    return Id{};
+}
 std::atomic<uint32_t> g_preview_cache_sequence{1};
 constexpr uint32_t kMaxFailureAttempts = 3;
 constexpr ULONGLONG kFailureRetryDelayMs = 2000;
@@ -606,6 +625,7 @@ bool ThumbnailCache::FetchResponse(const Request& req, Item& result, size_t lane
             if (!read(&label_chars, sizeof(label_chars)) || label_chars > ipc::kPreviewMaxPropertyLabelChars ||
                 !read_string(property.label, label_chars) || !read(&value_chars, sizeof(value_chars)) ||
                 value_chars > ipc::kPreviewMaxPropertyValueChars || !read_string(property.value, value_chars)) return false;
+            property.id = PreviewPropertyId(property.label);
             result.properties.push_back(std::move(property));
         }
         if (response.status == 0 && response.mapping_chars) {

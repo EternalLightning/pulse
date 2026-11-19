@@ -139,7 +139,8 @@ HRESULT ExecuteDeviceOperation(const DeviceOperation& request, std::vector<std::
         hr = folder->GetAttributes(paste ? SFGAO_FOLDER : SFGAO_FOLDER | SFGAO_READONLY, &attrs);
         if (FAILED(hr)) return hr;
         if (!(attrs & SFGAO_FOLDER) || (attrs & SFGAO_READONLY)) return E_ACCESSDENIED;
-        if (paste) return ops::PasteShellClipboardToFolder(folder.Get(), request.owner, completed_names);
+        if (paste) return ops::PasteShellClipboardToFolder(folder.Get(), request.owner, completed_names,
+            request.paste_sequence);
         if (request.name.empty() || request.name == L"." || request.name == L".." ||
             request.name.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos) return E_INVALIDARG;
         for (const auto ch : request.name) if (ch < 32) return E_INVALIDARG;

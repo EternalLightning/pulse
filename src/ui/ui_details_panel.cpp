@@ -593,8 +593,10 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                 infoRow(pulse::l10n::Get(pulse::l10n::StringId::Created).c_str(), d.created_text, iy);
                 infoRow(pulse::l10n::Get(pulse::l10n::StringId::ModifiedTime).c_str(), d.modified_text, iy);
                 infoRow(pulse::l10n::Get(pulse::l10n::StringId::LastAccessed).c_str(), d.accessed_text, iy);
-                for (const auto& property : d.preview_properties)
-                    infoRow(property.label.c_str(), property.value, iy);
+                for (const auto& property : d.preview_properties) {
+                    infoRow((property.id == l10n::StringId{} ? property.label : l10n::Get(property.id)).c_str(),
+                        property.value, iy);
+                }
                 y = iy + 8.0f * s;
                 break;
             }

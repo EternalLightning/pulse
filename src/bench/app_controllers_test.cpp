@@ -841,6 +841,10 @@ int wmain(int argc, wchar_t** argv) {
         ok &= Report("Escape cancels shortcut capture", !settings.global_search_hotkey_capturing() && prefs.global_search_key == VK_SPACE);
         settings.BeginGlobalSearchHotkeyCapture();
         effect = pulse::app::SettingsEffect::None;
+        settings.CaptureGlobalSearchHotkey('C', MOD_CONTROL);
+        ok &= Report("global search rejects a command shortcut",
+            settings.global_search_hotkey_capturing() && prefs.global_search_key == VK_SPACE &&
+            effect == pulse::app::SettingsEffect::None);
         settings.CaptureGlobalSearchHotkey('K', MOD_CONTROL | MOD_SHIFT);
         ok &= Report("shortcut capture saves and applies combination", !settings.global_search_hotkey_capturing() && prefs.global_search_key == 'K' && prefs.global_search_modifiers == (MOD_CONTROL | MOD_SHIFT) && pulse::app::HasEffect(effect, pulse::app::SettingsEffect::GlobalSearch));
         pulse::app::AppPrefs loaded;
@@ -849,7 +853,12 @@ int wmain(int argc, wchar_t** argv) {
         ok &= Report("global search preferences round trip", loaded.global_search_enabled && loaded.global_search_key == 'K' && loaded.global_search_modifiers == (MOD_CONTROL | MOD_SHIFT));
         loaded.FromJson(L"{}");
         ok &= Report("older preferences retain safe defaults", !loaded.global_search_enabled && loaded.global_search_key == VK_SPACE && loaded.global_search_modifiers == MOD_ALT);
-        prefs.persist = true; // This executable's data-directory stub is empty, so Save fails without touching disk.
+        wchar_t temporary[MAX_PATH]{}, blocked_root[MAX_PATH]{};
+        if (!GetTempPathW(ARRAYSIZE(temporary), temporary) ||
+            !GetTempFileNameW(temporary, L"pls", 0, blocked_root)) return 1;
+        // A file at the isolated configuration root makes the save fail deterministically.
+        pulse::storage::OverrideDefaultRootForTesting(blocked_root);
+        prefs.persist = true;
         effect = pulse::app::SettingsEffect::None;
         settings.BeginGlobalSearchHotkeyCapture();
         settings.CaptureGlobalSearchHotkey('L', MOD_ALT);
@@ -860,6 +869,7 @@ int wmain(int argc, wchar_t** argv) {
         prefs.persist = false;
         settings.ResetUi();
         ok &= Report("settings reset cancels capture", !settings.global_search_hotkey_capturing());
+        ok &= Report("failed-save fixture is removed", DeleteFileW(blocked_root) != FALSE);
         return ok ? 0 : 1;
     }
     using pulse::app::HasEffect;

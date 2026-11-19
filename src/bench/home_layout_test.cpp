@@ -179,5 +179,22 @@ int main() {
             check(mapped != pane.home_cards.end() && mapped->label == *label + L" (Z:)", "mapped drive display name matches Windows Shell");
     }
     check(catalog.ConsumeUpdate() && !catalog.ConsumeUpdate(), "completed catalog update is consumed once");
+    std::vector<std::pair<std::wstring, std::wstring>> drive_details;
+    for (const auto& card : pane.home_cards) {
+        if (card.group != 0) drive_details.emplace_back(card.path, card.detail);
+    }
+    model::HomeQuickAccessPrefs custom;
+    custom.hidden = model::kHomeQuickAccessHiddenMask;
+    custom.AddFolder(L"C:\\Users\\Pulse-Fixture");
+    catalog.SetQuickAccessPrefs(custom);
+    catalog.Fill(pane);
+    std::vector<std::pair<std::wstring, std::wstring>> new_drive_details;
+    for (const auto& card : pane.home_cards) {
+        if (card.group != 0) new_drive_details.emplace_back(card.path, card.detail);
+    }
+    check(!catalog.Loading() && drive_details == new_drive_details &&
+          pane.home_cards.size() == drive_details.size() + 1 &&
+          pane.home_cards.front().shell_icon_path == custom.folders.front(),
+          "editing Home quick access immediately projects its cards without rescanning drive metadata");
     return failures ? 1 : 0;
 }

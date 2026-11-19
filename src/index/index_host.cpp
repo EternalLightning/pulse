@@ -275,11 +275,17 @@ void ClientWriter(std::shared_ptr<Client> c) {
 }
 std::vector<uint8_t> StatusPayload() {
     PayloadWriter w;
+    using pulse::l10n::Language;
+    using pulse::l10n::StringId;
+    const auto status = g.as_service ? pulse::index::IndexStatusText{
+        pulse::l10n::Get(StringId::IndexServiceVisibilityNotice, Language::EnUS),
+        pulse::l10n::Get(StringId::IndexServiceVisibilityNotice, Language::ZhCN)} : g.engine.StatusTranslations();
     w.PutU32(g.engine.Ready() ? 1u : 0u);
     w.PutU32(g.as_service ? 0u : static_cast<uint32_t>((std::min)(g.engine.Count(), static_cast<size_t>(0xffffffffu))));
-    w.PutString(g.as_service ? pulse::l10n::Get(pulse::l10n::StringId::IndexServiceVisibilityNotice).c_str() : g.engine.Status());
+    w.PutString(status.english);
     w.PutU32(g.engine.PinyinReady() ? 1u : 0u);
     w.PutU64(g.engine.Revision()); w.PutU32(1);
+    w.PutString(status.chinese);
     return w.data();
 }
 

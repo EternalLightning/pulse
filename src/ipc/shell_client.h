@@ -72,7 +72,8 @@ public:
         const std::function<void(uint32_t)>& before_send = {});
     void SetFileOperationPaused(uint32_t id, bool paused);
     uint32_t DeviceOperation(HWND window, const std::wstring& verb,
-        const std::vector<std::wstring>& ids, const std::wstring& name, const std::wstring& folder, const Owner& owner);
+        const std::vector<std::wstring>& ids, const std::wstring& name, const std::wstring& folder,
+        uint32_t paste_sequence, const Owner& owner);
     void Cancel(uint32_t id);
     void Abort(uint32_t id);
     bool Ping();
@@ -117,6 +118,7 @@ private:
         ~Connection();
         HANDLE pipe;
         HANDLE cancel;
+        bool chinese = false;
     };
     std::shared_ptr<Connection> CurrentConnection();
     void SignalConnection();
@@ -126,6 +128,7 @@ private:
                     const std::function<void(uint32_t)>& before_send = {}, const Owner& owner = {});
     bool EnsureConnected();
     bool SpawnChild();
+    bool child_chinese_ = false;
     void KillChild();
     bool SendFrame(uint32_t type, uint32_t id, const std::vector<uint8_t>& payload);
     void ReaderThread();

@@ -17,11 +17,12 @@ struct PaneEmptyLayout {
 };
 
 inline PaneEmptyLayout MakePaneEmptyLayout(const D2D1_RECT_F& bounds, float scale,
-                                    bool can_create, float art_aspect = 512.0f / 360.0f) {
+                                    bool can_create, float art_aspect = 512.0f / 360.0f,
+                                    bool has_message = true) {
     PaneEmptyLayout out;
     const float width = std::max(0.0f, bounds.right - bounds.left);
     const float height = std::max(0.0f, bounds.bottom - bounds.top);
-    out.show_message = height >= 220.0f * scale;
+    out.show_message = has_message && height >= 220.0f * scale;
     out.show_action = can_create && height >= 280.0f * scale && width >= 180.0f * scale;
 
     const float titleH = 24.0f * scale;

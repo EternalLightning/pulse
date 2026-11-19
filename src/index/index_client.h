@@ -103,8 +103,10 @@ private:
     std::atomic<uint64_t> revision_{0};
     std::atomic<uint32_t> latest_search_id_{0};
     mutable std::mutex mu_;
-    std::wstring status_ = l10n::Get(l10n::StringId::IndexDisconnected).c_str();
-    std::wstring query_status_;
+    l10n::StringId local_status_ = l10n::StringId::IndexDisconnected;
+    std::wstring status_;
+    std::wstring status_zh_;
+    l10n::StringId query_status_{};
     bool helper_missing_ = false;
     std::wstring index_path_;
     bool service_mode_ = false;

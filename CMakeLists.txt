@@ -614,7 +614,7 @@ if(PULSE_SHELL_SOURCES)
     add_dependencies(pulse_shell_launch_test pulse_shell_launch_worker_fixture)
     add_executable(pulse_shell_launch_client_test
         src/bench/shell_launch_client_test.cpp src/ipc/shell_client.cpp)
-    target_link_libraries(pulse_shell_launch_client_test PRIVATE advapi32 user32)
+    target_link_libraries(pulse_shell_launch_client_test PRIVATE pulse_localization advapi32 user32)
     add_executable(pulse_shell_interaction_test src/bench/shell_interaction_test.cpp)
     target_link_libraries(pulse_shell_interaction_test PRIVATE pulse_shell_interaction_client)
     add_dependencies(pulse_shell_interaction_test pulse_shell)
@@ -1396,6 +1396,8 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
     add_executable(pulse_takeover_delivery_fixture_test src/bench/takeover_delivery_fixture_test.cpp)
     add_executable(pulse_empty_state_render_test src/bench/empty_state_render_test.cpp)
     add_executable(pulse_virtual_location_navigation_test src/bench/virtual_location_navigation_test.cpp)
+    add_executable(pulse_file_picker_commands_test src/bench/file_picker_commands_fixture_test.cpp)
+    add_executable(pulse_file_picker_size_test src/bench/file_picker_size_fixture_test.cpp)
     add_executable(pulse_file_dialog_takeover_test
         src/bench/file_dialog_takeover_test.cpp
         src/shell_bridge/file_dialog_contract.cpp
@@ -1405,7 +1407,7 @@ if(PULSE_BUILD_ARCHITECTURE_FIXTURES)
         src/bench/window_transfer_regression_test.cpp src/bench/network_access_application_test.cpp)
     target_compile_definitions(pulse_quality_application_objects PRIVATE PULSE_FOLDER_SIZES_TESTING=1)
     target_compile_definitions(pulse_folder_sizes_ui_cache_test PRIVATE PULSE_FOLDER_SIZES_TESTING=1)
-    foreach(quality_target pulse_hosted_edit_stability_test pulse_address_edit_stability_test pulse_removable_search_routing_test pulse_folder_sizes_ui_cache_test pulse_text_render_settings_test pulse_upstream_adaptation_test pulse_context_menu_settings_ui_test pulse_takeover_delivery_fixture_test pulse_empty_state_render_test pulse_virtual_location_navigation_test pulse_pane_animation_application_test pulse_group_toolbar_ui_test pulse_file_dialog_takeover_test)
+    foreach(quality_target pulse_hosted_edit_stability_test pulse_address_edit_stability_test pulse_removable_search_routing_test pulse_folder_sizes_ui_cache_test pulse_text_render_settings_test pulse_upstream_adaptation_test pulse_context_menu_settings_ui_test pulse_takeover_delivery_fixture_test pulse_empty_state_render_test pulse_virtual_location_navigation_test pulse_pane_animation_application_test pulse_group_toolbar_ui_test pulse_file_dialog_takeover_test pulse_file_picker_commands_test pulse_file_picker_size_test)
         target_link_libraries(${quality_target} PRIVATE pulse_quality_application_objects ${architecture_libraries})
         target_include_directories(${quality_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
         foreach(quality_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_OPTIONS)
@@ -1520,7 +1522,7 @@ foreach(namespace_worker_target pulse_worker_lifecycle_test pulse_fs_worker_canc
 endforeach()
 
 add_executable(pulse_settings_transfer_test src/bench/settings_transfer_test.cpp
-    src/app/settings_transfer.cpp)
+    src/app/settings_transfer.cpp src/model/path_aliases.cpp)
 
 add_executable(pulse_network_locations_feature_test src/bench/network_locations_feature_test.cpp
     src/app/server_address.cpp src/app/network_recent.cpp src/app/network_recent_store.cpp

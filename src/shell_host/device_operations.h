@@ -5,6 +5,7 @@
 
 #pragma once
 #include <windows.h>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,7 @@ struct DeviceOperation {
     std::wstring name;
     std::vector<std::wstring> ids;
     std::wstring folder;
+    uint32_t paste_sequence = 0;
 };
 // Called on the host STA; clipboard objects stay on that apartment.
 HRESULT ExecuteDeviceOperation(const DeviceOperation& request, std::vector<std::wstring>& completed_names);

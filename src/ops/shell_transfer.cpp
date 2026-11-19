@@ -506,7 +506,11 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
         }
         outcome.items.push_back(std::move(state));
     }
-    // Merged source containers are removed only when empty, never recursively.
+    CompletedOperation removed_directories;
+    removed_directories.type = OpType::Move;
+    removed_directories.task_id = task_id;
+    removed_directories.cut_clipboard_sequence = req.cut_clipboard_sequence;
+    // Merged containers are recorded separately from undo, which may only move their new contents.
     if (req.type == OpType::Move && SUCCEEDED(failure) && !cancelled()) {
         for (auto it = merged_directories.rbegin(); it != merged_directories.rend(); ++it) {
             if (!it->source_identity.Get()) continue;
@@ -518,10 +522,17 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                 completed.sources.push_back(it->source); destinations.push_back(it->destination);
                 completed.undo_produced_identities.push_back(it->source_identity.identity);
                 identities.push_back({}); references.push_back({});
+            } else {
+                removed_directories.sources.push_back(it->source);
+                removed_directories.destinations.push_back(it->destination);
             }
         }
     }
     if (!completed.sources.empty()) PushUndo(completed, &destinations, &identities, &references);
+    if (!removed_directories.sources.empty()) {
+        std::lock_guard lock(mutex_);
+        completions_.push_back(std::move(removed_directories));
+    }
     for (const auto& item : outcome.items)
         if (item.state == TransferItemState::Incomplete) outcome.remaining_sources.push_back(item.source);
     outcome.can_resume = !req.is_undo && !unstarted.empty();

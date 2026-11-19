@@ -19,6 +19,7 @@ struct SidebarModel;
 class HomeCatalog {
 public:
     void Refresh(const model::HomeQuickAccessPrefs& prefs = {});
+    void SetQuickAccessPrefs(const model::HomeQuickAccessPrefs& prefs);
     void UpdateDriveLabel(const std::wstring& root, const std::wstring& label);
     bool ConsumeUpdate();
     bool Loading() const;
@@ -29,12 +30,15 @@ private:
         std::mutex mutex;
         std::vector<ui::HomeCardView> cards;
         std::array<ui::HomeCardView, model::kHomeQuickAccessItemCount> quick_access_cards;
+        std::vector<ui::HomeCardView> visible_quick_access_cards;
         std::unordered_map<std::wstring, std::pair<uint64_t, uint64_t>> drive_capacity;
         std::unordered_map<std::wstring, std::wstring> label_updates;
         uint64_t generation = 0;
         model::HomeQuickAccessPrefs quick_access;
         bool loading = false;
         bool updated = false;
+        void UpdateQuickAccessPrefs(const model::HomeQuickAccessPrefs& prefs);
+        void RebuildQuickAccess();
     };
     std::shared_ptr<State> state_ = std::make_shared<State>();
 };

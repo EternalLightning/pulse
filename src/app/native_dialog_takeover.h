@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 
 namespace pulse::app {
 
@@ -33,6 +34,7 @@ private:
                        std::wstring pulse_folder, DWORD source_process, bool verify_copies);
     mutable std::mutex mutex_;
     std::shared_ptr<Shared> shared_;
+    std::thread watcher_;
     bool stopped_ = false;
 };
 

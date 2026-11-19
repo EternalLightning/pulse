@@ -16,6 +16,7 @@ namespace pulse::app {
 // Capabilities are supplied by the caller; catalog evaluation never probes disk
 // or invokes a Shell provider on the UI thread.
 struct CommandContext {
+    bool recycle_selection = false;
     int selected_count = 0;
     bool archive_view = false;
     bool shell_selection = false;
@@ -61,6 +62,7 @@ bool IsCommandEnabled(int command, const CommandContext& context);
 std::wstring CommandShortcutText(const CommandShortcut& shortcut);
 CommandShortcut EffectiveCommandShortcut(int command);
 CommandShortcut EffectiveCommandShortcut(int command, std::span<const CommandShortcutOverride> overrides);
+bool HasCommandShortcut(const CommandShortcut& shortcut, std::span<const CommandShortcutOverride> overrides);
 void ConfigureCommandShortcuts(std::span<const CommandShortcutOverride> overrides);
 bool ParseCommandShortcut(std::wstring_view text, CommandShortcut& shortcut);
 enum class ShortcutBindingResult { Success, Invalid, Reserved, Conflict };

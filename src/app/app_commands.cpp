@@ -127,6 +127,7 @@ app::CommandContext BuildCommandContext(AppState& s) {
     context.can_group_selection = CanGroupSelection(tab);
     context.can_dissolve_selection = CanDissolveSelection(tab);
     context.archive_view = IsArchiveView(tab->current_path);
+    context.recycle_selection = IsRecycleTab(tab) && context.selected_count > 0;
     context.read_only = tab->net_readonly;
     context.filesystem_folder = !tab->current_path.empty() &&
         !fs::IsVirtualPath(tab->current_path) && !context.archive_view;
@@ -744,7 +745,7 @@ void DispatchMenuCommand(AppState& s, int cmd) {
     case app::CmdCut: CollectToTray(s, true); break;
     case app::CmdCopy: CollectToTray(s, false); break;
     case app::CmdPaste: PasteIntoCurrent(s); break;
-    case app::CmdDelete: DeleteSelected(s, (GetKeyState(VK_SHIFT) & 0x8000) != 0); break;
+    case app::CmdDelete: DeleteSelected(s, false); break;
     case app::CmdRename: ShowRenameOverlay(s); break;
     case app::CmdBatchRename: ShowBatchRename(s); break;
     case app::CmdAdvancedSearch: ShowAdvancedSearch(s); break;

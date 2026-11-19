@@ -13,6 +13,7 @@
 #include "../ipc/shell_query_client.h"
 #include "../fs/shell_namespace.h"
 #include <shlobj.h>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -48,12 +49,51 @@ std::pair<uint64_t, uint64_t> ReadDriveMetadata(ui::HomeCardView& card) {
     return {};
 }
 }
+void HomeCatalog::State::RebuildQuickAccess() {
+    visible_quick_access_cards.clear();
+    const auto append_builtin = [&](size_t index) {
+        const auto& card = quick_access_cards[index];
+        if ((quick_access.hidden & (1u << index)) || card.path.empty()) return false;
+        visible_quick_access_cards.push_back(card);
+        return true;
+    };
+    const auto path_order = [](const std::wstring& a, const std::wstring& b) {
+        return CompareStringOrdinal(a.c_str(), -1, b.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+    };
+    std::set<std::wstring, decltype(path_order)> seen(path_order);
+    for (const int bit : model::kHomeQuickAccessFolderBits) {
+        if (append_builtin(bit))
+            seen.insert(model::NormalizeHomeQuickAccessFolder(quick_access_cards[bit].path));
+    }
+    for (const auto& folder : quick_access.folders) {
+        const auto normalized = model::NormalizeHomeQuickAccessFolder(folder);
+        if (normalized.empty() || !seen.insert(normalized).second) continue;
+        const auto slash = normalized.find_last_of(L'\\');
+        const auto label = slash != std::wstring::npos && slash + 1 < normalized.size()
+            ? normalized.substr(slash + 1) : normalized;
+        visible_quick_access_cards.push_back({label, {}, normalized, L"\xE8B7", 0, -1.0f, normalized});
+    }
+    for (const int bit : model::kHomeQuickAccessSystemBits) append_builtin(bit);
+}
+
+void HomeCatalog::State::UpdateQuickAccessPrefs(const model::HomeQuickAccessPrefs& prefs) {
+    if (quick_access == prefs) return;
+    quick_access = prefs;
+    RebuildQuickAccess();
+    updated = true;
+}
+
+void HomeCatalog::SetQuickAccessPrefs(const model::HomeQuickAccessPrefs& prefs) {
+    std::lock_guard lock(state_->mutex);
+    state_->UpdateQuickAccessPrefs(prefs);
+}
+
 void HomeCatalog::Refresh(const model::HomeQuickAccessPrefs& prefs) {
     auto state = state_;
     {
         std::lock_guard lock(state->mutex);
         ++state->generation;
-        state->quick_access = prefs;
+        state->UpdateQuickAccessPrefs(prefs);
         state->updated = true;
         if (state->loading) return;
         state->loading = true;
@@ -131,11 +171,16 @@ void HomeCatalog::Refresh(const model::HomeQuickAccessPrefs& prefs) {
                 cards.push_back(std::move(card));
             }
             // Publish local content before contacting network providers, which may be slow or offline.
+            bool published_locations = false;
             const auto publish = [&](bool complete) {
                 std::lock_guard lock(state->mutex);
                 if (state->generation != generation) return false;
                 state->cards = cards;
-                state->quick_access_cards = quick_access_cards;
+                if (!published_locations) {
+                    state->quick_access_cards = std::move(quick_access_cards);
+                    state->RebuildQuickAccess();
+                    published_locations = true;
+                }
                 state->drive_capacity = drive_capacity;
                 for (auto& card : state->cards) {
                     for (const auto& [root, label] : state->label_updates) {
@@ -207,28 +252,7 @@ void HomeCatalog::FillDriveLabels(SidebarModel& sidebar) const {
 void HomeCatalog::Fill(ui::PaneViewModel& pane, const model::PlacesCatalog* places) const {
     if (!pane.is_home) return;
     std::lock_guard lock(state_->mutex);
-    // Configuration projects cached card metadata without waiting for a network provider.
-    pane.home_cards.clear();
-    const auto append_builtin = [&](size_t index) {
-        const auto& card = state_->quick_access_cards[index];
-        if (!(state_->quick_access.hidden & (1u << index)) && !card.path.empty()) pane.home_cards.push_back(card);
-    };
-    for (const int bit : model::kHomeQuickAccessFolderBits) append_builtin(bit);
-    for (const auto& folder : state_->quick_access.folders) {
-        const auto normalized = model::NormalizeHomeQuickAccessFolder(folder);
-        if (normalized.empty() || std::any_of(pane.home_cards.begin(), pane.home_cards.end(), [&](const auto& card) {
-            return path::EqualInsensitive(model::NormalizeHomeQuickAccessFolder(card.path), normalized);
-        })) continue;
-        ui::HomeCardView card;
-        const auto slash = normalized.find_last_of(L'\\');
-        card.label = slash != std::wstring::npos && slash + 1 < normalized.size()
-            ? normalized.substr(slash + 1) : normalized;
-        card.path = normalized;
-        card.shell_icon_path = normalized;
-        card.glyph = L"\xE8B7";
-        pane.home_cards.push_back(std::move(card));
-    }
-    for (const int bit : model::kHomeQuickAccessSystemBits) append_builtin(bit);
+    pane.home_cards = state_->visible_quick_access_cards;
     pane.home_cards.insert(pane.home_cards.end(), state_->cards.begin(), state_->cards.end());
     pane.home_loading = state_->loading;
     if (places) {

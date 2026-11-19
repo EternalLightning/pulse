@@ -49,7 +49,7 @@ bool HandleHomeQuickAccessSettingsAction(AppState& state, int action, int index,
     }
     bool origin_refreshed = false;
     auto refresh = [&](AppState& window) {
-        window.home_catalog.Refresh(next);
+        window.home_catalog.SetQuickAccessPrefs(next);
         window.hitTestVmValid = false;
         InvalidateRect(window.hwnd, nullptr, FALSE);
     };

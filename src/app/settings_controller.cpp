@@ -5,6 +5,7 @@
 
 #include "../common/localization.h"
 #include "settings_controller.h"
+#include "command_catalog.h"
 #include "system_ctx_model.h"
 #include "../common/user_storage.h"
 #include "../index/index_client.h"
@@ -20,6 +21,12 @@
 namespace pulse::app {
 
 namespace {
+bool GlobalHotkeyAssignedToCommand(const AppPrefs& prefs, uint32_t key, uint32_t modifiers) {
+    if (modifiers & MOD_WIN) return false;
+    const CommandShortcut shortcut{key, (modifiers & MOD_CONTROL) != 0,
+        (modifiers & MOD_SHIFT) != 0, (modifiers & MOD_ALT) != 0};
+    return HasCommandShortcut(shortcut, prefs.command_shortcuts);
+}
 
 template <size_t Size>
 bool SelectValue(int index, const int (&values)[Size], int& target) {
@@ -437,6 +444,10 @@ bool SettingsController::CaptureGlobalSearchHotkey(uint32_t key, uint32_t modifi
         global_search_error_ = l10n::Get(l10n::StringId::GlobalSearchInvalid);
         return true;
     }
+    if (GlobalHotkeyAssignedToCommand(*prefs_, key, modifiers)) {
+        global_search_error_ = l10n::Get(l10n::StringId::GlobalSearchConflict);
+        return true;
+    }
     const auto previous_modifiers = prefs_->global_search_modifiers;
     const auto previous_key = prefs_->global_search_key;
     prefs_->global_search_modifiers = modifiers;
@@ -571,6 +582,11 @@ void SettingsController::ToggleUi(int index) {
         prefs_->auto_folder_size = !prefs_->auto_folder_size;
         SaveAndApply(SettingsEffect::FolderSizes);
     } else if (index == 15) {
+        if (!prefs_->global_search_enabled &&
+            GlobalHotkeyAssignedToCommand(*prefs_, prefs_->global_search_key, prefs_->global_search_modifiers)) {
+            global_search_error_ = l10n::Get(l10n::StringId::GlobalSearchConflict);
+            return;
+        }
         prefs_->global_search_enabled = !prefs_->global_search_enabled;
         if (!prefs_->Save()) {
             prefs_->global_search_enabled = !prefs_->global_search_enabled;

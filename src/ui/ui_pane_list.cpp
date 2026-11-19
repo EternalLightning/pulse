@@ -369,16 +369,16 @@ MainRenderer::DetailsColumnLayout MainRenderer::DetailsColumns(
                 default: width = 96.0f; break;
                 }
             }
-            const float header = CellTextWidth(DetailsColumnLabel(kind)) / std::max(0.01f, scale_) + 20.0f;
             const int index = configured.count++;
             configured.kinds[static_cast<size_t>(index)] = kind;
-            configured.widths[static_cast<size_t>(index)] = std::max(width, header) * scale_;
+            configured.widths[static_cast<size_t>(index)] = std::max(width * scale_, ConfiguredColumnMinimumWidth(kind));
             metadata += configured.widths[static_cast<size_t>(index)];
         }
         const float total = std::max(0.0f, configured.right - configured.left);
         // Keep the leading configured columns on narrow panes. Saved order and
         // visibility survive a resize, even while trailing columns cannot fit.
-        while (configured.count > 1 && metadata + kDetailsFitNameDip * scale_ > total) {
+        const float min_name = ConfiguredColumnMinimumWidth(ColumnKind::Name);
+        while (configured.count > 1 && metadata + min_name > total) {
             metadata -= configured.widths[static_cast<size_t>(--configured.count)];
         }
         configured.widths[0] = std::max(0.0f, total - metadata);
@@ -431,6 +431,11 @@ MainRenderer::DetailsColumnLayout MainRenderer::DetailsColumns(
     return columns;
 }
 
+float MainRenderer::ConfiguredColumnMinimumWidth(ColumnKind kind) const {
+    return kind == ColumnKind::Name ? kDetailsFitNameDip * scale_ :
+        std::max(24.0f * scale_, CellTextWidth(DetailsColumnLabel(kind)) + 20.0f * scale_);
+}
+
 void MainRenderer::ResizeConfiguredColumn(const D2D1_RECT_F& pane_bounds, PaneViewModel& vm,
                                           int divider_index, float cursor_x) const {
     const auto columns = DetailsColumns(pane_bounds, vm);
@@ -440,8 +445,10 @@ void MainRenderer::ResizeConfiguredColumn(const D2D1_RECT_F& pane_bounds, PaneVi
     const size_t right = left + 1;
     const float x0 = left ? columns.DividerX(divider_index - 1) : columns.left;
     const float x2 = columns.DividerX(divider_index + 1);
-    const float minimum = std::min(48.0f * scale_, (x2 - x0) * 0.5f);
-    const float edge = std::clamp(cursor_x, x0 + minimum, x2 - minimum);
+    const float first = x0 + ConfiguredColumnMinimumWidth(columns.kinds[left]);
+    const float last = x2 - ConfiguredColumnMinimumWidth(columns.kinds[right]);
+    if (first > last) return;
+    const float edge = std::clamp(cursor_x, first, last);
     if (columns.kinds[left] != ColumnKind::Name)
         vm.details_columns.widths[static_cast<size_t>(columns.kinds[left])] = std::clamp((edge - x0) / scale_, 24.0f, 4096.0f);
     vm.details_columns.widths[static_cast<size_t>(columns.kinds[right])] = std::clamp((x2 - edge) / scale_, 24.0f, 4096.0f);
@@ -2218,14 +2225,15 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                 case ColumnKind::Dimensions:
                 case ColumnKind::Duration:
                 case ColumnKind::DateTaken: {
-                    const auto label = DetailsColumnLabel(detailsColumns.kinds[static_cast<size_t>(col)]);
                     const auto kind = detailsColumns.kinds[static_cast<size_t>(col)];
-                    const std::wstring_view chinese = kind == ColumnKind::Dimensions ? L"尺寸" :
-                        kind == ColumnKind::Duration ? L"时长" : L"拍摄时间";
-                    const std::wstring_view english = kind == ColumnKind::Dimensions ? L"Dimensions" :
-                        kind == ColumnKind::Duration ? L"Duration" : L"Date taken";
+                    using Id = l10n::StringId;
+                    const auto expected = kind == ColumnKind::Dimensions ? Id::PreviewPropertyDimensions :
+                        kind == ColumnKind::Duration ? Id::PreviewPropertyDuration : Id::PreviewPropertyDateTaken;
                     const auto property = std::find_if(media_properties.begin(), media_properties.end(),
-                        [&](const auto& item) { return item.label == label || item.label == chinese || item.label == english; });
+                        [&](const auto& item) {
+                            return item.id == expected ||
+                                (kind == ColumnKind::Dimensions && item.id == Id::PreviewPropertyResolution);
+                        });
                     if (property != media_properties.end())
                         draw_detail_text(fit(property->value, avail), left, avail, DWRITE_TEXT_ALIGNMENT_LEADING);
                     break;

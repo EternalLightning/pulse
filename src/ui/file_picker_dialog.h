@@ -53,9 +53,11 @@ struct FilePickerSpec {
     std::vector<PickerFilter> filters;
     size_t filter_index = 0;
     bool allow_multiselect = false;
+    std::wstring multiselect_directory;
     bool show_hidden = false;
     bool software_device = false;
     bool verify_copies = false;
+    bool cover_source = false;
 
     // Called on a worker when opening the picker.
     PickerPlacesLoader load_places;

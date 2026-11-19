@@ -401,7 +401,8 @@ public:
     void DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
                    const D2D1_COLOR_F& color);
     bool DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
-                         const D2D1_COLOR_F* foreground = nullptr);
+                         const D2D1_COLOR_F* foreground = nullptr,
+                         D2D1_SIZE_F viewport = {24.0f, 24.0f}, float opacity = 1.0f);
     void DrawPaneLayoutIcon(const D2D1_RECT_F& bounds, MenuPictogram kind,
                             const D2D1_COLOR_F& color);
     void DrawFocusRing(const D2D1_RECT_F& bounds, float radius);

@@ -985,6 +985,7 @@ std::wstring OpsManager::UndoLabel() const {
 }
 
 void OpsManager::RefreshRecycleUndoValidity() {
+    if (!record_undo_) return;
     std::vector<std::pair<size_t, UndoEntry>> entries;
     uint64_t revision = 0;
     {
@@ -1041,6 +1042,7 @@ void OpsManager::PushUndo(const OpRequest& req,
                           const std::vector<FileObjectReference>* produced_references) {
     CompletedOperation completed;
     completed.type = req.type;
+    completed.cut_clipboard_sequence = req.cut_clipboard_sequence;
     completed.sources = req.sources;
     if (req.type == OpType::Rename && req.sources.size() == 1 &&
         pulse::path::IsDriveRootPath(req.sources.front())) completed.volume_label = req.new_name;
@@ -1057,11 +1059,13 @@ void OpsManager::PushUndo(const OpRequest& req,
         for (const auto& source : req.sources)
             completed.destinations.push_back(JoinPath(req.dest_dir, FileName(source)));
     }
-    const auto destinations = completed.destinations;
+    const auto destinations = record_undo_ ? completed.destinations : std::vector<std::wstring>{};
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        completed.task_id = status_.task_id;
         completions_.push_back(std::move(completed));
     }
+    if (!record_undo_) return;
     if (req.type == OpType::Rename && req.sources.size() == 1 &&
         pulse::path::IsDriveRootPath(req.sources.front())) return;
     if (req.is_undo) {
@@ -1571,9 +1575,11 @@ void OpsManager::WorkerThread() {
         QueueItem item;
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            cv_.wait_for(lock, std::chrono::seconds(1), [this] {
+            const auto ready = [this] {
                 return !queue_.empty() || !running_ || undo_validation_requested_.load();
-            });
+            };
+            if (record_undo_) cv_.wait_for(lock, std::chrono::seconds(1), ready);
+            else cv_.wait(lock, ready);
             if (!running_) break;
             if (queue_.empty()) {
                 lock.unlock();

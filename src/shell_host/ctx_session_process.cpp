@@ -125,7 +125,7 @@ struct ContextSessionProcesses::Core : std::enable_shared_from_this<Core> {
         bool invoke_done = false;
         const auto stop = [&] { return WaitForSingleObject(session->stop.value, 0) != WAIT_TIMEOUT; };
         std::wstring command = L"\"" + executable + L"\" --context-worker " +
-            std::to_wstring(GetCurrentProcessId()) + L" " + std::to_wstring(id);
+            std::to_wstring(GetCurrentProcessId()) + L" " + std::to_wstring(id) + L" " + l10n::LocaleName();
         STARTUPINFOW startup{sizeof(startup)};
         PROCESS_INFORMATION process{};
         if (!stop() && job.value && CreateProcessW(executable.c_str(), command.data(), nullptr,

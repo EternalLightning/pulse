@@ -61,6 +61,45 @@ bool ReadPixels(Compositor& compositor, const D2D1_RECT_F& bounds,
     return !pixels.empty();
 }
 
+int CheckPickerIllustrations() {
+    const HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC",
+        L"Picker illustration fixture", WS_POPUP, -30000, -30000, 640, 480,
+        nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    int failures = 0;
+    {
+        Compositor compositor;
+        if (!window || !compositor.Init(window, true)) {
+            failures = 1;
+        } else {
+            compositor.Resize(640, 480);
+            fluent::Painter painter(&compositor);
+            const auto rows = D2D1::RectF(0, 0, 640, 480);
+            for (const bool filtered : {false, true}) {
+                const auto size = filtered ? D2D1::SizeF(320, 240) : D2D1::SizeF(512, 360);
+                const auto layout = MakePaneEmptyLayout(rows, 1.0f, false, size.width / size.height, false);
+                auto* dc = compositor.Dc();
+                dc->BeginDraw();
+                dc->Clear(D2D1::ColorF(D2D1::ColorF::White));
+                const bool drawn = painter.BeginFrame(Theme{}) && painter.DrawSvgResource(
+                    filtered ? IDR_NO_FILTER_RESULTS_SVG : IDR_EMPTY_FOLDER_SVG, layout.art, nullptr, size, 0.68f);
+                std::vector<unsigned char> pixels;
+                const bool rendered = SUCCEEDED(dc->EndDraw()) && drawn && ReadPixels(compositor, layout.art, pixels);
+                size_t visible = 0;
+                for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+                    if (pixels[i] < 245 || pixels[i + 1] < 245 || pixels[i + 2] < 245) ++visible;
+                }
+                const bool passed = rendered && visible > pixels.size() / 40 &&
+                    layout.title.top >= layout.art.bottom && layout.title.bottom <= rows.bottom;
+                std::printf("[%s] picker %s illustration renders above its label\n", passed ? "PASS" : "FAIL",
+                    filtered ? "filter" : "empty folder");
+                failures += !passed;
+            }
+        }
+    }
+    if (window) DestroyWindow(window);
+    return failures ? 1 : 0;
+}
+
 void CheckFailedRefreshPresentation(const std::function<void(bool, const char*)>& check,
                                     const std::filesystem::path& output) {
     using namespace pulse;
@@ -237,6 +276,11 @@ int main(int argc, char* argv[]) {
     OleInitialize(nullptr);
     pulse::compat::EnableDpiAwareness();
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc > 1 && std::string_view(argv[1]) == "--picker-art-only") {
+        const int result = CheckPickerIllustrations();
+        OleUninitialize();
+        return result;
+    }
     SetEnvironmentVariableW(L"PULSE_TEST_HIDDEN_SHOT", L"1");
     const auto output = std::filesystem::absolute(L"bench_data/empty-state-render");
     std::filesystem::create_directories(output);

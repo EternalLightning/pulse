@@ -64,6 +64,8 @@ std::wstring DeviceParent(const std::wstring& path) {
 void QueueDeviceOperation(AppState& state, std::wstring verb,
         std::vector<std::wstring> ids, std::wstring name) {
     if (ids.empty() || std::any_of(ids.begin(), ids.end(), [](const auto& id) { return id.empty(); })) return;
+    const uint32_t paste_sequence = verb == L"paste" ? GetClipboardSequenceNumber() : 0;
+    if (verb == L"paste" && !paste_sequence) return;
     if (!state.device_shell_owner) {
         ipc::ShellClient::Callbacks callbacks;
         callbacks.done = [mailbox = state.device_operation_mailbox](uint32_t, uint32_t hr,
@@ -83,8 +85,8 @@ void QueueDeviceOperation(AppState& state, std::wstring verb,
     const auto* tab = ActiveTab(state);
     const std::wstring folder = IsDeviceTab(tab) ? tab->current_path : L"";
     const bool queued = state.worker.EnqueueIo([window, owner, mailbox, verb = std::move(verb),
-            ids = std::move(ids), name = std::move(name), folder] {
-        if (!ipc::ShellClient::Instance().DeviceOperation(window, verb, ids, name, folder, owner) && mailbox)
+            ids = std::move(ids), name = std::move(name), folder, paste_sequence] {
+        if (!ipc::ShellClient::Instance().DeviceOperation(window, verb, ids, name, folder, paste_sequence, owner) && mailbox)
             mailbox->Publish({HRESULT_FROM_WIN32(ERROR_NOT_READY), false});
     });
     if (!queued && mailbox) mailbox->Publish({HRESULT_FROM_WIN32(ERROR_NOT_READY), false});

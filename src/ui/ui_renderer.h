@@ -1103,6 +1103,7 @@ public:
     float TypeChipWidthDip(const std::wstring& chip) const;
     // Cached max(LumaText, DWrite) advance for list cells (small=true: SmallFormat).
     float CellTextWidth(const std::wstring& text, bool small_text = false) const;
+    float ConfiguredColumnMinimumWidth(ColumnKind kind) const;
     void SetListStyle(bool smart_date, bool zebra, bool size_bar) {
         list_smart_date_ = smart_date; list_zebra_ = zebra; list_size_bar_ = size_bar;
         auto_widths_scale_ = -1.0f;

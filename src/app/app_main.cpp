@@ -5,6 +5,7 @@
 
 #include "archive_navigation.h"
 #include "context_menu_settings_drag.h"
+#include "command_catalog.h"
 #include "system_ctx_preview_drag.h"
 #include "app_exit.h"
 #include "file_dialog_bridge_host.h"
@@ -1485,9 +1486,15 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             ShowOmnibar(*s, OmnibarMode::Path);
             return 0;
         }
-        if (s && (wParam == VK_RETURN || wParam == VK_UP || wParam == VK_LEFT || wParam == VK_RIGHT) &&
-            (GetKeyState(VK_MENU) & 0x8000))
-            return HandleKeyDown(s, hwnd, msg, wParam, lParam);
+        if (s && (GetKeyState(VK_MENU) & 0x8000)) {
+            const bool ctrl = GetKeyState(VK_CONTROL) < 0;
+            const bool shift = GetKeyState(VK_SHIFT) < 0;
+            const HWND focus = GetFocus();
+            if ((!focus || !IsChild(hwnd, focus)) &&
+                (app::LookupCommandShortcut(static_cast<unsigned>(wParam), ctrl, shift, true) != app::CmdNone ||
+                 wParam == VK_UP || wParam == VK_LEFT || wParam == VK_RIGHT))
+                return HandleKeyDown(s, hwnd, msg, wParam, lParam);
+        }
         break;
 
     case WM_SYSCHAR:
@@ -1625,21 +1632,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
                             tag_metadata_paths.push_back(completed.destinations[i]);
                         }
                         if (completed.type == ops::OpType::Move &&
-                            s->pendingCutClipboardSequence != 0) {
+                            s->pendingCutClipboardSequence != 0 &&
+                            completed.cut_clipboard_sequence == s->pendingCutClipboardSequence) {
                             s->completedCutClipboardPaths.insert(
                                 s->completedCutClipboardPaths.end(), completed.sources.begin(),
                                 completed.sources.end());
-                            const bool all_done = std::all_of(
-                                s->pendingCutClipboardPaths.begin(),
-                                s->pendingCutClipboardPaths.end(), [&](const std::wstring& expected) {
-                                    const std::wstring normalized = fs::NormalizePath(expected);
-                                    return std::any_of(s->completedCutClipboardPaths.begin(),
-                                        s->completedCutClipboardPaths.end(),
-                                        [&](const std::wstring& actual) {
-                                            return _wcsicmp(normalized.c_str(), actual.c_str()) == 0;
-                                        });
-                                });
-                            if (all_done) {
+                            auto expected = s->pendingCutClipboardPaths;
+                            for (auto& path : expected) path = fs::NormalizePath(std::move(path));
+                            if (ops::CutPasteMovedAllPaths(expected, s->completedCutClipboardPaths)) {
                                 ops::CompleteCutClipboard(s->pendingCutClipboardSequence,
                                                           s->pendingCutClipboardPaths);
                                 s->pendingCutClipboardSequence = 0;

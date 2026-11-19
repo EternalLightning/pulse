@@ -81,7 +81,7 @@ struct OpsManager::JournalState {
     std::set<std::wstring> opaque_files;
 };
 
-OpsManager::OpsManager() = default;
+OpsManager::OpsManager(bool record_undo) : record_undo_(record_undo) {}
 
 OpsManager::~OpsManager() {
     Stop();

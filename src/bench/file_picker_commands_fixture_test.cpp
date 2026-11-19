@@ -144,8 +144,8 @@ int ClipboardCases() {
             const bool undo = session->Manager().CanUndo();
             std::printf("[INFO] delayed sequence %lu -> %lu, rendered %d, undo %d\n",
                 delayed_sequence, rendered_sequence, static_cast<int>(file.rendered), static_cast<int>(undo));
-            check(copied && file.rendered && fs::exists(source) && undo,
-                "first paste renders delayed CF_HDROP and copies through OpsManager with undo");
+            check(copied && file.rendered && fs::exists(source) && !undo,
+                "first paste renders delayed CF_HDROP without retaining private undo history");
 
             if (copied) {
                 std::ofstream(destination, std::ios::trunc) << "existing";
@@ -177,6 +177,18 @@ int ClipboardCases() {
                 start(operation) && ready(operation) && operation->result == S_OK &&
                 !fs::exists(source) && fs::exists(destination) && !IsClipboardFormatAvailable(CF_HDROP),
                 "complete cut moves the file and clears only its clipboard");
+
+            const auto source_folder = root / L"from" / L"merged";
+            const auto target_folder = destination.parent_path() / L"merged";
+            fs::create_directories(source_folder);
+            fs::create_directories(target_folder);
+            std::ofstream(source_folder / L"moved.txt") << "move";
+            std::ofstream(target_folder / L"kept.txt") << "keep";
+            operation = std::make_shared<PickerFileOperation>();
+            check(WriteClipboard({source_folder.wstring()}, true, owner) && start(operation) && ready(operation) &&
+                operation->result == S_OK && !fs::exists(source_folder) &&
+                fs::exists(target_folder / L"moved.txt") && fs::exists(target_folder / L"kept.txt") &&
+                !IsClipboardFormatAvailable(CF_HDROP), "cut merged into a same-name folder clears its removed source");
 
             DestroyWindow(owner);
         } else check(false, "create a delayed clipboard provider");
@@ -220,6 +232,14 @@ void SaveRenameCase(const std::filesystem::path& root, Check check) {
             const HWND address = first_address ? first : second;
             const HWND filename = first_address ? second : first;
             const bool loaded = WaitFor([&] { return EditText(address) == folder.wstring(); });
+            bool restored = false;
+            if (loaded) {
+                const auto missing = (folder / L"unavailable").wstring();
+                SendMessageW(address, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(missing.c_str()));
+                PostMessageW(address, WM_KEYDOWN, VK_RETURN, 1);
+                restored = WaitFor([&] { return EditText(address) == folder.wstring(); });
+            }
+            check(restored, "failed navigation restores the actual directory in the address field");
             HWND menu = nullptr;
             if (loaded) click(224, 116);
             const bool text_menu = loaded && WaitFor([&] { return (menu = FindOnThread(picker, L"PulseFluentMenu")) != nullptr; });
@@ -239,6 +259,16 @@ void SaveRenameCase(const std::filesystem::path& root, Check check) {
             if (name_prompt) {
                 PostMessageW(edit, WM_KEYDOWN, VK_ESCAPE, 1);
                 WaitFor([&] { return !FindOnThread(picker, L"PulsePickerItemName"); });
+            }
+            if (loaded) {
+                SendMessageW(filename, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L"Draft.txt"));
+                POINT point{px(236), px(182)};
+                ClientToScreen(picker, &point);
+                PostMessageW(picker, WM_CONTEXTMENU, reinterpret_cast<WPARAM>(picker), MAKELPARAM(point.x, point.y));
+                const bool item_menu = WaitFor([&] { return (menu = FindOnThread(picker, L"PulseFluentMenu")) != nullptr; });
+                if (item_menu) PostMessageW(menu, WM_KEYDOWN, VK_ESCAPE, 1);
+                check(item_menu && WaitFor([&] { return !FindOnThread(picker, L"PulseFluentMenu"); }) &&
+                    EditText(filename) == L"Draft.txt", "a context-menu selection leaves a typed save draft intact");
             }
             if (loaded) click(236, 182);
             const bool selected = WaitFor([&] { return EditText(filename) == L"Old.txt"; });
@@ -263,6 +293,7 @@ void SaveRenameCase(const std::filesystem::path& root, Check check) {
             });
             check(updated, "the Save filename follows the renamed selection");
             if (updated) {
+                SendMessageW(filename, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L"New.txt"));
                 WaitFor([&] {
                     if (!IsWindow(picker)) return true;
                     PostMessageW(filename, WM_KEYDOWN, VK_RETURN, 1);
@@ -276,7 +307,54 @@ void SaveRenameCase(const std::filesystem::path& root, Check check) {
     const bool submitted = pulse::ui::ShowFilePicker(nullptr, spec, false, {0.0f, 0.47f, 0.83f, 1.0f}, result);
     if (driver.joinable()) driver.join();
     check(submitted && result.paths.size() == 1 && result.paths.front() == new_path,
-        "Save submits the new path and leaves the old filename absent");
+        "a relative Save filename resolves against the displayed directory after navigation failure and rename");
+}
+
+template <typename Check>
+void CancelSubmitCase(const std::filesystem::path& root, bool close, Check check) {
+    std::atomic_bool submitted{false}, cancelled{false}, timed_out{false};
+    std::thread driver;
+    pulse::ui::FilePickerSpec spec;
+    spec.mode = pulse::ui::PickerMode::Open;
+    spec.initial_path = root.wstring();
+    spec.filename = L"pending.txt";
+    spec.software_device = true;
+    spec.begin_submit = [&](const auto&) { submitted = true; return true; };
+    spec.begin_cancel = [&] { cancelled = true; return true; };
+    spec.poll_submit = [&]() -> std::optional<pulse::ui::PickerSubmitReply> {
+        if (cancelled) return pulse::ui::PickerSubmitReply{true, false, {}};
+        return std::nullopt;
+    };
+    spec.should_close = [&] { return timed_out.load(); };
+    spec.on_ready = [&](HWND picker) {
+        driver = std::thread([&, picker] {
+            const bool ready = WaitFor([&] {
+                if (submitted) return true;
+                for (HWND edit = FindWindowExW(picker, nullptr, L"Edit", nullptr); edit;
+                     edit = FindWindowExW(picker, edit, L"Edit", nullptr)) {
+                    if (EditText(edit) == spec.filename) PostMessageW(edit, WM_KEYDOWN, VK_RETURN, 1);
+                }
+                return false;
+            });
+            if (ready && close) PostMessageW(picker, WM_CLOSE, 0, 0);
+            if (ready && !close) {
+                RECT client{};
+                GetClientRect(picker, &client);
+                const auto dpi = static_cast<int>(pulse::compat::WindowDpi(picker));
+                const auto button = MAKELPARAM(client.right - MulDiv(138, dpi, 96),
+                    client.bottom - MulDiv(30, dpi, 96));
+                PostMessageW(picker, WM_LBUTTONDOWN, MK_LBUTTON, button);
+                PostMessageW(picker, WM_LBUTTONUP, 0, button);
+            }
+            if (!ready || !WaitFor([&] { return !IsWindow(picker); })) timed_out = true;
+        });
+    };
+    pulse::ui::FilePickerResult result;
+    const bool accepted = pulse::ui::ShowFilePicker(nullptr, spec, false, {0.0f, 0.47f, 0.83f, 1.0f}, result);
+    if (driver.joinable()) driver.join();
+    check(submitted && cancelled && !timed_out && !accepted && result.paths.empty(),
+        close ? "WM_CLOSE cancels pending submission and discards late acceptance" :
+            "the Cancel button cancels pending submission and discards late acceptance");
 }
 }
 
@@ -389,6 +467,8 @@ int wmain(int argc, wchar_t** argv) {
     if (driver.joinable()) driver.join();
     check(!submitted && result.paths.empty(), "file management leaves the selection dialog open until cancelled");
     SaveRenameCase(root, check);
+    CancelSubmitCase(root, false, check);
+    CancelSubmitCase(root, true, check);
     std::error_code cleanup;
     fs::remove_all(root, cleanup);
     OleUninitialize();

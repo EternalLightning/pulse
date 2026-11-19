@@ -5,6 +5,7 @@
 #include "dialog_keyboard.h"
 #include "dialog_style.h"
 #include "edit_host.h"
+#include "empty_state_layout.h"
 #include "file_conflict_prompt.h"
 #include "file_picker_commands.h"
 #include "file_picker_listing.h"
@@ -20,6 +21,7 @@
 #include "../fs/fs_enum.h"
 #include "../ops/clipboard.h"
 #include "../ops/picker_file_operations.h"
+#include "../common/resource_ids.h"
 
 #include <commctrl.h>
 #include <shlobj.h>
@@ -150,7 +152,14 @@ public:
     }
 
     ~PickerWindow() {
-        if (file_operation_) file_operation_->Cancel(*operations_);
+        if (file_operation_ && !file_operation_->Cancel(*operations_)) {
+            while (!file_operation_->ready.load(std::memory_order_acquire)) {
+                MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_SENDMESSAGE, MWMO_INPUTAVAILABLE);
+                MSG message{};
+                PeekMessageW(&message, nullptr, 0, 0, PM_NOREMOVE | PM_QS_SENDMESSAGE);
+            }
+        }
+        if (operations_) operations_->Manager().Stop();
         if (window_) DestroyWindow(window_);
         if (font_) DeleteObject(font_);
         if (edit_brush_) DeleteObject(edit_brush_);
@@ -179,8 +188,13 @@ public:
         const int work_width = static_cast<int>(monitor.rcWork.right - monitor.rcWork.left);
         const int work_height = static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top);
         const auto preferred = PreferredSize(spec_.mode);
-        const int preferred_width = Pixels(std::max(kMinimumWidth, static_cast<float>(preferred.cx)));
-        const int preferred_height = Pixels(std::max(kMinimumHeight, static_cast<float>(preferred.cy)));
+        RECT source_bounds{};
+        if (spec_.cover_source) GetWindowRect(source, &source_bounds);
+        // Cover the native surface at startup without changing its visibility or input queue.
+        const int preferred_width = std::max(Pixels(std::max(kMinimumWidth, static_cast<float>(preferred.cx))),
+            static_cast<int>(source_bounds.right - source_bounds.left));
+        const int preferred_height = std::max(Pixels(std::max(kMinimumHeight, static_cast<float>(preferred.cy))),
+            static_cast<int>(source_bounds.bottom - source_bounds.top));
         const int width = work_width > 0 ? std::min(preferred_width, work_width) : preferred_width;
         const int height = work_height > 0 ? std::min(preferred_height, work_height) : preferred_height;
         if (!CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW, kPickerClass, title_.c_str(),
@@ -196,7 +210,12 @@ public:
         ShowDialogWithFade(window_);
         Layout();
         if (spec_.on_ready) spec_.on_ready(window_);
-        SetForegroundWindow(window_);
+        if (!SetForegroundWindow(window_) && spec_.cover_source && GetForegroundWindow() == source) {
+            // The foreground policy can refuse activation while the native dialog is still in front.
+            constexpr UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER;
+            if (SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0, flags))
+                SetWindowPos(window_, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+        }
         SetFocus(filename_ ? filename_ : window_);
         if (filename_) SendMessageW(filename_, EM_SETSEL, 0, -1);
         MSG message{};
@@ -227,6 +246,12 @@ private:
     bool CanPick() const { return !request_ && loaded_ && !waiting_ && !file_operation_ && !submit_locked_; }
     bool HasFilter() const { return has_name_ && !spec_.filters.empty(); }
 
+    void RestoreAddressText() {
+        const auto display = directory_.empty() ? Get(StringId::ThisPc) : directory_;
+        SetWindowTextW(address_, display.c_str());
+        if (GetFocus() == address_) SendMessageW(address_, EM_SETSEL, 0, -1);
+    }
+
     int MinimumTrackWidth() const {
         if (!compositor_.Dc()) return Pixels(kMinimumWidth);
         const float actions = painter_.MeasureButtonWidth(windows_label_) +
@@ -256,6 +281,7 @@ private:
             request_ = std::move(request);
         } else {
             filter_index_ = applied_filter_;
+            RestoreAddressText();
             notice_ = Get(StringId::DirectoryWorkerStartFailed);
         }
         Invalidate();
@@ -266,6 +292,7 @@ private:
         auto request = std::move(request_);
         if (!request->succeeded) {
             filter_index_ = applied_filter_;
+            RestoreAddressText();
             notice_ = Get(StringId::DirectoryUnavailable);
             Invalidate();
             return;
@@ -289,9 +316,7 @@ private:
         offset_ = 0.0f;
         scroll_.Reset();
         prefix_.clear();
-        const auto display = directory_.empty() ? Get(StringId::ThisPc) : directory_;
-        SetWindowTextW(address_, display.c_str());
-        if (GetFocus() == address_) SendMessageW(address_, EM_SETSEL, 0, -1);
+        RestoreAddressText();
         if (!selections.empty()) {
             for (size_t i = 0; i < entries_.size() && !selections.empty(); ++i) {
                 if (selections.erase(entries_[i].name)) selection_.insert(static_cast<int>(i));
@@ -365,6 +390,7 @@ private:
             if (auto reply = spec_.poll_submit()) {
                 if (reply->accepted) { CloseWindow(!cancelling_); return; }
                 SetWaiting(false);
+                cancelling_ = false;
                 submit_locked_ = !reply->retry_allowed;
                 notice_ = reply->error.empty() ? Get(StringId::PickerSubmitFailed) : std::move(reply->error);
                 Invalidate();
@@ -389,9 +415,9 @@ private:
 
     void CancelPicker() {
         if (!CancelFileOperation()) return;
-        if (waiting_) return;
-        if (submit_locked_ || !spec_.begin_cancel || !spec_.begin_cancel() || !spec_.poll_submit) {
-            CloseWindow();
+        if (cancelling_) return;
+        if (!spec_.begin_cancel || !spec_.begin_cancel() || !spec_.poll_submit) {
+            if (!waiting_) CloseWindow();
             return;
         }
         cancelling_ = true;
@@ -430,12 +456,10 @@ private:
         auto operation = std::make_shared<ops::PickerFileOperation>();
         const auto* file_request = std::get_if<ops::OpRequest>(&request);
         const bool renamed = file_request && file_request->type == ops::OpType::Rename;
-        const bool refresh = !std::holds_alternative<ops::PickerProperties>(request);
         if (ops::SubmitPickerFileOperation(operations_, operation, std::move(request), window_, spec_.verify_copies)) {
             file_operation_ = std::move(operation);
             operation_reveal_ = std::move(reveal);
             operation_rename_ = renamed;
-            operation_refresh_ = refresh;
             notice_.clear();
             for (HWND edit : {address_, filename_}) if (edit) SendMessageW(edit, EM_SETREADONLY, TRUE, 0);
         } else notice_ = Get(StringId::OpFailed);
@@ -454,7 +478,7 @@ private:
             if (!entry.full_path.empty()) entry.full_path = PathInDirectory(entry.name);
             if (filename_from_selection_) UpdateFilenameFromSelection();
         }
-        if (operation_refresh_)
+        if (operation->refresh)
             StartLoad(directory_, false, SUCCEEDED(result) ? std::move(operation_reveal_) : std::wstring{});
         operation_reveal_.clear();
         if (FAILED(result) && result != HRESULT_FROM_WIN32(ERROR_CANCELLED))
@@ -487,17 +511,7 @@ private:
         if (command != NewFile && command != NewFolder && command != NewText)
             for (const int row : selection_) paths.push_back(EntryPath(row));
         if (command == Cut || command == Copy || command == CopyPath) {
-            bool success = false;
-            if (command == CopyPath) {
-                std::wstring text;
-                for (const auto& path : paths) {
-                    if (!text.empty()) text += L"\r\n";
-                    text += path;
-                }
-                success = ops::WriteClipboardText(text);
-            } else success = ops::WriteClipboard(paths, command == Cut);
-            notice_ = success ? std::wstring{} : Get(StringId::OpFailed);
-            UpdateClipboard();
+            BeginFileOperation(ops::PickerClipboardWrite{std::move(paths), command == Cut, command == CopyPath});
             return;
         }
         if (command == Properties) {
@@ -545,7 +559,11 @@ private:
             if (!ContainsRect(Bounds(Files), x, y) || OnScrollbar(x, y)) return;
             const int row = HitRow(x, y);
             item_menu = row >= 0;
-            if (item_menu && !selection_.contains(row)) Select(row, false, false);
+            if (item_menu && !selection_.contains(row)) {
+                const bool has_draft = spec_.mode == PickerMode::Save &&
+                    !filename_from_selection_ && !EditValue(filename_).empty();
+                Select(row, false, false, !has_draft);
+            }
             focus_ = Files;
             SetFocus(window_);
         }
@@ -561,17 +579,19 @@ private:
         if (!CanPick()) return;
         FilePickerResult candidate;
         candidate.filter_index = filter_index_;
-        if (selection_.size() == 1 && entries_[static_cast<size_t>(*selection_.begin())].is_dir) {
+        if (!context_selection_ && selection_.size() == 1 && entries_[static_cast<size_t>(*selection_.begin())].is_dir) {
             auto folder = EntryPath(*selection_.begin());
             if (has_name_) { StartLoad(std::move(folder)); return; }
             candidate.paths.push_back(std::move(folder));
         } else if (!has_name_) {
             if (!directory_.empty()) candidate.paths.push_back(directory_);
         } else if (filename_from_selection_) {
-            for (const int row : selection_) candidate.paths.push_back(EntryPath(row));
+            for (const int row : selection_) {
+                if (!entries_[static_cast<size_t>(row)].is_dir) candidate.paths.push_back(EntryPath(row));
+            }
         } else {
             std::vector<std::wstring> names;
-            if (ParseNames(EditValue(filename_), multiple_, names)) {
+            if (ParseNames(EditValue(filename_), CanSelectMultiple(), names)) {
                 if (names.size() == 1 && names.front().find_first_of(L"\\/:") == std::wstring::npos) {
                     const auto folder = std::find_if(entries_.begin(), entries_.end(), [&](const fs::DirEntry& entry) {
                         return entry.is_dir && _wcsicmp(entry.name.c_str(), names.front().c_str()) == 0;
@@ -615,24 +635,27 @@ private:
         filename_from_selection_ = from_selection;
     }
 
-    void Select(int row, bool shift, bool toggle) {
+    void Select(int row, bool shift, bool toggle, bool update_filename = true) {
         if (request_ || waiting_ || file_operation_ || row < 0 || static_cast<size_t>(row) >= Size()) return;
         cursor_ = row;
-        if (entries_[static_cast<size_t>(row)].is_dir || !multiple_ || (!shift && !toggle)) {
+        context_selection_ = !update_filename;
+        if (entries_[static_cast<size_t>(row)].is_dir || !CanSelectMultiple() || (!shift && !toggle)) {
             selection_ = {row};
             anchor_ = row;
         } else if (shift) {
             if (anchor_ < 0 || entries_[static_cast<size_t>(anchor_)].is_dir) anchor_ = row;
             if (!toggle) selection_.clear();
             if (!selection_.empty() && entries_[static_cast<size_t>(*selection_.begin())].is_dir) selection_.clear();
-            for (int i = std::min(anchor_, row); i <= std::max(anchor_, row); ++i) selection_.insert(i);
+            for (int i = std::min(anchor_, row); i <= std::max(anchor_, row); ++i) {
+                if (!entries_[static_cast<size_t>(i)].is_dir) selection_.insert(i);
+            }
         } else {
             if (!selection_.empty() && entries_[static_cast<size_t>(*selection_.begin())].is_dir)
                 selection_.clear();
             if (!selection_.erase(row)) selection_.insert(row);
             anchor_ = row;
         }
-        UpdateFilenameFromSelection();
+        if (update_filename) UpdateFilenameFromSelection();
         Invalidate();
     }
 
@@ -671,6 +694,7 @@ private:
         if (auto path = ResolvePath(directory_, value); !path.empty()) {
             StartLoad(std::move(path));
         } else {
+            RestoreAddressText();
             notice_ = Get(StringId::DirectoryUnavailable);
             Invalidate();
         }
@@ -806,7 +830,7 @@ private:
         if (!Size()) return;
         const bool ctrl = GetKeyState(VK_CONTROL) < 0;
         const bool shift = GetKeyState(VK_SHIFT) < 0;
-        if (key == 'A' && ctrl && multiple_) {
+        if (key == 'A' && ctrl && CanSelectMultiple()) {
             selection_.clear();
             for (size_t i = 0; i < Size(); ++i) if (!entries_[i].is_dir) selection_.insert(static_cast<int>(i));
             if (!selection_.empty() && !selection_.contains(cursor_)) {
@@ -830,7 +854,7 @@ private:
         default: return;
         }
         next = std::clamp(next, 0, static_cast<int>(Size()) - 1);
-        if (ctrl && multiple_ && !shift) cursor_ = next;
+        if (ctrl && CanSelectMultiple() && !shift) cursor_ = next;
         else Select(next, shift, ctrl && shift);
         RevealCursor();
         Invalidate();
@@ -943,7 +967,7 @@ private:
     D2D1_COLOR_F Background() const { return ChildEditColor(ChildEditBackColor(dark_)); }
 
     bool Enabled(Control id) const {
-        if (waiting_) return false;
+        if (waiting_) return !cancelling_ && spec_.begin_cancel && (id == Close || id == Cancel);
         if (file_operation_) return id == Close || id == Cancel;
         if (const auto command = ToolbarCommand(id); command != PickerCommand::None)
             return PickerCommandEnabled(command, CommandState());
@@ -979,6 +1003,22 @@ private:
             0, theme.stroke_divider);
         if (request_ || !Size()) {
             if (focus_ == Files && GetFocus() == window_) painter_.DrawFocusRing(frame, radius);
+            if (loaded_ && !request_ && Viewport() >= Px(100.0f)) {
+                const auto viewport = filtered_ ? D2D1::SizeF(320.0f, 240.0f) : D2D1::SizeF(512.0f, 360.0f);
+                const auto layout = MakePaneEmptyLayout(rows_, scale_, false, viewport.width / viewport.height, false);
+                if (high_contrast || !painter_.DrawSvgResource(
+                        filtered_ ? IDR_NO_FILTER_RESULTS_SVG : IDR_EMPTY_FOLDER_SVG, layout.art, nullptr,
+                        viewport, dark_ ? 1.0f : 0.68f)) {
+                    const float size = Px(36.0f);
+                    const float x = (layout.art.left + layout.art.right - size) * 0.5f;
+                    const float y = (layout.art.top + layout.art.bottom - size) * 0.5f;
+                    painter_.DrawGlyph(filtered_ ? L"\xE721" : L"\xE8B7",
+                        D2D1::RectF(x, y, x + size, y + size), theme.text_secondary);
+                }
+                painter_.DrawText(Get(filtered_ ? StringId::NoFilteredResults : StringId::FolderEmpty),
+                    layout.title, compositor_.HeaderFormat(), theme.text, fluent::HorizontalAlignment::Center);
+                return;
+            }
             const auto message = request_ ? StringId::LoadingEllipsis :
                 !loaded_ ? StringId::DirectoryUnavailable :
                 filtered_ ? StringId::NoFilteredResults : StringId::FolderEmpty;
@@ -1056,7 +1096,7 @@ private:
         if (busy || !notice_.empty()) painter_.DrawText(busy ?
             Get(cancel_after_operation_ ? StringId::OperationCenterCancelling : StringId::LoadingEllipsis) : notice_,
             notice_rect_, compositor_.SmallFormat(), busy ? theme.text_secondary : theme.danger);
-        painter_.DrawButton({Bounds(WindowsDialog), windows_label_, {}, fluent::ButtonKind::Transparent, State(WindowsDialog)});
+        painter_.DrawButton({Bounds(WindowsDialog), windows_label_, {}, fluent::ButtonKind::Standard, State(WindowsDialog)});
         painter_.DrawButton({Bounds(Cancel), cancel_label_, {}, fluent::ButtonKind::Standard, State(Cancel)});
         painter_.DrawButton({Bounds(Primary), primary_label_, {}, fluent::ButtonKind::Primary, State(Primary)});
         if (const auto command = ToolbarCommand(hover_); command != PickerCommand::None &&
@@ -1469,6 +1509,11 @@ private:
         return DefWindowProcW(window_, message, wparam, lparam);
     }
 
+    bool CanSelectMultiple() const {
+        return multiple_ && (spec_.multiselect_directory.empty() ||
+            path::EqualInsensitive(directory_, spec_.multiselect_directory));
+    }
+
     const FilePickerSpec& spec_;
     D2D1_COLOR_F accent_{};
     bool dark_ = false, has_name_ = false, multiple_ = false;
@@ -1490,7 +1535,7 @@ private:
     std::set<int> selection_;
     std::wstring directory_, notice_, prefix_;
     std::wstring operation_reveal_, reveal_name_;
-    bool operation_rename_ = false, operation_refresh_ = false, file_conflict_open_ = false;
+    bool operation_rename_ = false, file_conflict_open_ = false, context_selection_ = false;
     std::wstring title_, primary_label_, cancel_label_, windows_label_, name_label_;
     std::array<D2D1_RECT_F, Count> controls_{};
     D2D1_RECT_F rows_{}, notice_rect_{}, name_label_rect_{};

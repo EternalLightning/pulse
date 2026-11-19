@@ -8,6 +8,7 @@
 #include "preview_viewport.h"
 #include "image_cache_budget.h"
 #include "../ipc/preview_protocol.h"
+#include "../common/localization.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -26,6 +27,7 @@ enum class PreviewDrawResult { Pending, Bitmap, Text, Hex, Failed };
 struct PreviewProperty {
     std::wstring label;
     std::wstring value;
+    l10n::StringId id{};
 };
 
 class ThumbnailCache {

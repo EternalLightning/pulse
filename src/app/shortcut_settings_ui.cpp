@@ -123,14 +123,20 @@ void HandleShortcutSettingsAction(AppState& state, int action, int command) {
                 app::CommandShortcut shortcut;
                 if (!app::ParseCommandShortcut(values[0], shortcut))
                     return ui::InputDialogValidation{false, l10n::Pick(L"请输入有效组合键。", L"Enter a valid key combination.")};
-                const auto error = BindingError(state, command, shortcut, next);
+                const auto error = BindingError(state, command, shortcut, state.appPrefs.command_shortcuts);
                 return ui::InputDialogValidation{error.empty(), error};
             };
             const auto result = ui::ShowInputDialog(state.hwnd, spec, state.darkMode, state.accentColor);
             if (!result.accepted) return;
             app::CommandShortcut shortcut;
-            if (!app::ParseCommandShortcut(result.values[0], shortcut) ||
-                app::SetCommandShortcut(next, command, shortcut) != app::ShortcutBindingResult::Success) return;
+            if (!app::ParseCommandShortcut(result.values[0], shortcut)) return;
+            next = state.appPrefs.command_shortcuts;
+            const auto error = BindingError(state, command, shortcut, next);
+            if (!error.empty()) {
+                state.notification_toast.ShowError(state.hwnd, spec.title, error);
+                return;
+            }
+            if (app::SetCommandShortcut(next, command, shortcut) != app::ShortcutBindingResult::Success) return;
         } else return;
         // Saving affects command bindings only; toolbar configuration has its own page.
         const auto previous = state.appPrefs.command_shortcuts;

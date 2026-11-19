@@ -88,7 +88,7 @@ bool ReservedShortcut(const CommandShortcut& shortcut) {
         (shortcut.key >= VK_LEFT && shortcut.key <= VK_DOWN) || shortcut.key == VK_HOME ||
         shortcut.key == VK_END || shortcut.key == VK_PRIOR || shortcut.key == VK_NEXT ||
         shortcut.key == VK_INSERT || shortcut.key == VK_DELETE) return true;
-    if (shortcut.alt && shortcut.key == VK_F4) return true;
+    if (shortcut.alt && (shortcut.key == VK_F4 || shortcut.key == 'D')) return true;
     if (shortcut.ctrl &&
         (shortcut.key == 'T' || shortcut.key == 'K' || shortcut.key == 'P' ||
          (shortcut.key == 'F' && !shortcut.shift) || shortcut.key == 'D' || shortcut.key == 'W' || shortcut.key == 'L')) return true;
@@ -139,6 +139,10 @@ const CommandDescriptor* FindCommandDescriptor(int command) {
 }
 
 bool IsCommandEnabled(int command, const CommandContext& context) {
+    if (context.recycle_selection) {
+        if (command == CmdDelete) return !context.read_only;
+        if (command == CmdProperties || command == CmdCopyPath) return true;
+    }
     if (context.device_selection && context.selection_filesystem) {
         if (command == CmdCut) return context.device_cut;
         if (command == CmdDelete) return context.device_delete;
@@ -184,6 +188,22 @@ CommandShortcut EffectiveCommandShortcut(int command, std::span<const CommandSho
 
 CommandShortcut EffectiveCommandShortcut(int command) {
     return EffectiveCommandShortcut(command, shortcut_overrides);
+}
+
+namespace {
+int FindCommandByShortcut(const CommandShortcut& shortcut, std::span<const CommandShortcutOverride> overrides,
+                          int exclude = CmdNone) {
+    if (!shortcut.key) return CmdNone;
+    for (const auto& descriptor : kCommands) {
+        if (descriptor.command != exclude && EffectiveCommandShortcut(descriptor.command, overrides) == shortcut)
+            return descriptor.command;
+    }
+    return CmdNone;
+}
+}
+
+bool HasCommandShortcut(const CommandShortcut& shortcut, std::span<const CommandShortcutOverride> overrides) {
+    return FindCommandByShortcut(shortcut, overrides) != CmdNone;
 }
 
 bool ParseCommandShortcut(std::wstring_view text, CommandShortcut& shortcut) {
@@ -243,12 +263,9 @@ ShortcutBindingResult ValidateCommandShortcut(int command, const CommandShortcut
     if (!shortcut.key) return ShortcutBindingResult::Success;
     if (!SupportedShortcutKey(shortcut.key)) return ShortcutBindingResult::Invalid;
     if (ReservedShortcut(shortcut)) return ShortcutBindingResult::Reserved;
-    for (const auto& descriptor : kCommands) {
-        if (descriptor.command == command) continue;
-        if (EffectiveCommandShortcut(descriptor.command, overrides) == shortcut) {
-            if (conflict_command) *conflict_command = descriptor.command;
-            return ShortcutBindingResult::Conflict;
-        }
+    if (const int conflict = FindCommandByShortcut(shortcut, overrides, command); conflict != CmdNone) {
+        if (conflict_command) *conflict_command = conflict;
+        return ShortcutBindingResult::Conflict;
     }
     return ShortcutBindingResult::Success;
 }
@@ -285,20 +302,14 @@ void ConfigureCommandShortcuts(std::span<const CommandShortcutOverride> override
 }
 
 int LookupCommandShortcut(unsigned key, bool ctrl, bool shift, bool alt) {
-    if (!key) return CmdNone;
-    for (const auto& descriptor : kCommands) {
-        const auto shortcut = EffectiveCommandShortcut(descriptor.command);
-        if (shortcut.key == key && shortcut.ctrl == ctrl &&
-            shortcut.shift == shift && shortcut.alt == alt) return descriptor.command;
-    }
-    return CmdNone;
+    return FindCommandByShortcut({key, ctrl, shift, alt}, shortcut_overrides);
 }
 
 ui::FluentMenuItem BuildCommandMenuItem(int command, const CommandContext& context) {
     ui::FluentMenuItem item;
     item.command = command;
     const auto* descriptor = FindCommandDescriptor(command);
-    item.enabled = descriptor && Enabled(descriptor->availability, context);
+    item.enabled = IsCommandEnabled(command, context);
     if (!descriptor) return item;
     item.text = l10n::Get(descriptor->label);
     item.glyph = descriptor->glyph;

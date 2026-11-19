@@ -61,7 +61,13 @@ DWORD CheckAncestors(const Path& path, bool file, Drive drive, Attributes attrib
     if (kind == DRIVE_NO_ROOT_DIR) return ERROR_PATH_NOT_FOUND;
     if (kind == DRIVE_UNKNOWN) return ERROR_NOT_READY;
     if (!SupportedDrive(kind)) return ERROR_NOT_SUPPORTED;
-    for (size_t end = path.root_length;;) {
+    size_t end = path.root_length;
+    if (path.unc) {
+        if (end == path.value.size()) return file ? ERROR_DIRECTORY : ERROR_SUCCESS;
+        const auto next = path.value.find(L'\\', end + 1);
+        end = next == path.value.npos ? path.value.size() : next;
+    }
+    for (;;) {
         if (cancelled()) return ERROR_CANCELLED;
         DWORD flags = 0;
         const DWORD error = attributes(path.value.substr(0, end), flags);

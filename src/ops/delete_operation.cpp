@@ -206,7 +206,7 @@ void OpsManager::FinishDelete(const QueueItem& item, std::wstring error,
             CompletedOperation recycled;
             recycled.type = OpType::RecycleDelete; recycled.task_id = item.seq; recycled.sources = recycled_paths;
             completions_.push_back(std::move(recycled));
-            if (!item.req.is_undo) {
+            if (record_undo_ && !item.req.is_undo) {
                 UndoEntry undo;
                 undo.type = OpType::RecycleDelete; undo.sources = recycled_paths;
                 undo.destinations = recycle_destinations;

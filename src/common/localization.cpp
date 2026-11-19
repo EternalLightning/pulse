@@ -123,11 +123,14 @@ const wchar_t* LocaleName() noexcept {
 }
 
 const std::wstring& Get(StringId id) {
+    return Get(id, g_effective.load());
+}
+const std::wstring& Get(StringId id, Language language) {
     const UINT value = static_cast<UINT>(id);
     if (value < kFirstString || value > kLastString) return g_empty;
     const size_t index = value - kFirstString;
     std::lock_guard lock(g_mutex);
-    const Language language = g_effective.load();
+    if (language == Language::System) language = SystemLanguage();
     if (!g_module) return RuntimeMessage(value, language);
     const size_t locale = language == Language::ZhCN ? 0 : 1;
     if (!g_loaded[locale][index]) {

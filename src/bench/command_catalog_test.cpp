@@ -152,6 +152,20 @@ int main(int argc, char** argv) {
         IsCommandEnabled(CmdProperties, context), "archive context disables unsupported actions and retains archive properties");
     Check(!BuildCommandMenuItem(999999, context).enabled &&
         !IsCommandEnabled(999999, context), "unknown commands cannot create enabled blank actions");
+    context = {};
+    context.recycle_selection = true;
+    context.selected_count = 1;
+    Check(IsCommandEnabled(CmdDelete, context) && IsCommandEnabled(CmdProperties, context) &&
+        IsCommandEnabled(CmdCopyPath, context) && !IsCommandEnabled(CmdMoveToTarget, context),
+        "Recycle Bin selection exposes only its supported operations");
+    context = {};
+    context.device_selection = context.selection_filesystem = context.device_cut = context.device_delete = true;
+    context.selected_count = 1;
+    Check(BuildCommandMenuItem(CmdDelete, context).enabled && BuildCommandMenuItem(CmdCut, context).enabled &&
+        !BuildCommandMenuItem(CmdRename, context).enabled,
+        "device menus use the same capability gates as command dispatch");
+    Check(ValidateCommandShortcut(CmdCopy, {'D', false, false, true}, {}) == ShortcutBindingResult::Reserved,
+        "Alt+D remains reserved for the address bar");
     CheckPalette(L"zh-CN");
     CheckPalette(L"en-US");
 

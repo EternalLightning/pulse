@@ -37,8 +37,8 @@ void IndexClient::Start(HWND notify, UINT status_msg, UINT search_msg, std::wstr
     helper_missing_ = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        status_ = l10n::Get(l10n::StringId::IndexDisconnected).c_str();
-        query_status_.clear();
+        local_status_ = l10n::StringId::IndexDisconnected;
+        query_status_ = {};
         scope_ready_ = false;
     }
     worker_ = std::thread([this] { Worker(); });
@@ -73,7 +73,7 @@ bool IndexClient::SpawnHelper() {
     if (ServiceInstalled()) {
         {
             std::lock_guard<std::mutex> lock(mu_);
-            status_ = l10n::Get(l10n::StringId::IndexWaitingService).c_str();
+            local_status_ = l10n::StringId::IndexWaitingService;
         }
         if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
         return false;
@@ -82,7 +82,7 @@ bool IndexClient::SpawnHelper() {
     if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) {
         helper_missing_ = true;
         std::lock_guard<std::mutex> lock(mu_);
-        status_ = l10n::Get(l10n::StringId::IndexExecutableMissing).c_str();
+        local_status_ = l10n::StringId::IndexExecutableMissing;
         return false;
     }
     std::wstring cmd = L"\"" + exe + L"\" " + std::to_wstring(GetCurrentProcessId());
@@ -199,10 +199,6 @@ void IndexClient::HandleStatus(const uint8_t* p, size_t n) {
     uint32_t ready = 0, count = 0;
     std::wstring text;
     if (!r.GetU32(ready) || !r.GetU32(count) || !r.GetString(text)) return;
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        status_ = std::move(text);
-    }
     uint32_t pinyin_ready = 0;
     // Optional trailing status field: older hosts remain usable and report unavailable.
     if (!r.GetU32(pinyin_ready)) pinyin_ready = 0;
@@ -210,8 +206,22 @@ void IndexClient::HandleStatus(const uint8_t* p, size_t n) {
     ready_.store(ready != 0);
     count_.store(count);
     uint64_t revision = 0; uint32_t version = 0;
-    if (r.GetU64(revision) && r.GetU32(version) && version == 1) revision_ = revision;
-    else { std::lock_guard lock(mu_); status_ = l10n::Get(l10n::StringId::IndexProcessOutdated).c_str(); }
+    const bool compatible = r.GetU64(revision) && r.GetU32(version) && version == 1;
+    std::wstring chinese;
+    if (compatible) {
+        revision_ = revision;
+        if (r.remaining()) r.GetString(chinese);
+    }
+    {
+        std::lock_guard lock(mu_);
+        if (compatible) {
+            local_status_ = {};
+            status_ = std::move(text);
+            status_zh_ = std::move(chinese);
+        } else {
+            local_status_ = l10n::StringId::IndexProcessOutdated;
+        }
+    }
     if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
 }
 
@@ -223,10 +233,10 @@ void IndexClient::HandleSearch(uint32_t id, const uint8_t* p, size_t n) {
         std::lock_guard<std::mutex> lock(mu_);
         const auto reply = replies_.find(id);
         if (reply == replies_.end()) return;
-        if (sr.error == ERROR_BUSY) query_status_ = l10n::Get(l10n::StringId::IndexQueryBusy).c_str();
-        else if (sr.error) query_status_ = l10n::Get(l10n::StringId::IndexQueryFailed).c_str();
-        else if (sr.incomplete) query_status_ = l10n::Get(l10n::StringId::IndexQueryIncomplete).c_str();
-        else query_status_.clear();
+        if (sr.error == ERROR_BUSY) query_status_ = l10n::StringId::IndexQueryBusy;
+        else if (sr.error) query_status_ = l10n::StringId::IndexQueryFailed;
+        else if (sr.incomplete) query_status_ = l10n::StringId::IndexQueryIncomplete;
+        else query_status_ = {};
         TraceSearch("filename_received", sr.revision);
         results_[id] = std::move(sr);
         // Cancellation removes the route under this lock before a popup is destroyed.
@@ -373,8 +383,8 @@ void IndexClient::Disconnect() {
     {
         std::lock_guard<std::mutex> lock(mu_);
         connected_ = false;
-        query_status_.clear();
-        status_ = l10n::Get(l10n::StringId::IndexReconnecting).c_str();
+        query_status_ = {};
+        local_status_ = l10n::StringId::IndexReconnecting;
     }
     pending_cv_.notify_all();
     if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
@@ -387,7 +397,7 @@ void IndexClient::Worker() {
                 {
                     std::lock_guard<std::mutex> lock(mu_);
                     if (!helper_missing_)
-                        status_ = l10n::Get(l10n::StringId::IndexDisconnected).c_str();
+                        local_status_ = l10n::StringId::IndexDisconnected;
                 }
                 for (int i = 0; i < 10 && running_; ++i) Sleep(100);
                 continue;
@@ -420,7 +430,9 @@ void IndexClient::Worker() {
 
 std::wstring IndexClient::Status() const {
     std::lock_guard<std::mutex> lock(mu_);
-    return query_status_.empty() ? status_ : query_status_;
+    if (query_status_ != l10n::StringId{}) return l10n::Get(query_status_);
+    if (local_status_ != l10n::StringId{}) return l10n::Get(local_status_);
+    return l10n::effective_language() == l10n::Language::ZhCN && !status_zh_.empty() ? status_zh_ : status_;
 }
 
 void IndexClient::SearchAsync(const Query& q, uint32_t id, HWND reply, UINT reply_message) {

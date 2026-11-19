@@ -171,12 +171,15 @@ void PasteIntoCurrent(AppState& s) {
         ops::OpRequest req;
         req.type = cb.cut ? ops::OpType::Move : ops::OpType::Copy;
         req.dest_dir = tab->current_path;
+        if (cb.cut) req.cut_clipboard_sequence = cb.sequence;
         for (auto& p : cb.paths) req.sources.push_back(fs::NormalizePath(p));
         if (SubmitWithConflictResolution(s, std::move(req)) && cb.cut) {
             s.cutPaths.clear();
-            s.pendingCutClipboardSequence = cb.sequence;
-            s.pendingCutClipboardPaths = cb.paths;
-            s.completedCutClipboardPaths.clear();
+            if (s.pendingCutClipboardSequence != cb.sequence) {
+                s.pendingCutClipboardSequence = cb.sequence;
+                s.pendingCutClipboardPaths = std::move(cb.paths);
+                s.completedCutClipboardPaths.clear();
+            }
         }
     } else if (source == app::ClipboardPasteSource::Shell) {
         // Shell providers can block while materializing virtual files. The I/O

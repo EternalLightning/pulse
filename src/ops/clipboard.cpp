@@ -11,8 +11,12 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <algorithm>
 #include <cstring>
 #include <memory>
+#include <set>
+#include <string_view>
+#include <unordered_set>
 #include <wrl/client.h>
 
 namespace pulse::ops {
@@ -38,7 +42,7 @@ bool OpenClipboardWithRetry(HWND owner) {
 
 } // namespace
 
-bool WriteClipboard(const std::vector<std::wstring>& paths, bool cut) {
+bool WriteClipboard(const std::vector<std::wstring>& paths, bool cut, HWND owner) {
     if (paths.empty()) return false;
 
     // DROPFILES + double-null-terminated wide path list.
@@ -64,7 +68,7 @@ bool WriteClipboard(const std::vector<std::wstring>& paths, bool cut) {
 
     // EmptyClipboard assigns ownership to the window passed to OpenClipboard;
     // using nullptr can leave no owner and make SetClipboardData fail.
-    if (!OpenClipboardWithRetry(ClipboardOwner())) {
+    if (!OpenClipboardWithRetry(owner ? owner : ClipboardOwner())) {
         GlobalFree(hdrop);
         return false;
     }
@@ -100,7 +104,7 @@ bool WriteClipboard(const std::vector<std::wstring>& paths, bool cut) {
     return true;
 }
 
-bool WriteClipboardText(const std::wstring& text) {
+bool WriteClipboardText(const std::wstring& text, HWND owner) {
     if (text.empty()) return false;
     size_t bytes = (text.size() + 1) * sizeof(wchar_t);
     HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
@@ -112,7 +116,7 @@ bool WriteClipboardText(const std::wstring& text) {
     }
     std::memcpy(memory, text.c_str(), bytes);
     GlobalUnlock(h);
-    if (!OpenClipboardWithRetry(ClipboardOwner())) {
+    if (!OpenClipboardWithRetry(owner ? owner : ClipboardOwner())) {
         GlobalFree(h);
         return false;
     }
@@ -254,11 +258,14 @@ public:
     HRESULT Record(HRESULT result) { if (FAILED(result) && SUCCEEDED(result_)) result_ = result; return Check(); }
     HRESULT Record(HRESULT result, IShellItem* folder, IShellItem* item) {
         int order = 1;
-        if (completed_names_ && SUCCEEDED(result) && item && folder && destination_ &&
+        if (completed_names_ && completed_names_->size() < 1024 && remaining_name_units_ &&
+            SUCCEEDED(result) && item && folder && destination_ &&
             SUCCEEDED(folder->Compare(destination_, SICHINT_CANONICAL, &order)) && order == 0) {
             auto name = portable_device::ShellItemName(item);
-            if (!name.empty() && std::find(completed_names_->begin(), completed_names_->end(), name) == completed_names_->end())
+            if (!name.empty() && name.size() <= remaining_name_units_ && seen_names_.insert(name).second) {
+                remaining_name_units_ -= name.size();
                 completed_names_->push_back(std::move(name));
+            }
         }
         return Record(result);
     }
@@ -283,6 +290,9 @@ private:
     const std::atomic_bool* cancelled_;
     IShellItem* destination_;
     std::vector<std::wstring>* completed_names_;
+    // These names only select visible results in the device view.
+    size_t remaining_name_units_ = 64 * 1024;
+    std::unordered_set<std::wstring> seen_names_;
     HRESULT result_ = S_OK;
 };
 } // namespace
@@ -436,6 +446,15 @@ HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferr
 }
 
 namespace {
+HRESULT CaptureShellClipboard(uint32_t expected_sequence, Microsoft::WRL::ComPtr<IDataObject>& data) {
+    if (!expected_sequence || GetClipboardSequenceNumber() != expected_sequence)
+        return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    const HRESULT captured = OleGetClipboard(&data);
+    if (FAILED(captured)) return captured;
+    if (GetClipboardSequenceNumber() != expected_sequence) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    return data ? S_OK : DV_E_FORMATETC;
+}
+
 HRESULT PasteClipboard(const std::wstring& dir, uint32_t expected_sequence,
                         const std::atomic_bool* cancelled, HWND owner,
                         const std::function<bool()>& begin_transfer) {
@@ -443,12 +462,10 @@ HRESULT PasteClipboard(const std::wstring& dir, uint32_t expected_sequence,
     if (FAILED(ole)) return ole;
     struct OleDone { ~OleDone() { OleUninitialize(); } } ole_done;
 
-    if (GetClipboardSequenceNumber() != expected_sequence) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     Microsoft::WRL::ComPtr<IDataObject> data;
-    const HRESULT captured = OleGetClipboard(&data);
+    const HRESULT captured = CaptureShellClipboard(expected_sequence, data);
     if (FAILED(captured)) return captured;
-    if (!data) return DV_E_FORMATETC;
-    if (GetClipboardSequenceNumber() != expected_sequence || (cancelled && cancelled->load()))
+    if (cancelled && cancelled->load())
         return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     const auto effect = ShellClipboardEffect(data.Get());
     Microsoft::WRL::ComPtr<IShellItem> folder;
@@ -468,11 +485,11 @@ HRESULT PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence,
     return PasteClipboard(dir, expected_sequence, &cancelled, owner, begin_transfer);
 }
 
-HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner, std::vector<std::wstring>& completed_names) {
+HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner, std::vector<std::wstring>& completed_names,
+                                    uint32_t expected_sequence) {
     Microsoft::WRL::ComPtr<IDataObject> data;
-    const HRESULT hr = OleGetClipboard(&data);
+    const HRESULT hr = CaptureShellClipboard(expected_sequence, data);
     if (FAILED(hr)) return hr;
-    if (!data) return DV_E_FORMATETC;
     return PasteShellDataToFolder(data.Get(), folder, ShellClipboardEffect(data.Get()), nullptr, owner, &completed_names);
 }
 
@@ -489,6 +506,18 @@ bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t 
         PreferredEffectIsCut(preferred_effect) ? DROPEFFECT_MOVE : DROPEFFECT_COPY));
 }
 #endif
+
+bool CutPasteMovedAllPaths(const std::vector<std::wstring>& expected_normalized,
+                          const std::vector<std::wstring>& moved_normalized) {
+    const auto path_order = [](std::wstring_view a, std::wstring_view b) {
+        return CompareStringOrdinal(a.data(), static_cast<int>(a.size()),
+            b.data(), static_cast<int>(b.size()), TRUE) == CSTR_LESS_THAN;
+    };
+    const std::set<std::wstring_view, decltype(path_order)> moved(
+        moved_normalized.begin(), moved_normalized.end(), path_order);
+    return !expected_normalized.empty() && std::all_of(expected_normalized.begin(), expected_normalized.end(),
+        [&](const auto& path) { return moved.contains(path); });
+}
 
 bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& expected_paths, HWND owner) {
     if (sequence == 0 || expected_paths.empty() || GetClipboardSequenceNumber() != sequence)

@@ -46,6 +46,11 @@ void ShowCommandCustomization(AppState& s) {
             ToolbarCategory(descriptor), descriptor.pictogram});
     const auto result = ui::ShowToolbarCustomization(s.hwnd, spec, s.darkMode, s.accentColor);
     if (!result.accepted || result.order == s.appPrefs.toolbar_order) return;
+    if (spec.order != s.appPrefs.toolbar_order) {
+        s.notification_toast.ShowError(s.hwnd, spec.title, l10n::Pick(
+            L"工具栏已在另一个窗口修改，请重新打开设置。", L"The toolbar changed in another window. Reopen customization."));
+        return;
+    }
     const auto previous = s.appPrefs.toolbar_order;
     s.appPrefs.toolbar_order = result.order;
     if (!s.appPrefs.Save()) {

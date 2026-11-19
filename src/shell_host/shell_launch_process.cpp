@@ -125,7 +125,7 @@ struct ShellLaunchProcesses::Core : std::enable_shared_from_this<Core> {
         bool dispatched = false, completed = false;
         const auto stopped = [&] { return WaitForSingleObject(session->stop.value, 0) != WAIT_TIMEOUT; };
         std::wstring command = L"\"" + executable + L"\" --launch-worker " +
-            std::to_wstring(GetCurrentProcessId()) + L" " + std::to_wstring(id);
+            std::to_wstring(GetCurrentProcessId()) + L" " + std::to_wstring(id) + L" " + l10n::LocaleName();
         STARTUPINFOW startup{sizeof(startup)};
         PROCESS_INFORMATION child{};
         if (!stopped() && job.value && CreateProcessW(executable.c_str(), command.data(), nullptr,

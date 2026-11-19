@@ -19,8 +19,13 @@ struct PickerClipboardPaste {
 struct PickerProperties {
     std::vector<std::wstring> paths;
 };
+struct PickerClipboardWrite {
+    std::vector<std::wstring> paths;
+    bool cut = false;
+    bool text = false;
+};
 
-using PickerFileRequest = std::variant<OpRequest, PickerClipboardPaste, PickerProperties>;
+using PickerFileRequest = std::variant<OpRequest, PickerClipboardPaste, PickerProperties, PickerClipboardWrite>;
 
 class PickerFileOperations {
 public:
@@ -34,7 +39,7 @@ private:
     std::condition_variable event_;
     bool changed_ = false;
     bool started_ = false;
-    OpsManager manager_;
+    OpsManager manager_{false};
 };
 
 struct PickerFileOperation {
@@ -44,6 +49,7 @@ struct PickerFileOperation {
     std::atomic_bool cancelled{false};
     std::atomic_bool ready{false};
     HRESULT result = E_FAIL;
+    bool refresh = false;
 
 private:
     enum class Phase { Preparing, Running, Cancelled };

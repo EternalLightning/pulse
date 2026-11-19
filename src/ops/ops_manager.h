@@ -122,6 +122,7 @@ struct OpRequest {
     std::optional<FILE_BASIC_INFO> folder_metadata;
     std::vector<std::wstring> sources;
     std::wstring dest_dir;    // Copy / Move
+    uint32_t cut_clipboard_sequence = 0; // Attribute confirmed moves to their clipboard snapshot.
     std::wstring new_name;    // Rename
     std::vector<std::wstring> new_names; // BatchRename names / undo Move full original paths
     CollisionPolicy collision_policy = CollisionPolicy::System; // Copy / Move
@@ -214,6 +215,7 @@ struct DeleteOutcome {
 struct CompletedOperation {
     OpType type = OpType::Copy;
     uint64_t task_id = 0;
+    uint32_t cut_clipboard_sequence = 0;
     std::vector<std::wstring> sources;
     std::vector<std::wstring> destinations;
     std::optional<std::wstring> volume_label;
@@ -259,7 +261,7 @@ using ShellMenuItem = pulse::ShellMenuItem;
 
 class OpsManager {
 public:
-    OpsManager();
+    explicit OpsManager(bool record_undo = true);
     ~OpsManager();
 
     // notify is invoked from worker/IPC threads whenever status changes.
@@ -514,6 +516,7 @@ private:
                     std::vector<std::wstring> slow_clsids);
 
     std::function<void()> notify_;
+    const bool record_undo_;
 
     mutable std::atomic<bool> undo_validation_requested_{false};
     uint64_t pending_recycle_undo_revision_ = 0; // mutex_; prevents duplicate validation requests

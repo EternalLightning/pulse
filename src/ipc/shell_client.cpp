@@ -184,6 +184,10 @@ bool ShellClient::SpawnChild() {
     cmd += exe_dir;
     cmd += L"Pulse.Shell.exe\" ";
     cmd += std::to_wstring(GetCurrentProcessId());
+    const auto language = l10n::effective_language();
+    child_chinese_ = language == l10n::Language::ZhCN;
+    cmd += L' ';
+    cmd += l10n::LanguageId(language);
 
     STARTUPINFOW si{ sizeof(si) };
     si.dwFlags = STARTF_FORCEOFFFEEDBACK; // background helper: no AppStarting cursor
@@ -261,6 +265,7 @@ bool ShellClient::EnsureConnected() {
         return false;
     }
     auto connection = std::make_shared<Connection>(h);
+    connection->chinese = child_chinese_;
     if (!connection->cancel) return false;
     {
         std::lock_guard lock(connection_mutex_);
@@ -275,11 +280,6 @@ bool ShellClient::SendFrame(uint32_t type, uint32_t id, const std::vector<uint8_
     if (!running_.load()) return false;
     const auto connection = CurrentConnection();
     if (!connection) return false;
-    MsgHeader h;
-    h.type = type;
-    h.request_id = id;
-    h.payload_size = (uint32_t)payload.size();
-
     PipeIoOptions options;
     options.cancel_event = connection->cancel;
     options.deadline = GetTickCount64() + 5000;
@@ -290,12 +290,25 @@ bool ShellClient::SendFrame(uint32_t type, uint32_t id, const std::vector<uint8_
         return ok;
     };
 
-    if (!write_all(&h, sizeof(h)) ||
-        (!payload.empty() && !write_all(payload.data(), (DWORD)payload.size()))) {
+    const auto write_frame = [&](uint32_t kind, uint32_t request, const std::vector<uint8_t>& bytes) {
+        MsgHeader h;
+        h.type = kind;
+        h.request_id = request;
+        h.payload_size = static_cast<uint32_t>(bytes.size());
+        if (write_all(&h, sizeof(h)) && (bytes.empty() || write_all(bytes.data(), h.payload_size)))
+            return true;
         SetEvent(connection->cancel); // A partial frame cannot be reused.
         return false;
+    };
+    const auto language = l10n::effective_language();
+    const bool chinese = language == l10n::Language::ZhCN;
+    if (chinese != connection->chinese) {
+        PayloadWriter writer;
+        writer.PutString(l10n::LanguageId(language));
+        if (!write_frame(REQ_SET_LANGUAGE, 0, writer.data())) return false;
+        connection->chinese = chinese;
     }
-    return true;
+    return write_frame(type, id, payload);
 }
 
 uint32_t ShellClient::Submit(uint32_t type, const std::vector<uint8_t>& payload,
@@ -410,7 +423,8 @@ uint32_t ShellClient::Launch(const ShellLaunchRequest& request, LaunchReply repl
 }
 
 uint32_t ShellClient::DeviceOperation(HWND window, const std::wstring& verb,
-        const std::vector<std::wstring>& ids, const std::wstring& name, const std::wstring& folder, const Owner& owner) {
+        const std::vector<std::wstring>& ids, const std::wstring& name, const std::wstring& folder,
+        uint32_t paste_sequence, const Owner& owner) {
     if (ids.empty()) return 0;
     PayloadWriter writer;
     writer.PutU64(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(window)));
@@ -418,6 +432,7 @@ uint32_t ShellClient::DeviceOperation(HWND window, const std::wstring& verb,
     writer.PutString(name);
     writer.PutStringArray(ids);
     writer.PutString(folder);
+    if (verb == L"paste") writer.PutU32(paste_sequence);
     return Submit(REQ_DEVICE_OPERATION, writer.data(), {}, owner);
 }
 

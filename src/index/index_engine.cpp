@@ -74,17 +74,21 @@ uint64_t UnixToFt(uint32_t u) {
     return static_cast<uint64_t>(u) * 10000000ull + kUnixFtEpoch;
 }
 
-std::wstring StatusItemCount(uint64_t count, std::wstring_view detail = {}) {
-    std::wstring text = l10n::Format(l10n::StringId::IndexItemCountFormat, static_cast<unsigned long long>(count));
-    if (!detail.empty()) {
-        text += L"  ";
-        text.append(detail.data(), detail.size());
-    }
+template<class... Args>
+IndexStatusText StatusText(l10n::StringId id, Args... args) {
+    return {l10n::FormatIn(l10n::Language::EnUS, id, args...),
+        l10n::FormatIn(l10n::Language::ZhCN, id, args...)};
+}
+
+IndexStatusText StatusItemCount(uint64_t count, l10n::StringId detail) {
+    auto text = StatusText(l10n::StringId::IndexItemCountFormat, static_cast<unsigned long long>(count));
+    text.english += L"  " + l10n::Get(detail, l10n::Language::EnUS);
+    text.chinese += L"  " + l10n::Get(detail, l10n::Language::ZhCN);
     return text;
 }
 
-std::wstring StatusDriveProgress(wchar_t letter, size_t count) {
-    return l10n::Format(l10n::StringId::IndexDriveProgressFormat, letter, static_cast<unsigned long long>(count));
+IndexStatusText StatusDriveProgress(wchar_t letter, size_t count) {
+    return StatusText(l10n::StringId::IndexDriveProgressFormat, letter, static_cast<unsigned long long>(count));
 }
 
 std::wstring Display(std::wstring p) {
@@ -348,10 +352,11 @@ void Engine::MappedFile::Close() {
     size = 0;
 }
 
-void Engine::SetStatus(std::wstring s) {
+void Engine::SetStatus(IndexStatusText text) {
     std::lock_guard<std::mutex> lock(status_mu_);
-    status_ = std::move(s);
+    status_ = std::move(text);
 }
+void Engine::SetStatus(l10n::StringId id) { SetStatus(StatusText(id)); }
 void Engine::RecordFeed(const ChangeRecord& record) {
     const auto id = ++feed_sequence_;
     TraceSearch("filename_event", id, record.path);
@@ -439,7 +444,7 @@ bool Engine::IsExcludedPath(std::wstring_view path) const {
     return false;
 }
 
-std::wstring Engine::Status() const {
+IndexStatusText Engine::StatusTranslations() const {
     std::lock_guard<std::mutex> lock(status_mu_);
     return status_;
 }
@@ -447,7 +452,7 @@ std::wstring Engine::Status() const {
 void Engine::RequestRebuild() {
     IndexConfig config;
     if (MachineIndexScope() && !LoadMachineConfig(config, nullptr)) {
-        SetStatus(l10n::Get(l10n::StringId::IndexConfigUnreadablePreserved).c_str());
+        SetStatus(l10n::StringId::IndexConfigUnreadablePreserved);
         PingNotify(true);
         return;
     }
@@ -458,7 +463,7 @@ void Engine::RequestRebuild() {
     }
     rebuild_requested_.store(true);
     if (change_signal_) SetEvent(change_signal_);
-    SetStatus(l10n::Get(l10n::StringId::IndexConfigChangedRebuild).c_str());
+    SetStatus(l10n::StringId::IndexConfigChangedRebuild);
     PingNotify(true);
 }
 
@@ -552,7 +557,7 @@ void Engine::Start(HWND notify, UINT msg) {
     notify_msg_ = msg;
     const auto directory = DataDir();
     if (directory.empty()) {
-        SetStatus(l10n::Get(l10n::StringId::IndexDirectoryUnreadable).c_str());
+        SetStatus(l10n::StringId::IndexDirectoryUnreadable);
         PingNotify(true);
         return;
     }
@@ -2218,7 +2223,7 @@ void Engine::FlushDeltas() {
     bool saved = true;
     for (auto& [k, log] : delta_logs_)
         if (log && !log->Flush()) saved = false;
-    if (!saved) SetStatus(l10n::Get(l10n::StringId::IndexSaveRetry).c_str());
+    if (!saved) SetStatus(l10n::StringId::IndexSaveRetry);
     last_delta_flush_tick_ = GetTickCount64();
     filename_timing_.End(FilenameStage::DeltaFlush, timing, 0,
         saved ? ERROR_SUCCESS : ERROR_WRITE_FAULT, saved ? "scheduled" : "write_failed");
@@ -2524,7 +2529,7 @@ void Engine::MergeBase(bool force, const char* reason) {
                 if (entry.second) stats.merge.delta_bytes += entry.second->BytesOnDisk();
         }
         if (!FlattenLocked(snap, vols)) {
-            SetStatus(l10n::Get(l10n::StringId::IndexStructureInvalid).c_str());
+            SetStatus(l10n::StringId::IndexStructureInvalid);
             merging_ = false;
             return;
         }
@@ -2607,8 +2612,8 @@ bool Engine::TryLoadCache() {
     AdoptMappedLocked(std::move(mapped));
     ReplayDeltasLocked();
     OpenDeltasLocked();
-    SetStatus(delta_replay_failed_ ? l10n::Get(l10n::StringId::IndexDeltaRecoveryRebuild).c_str() :
-        l10n::Format(l10n::StringId::IndexLoadedCountFormat, static_cast<unsigned long long>(indexed_.load())));
+    SetStatus(delta_replay_failed_ ? StatusText(l10n::StringId::IndexDeltaRecoveryRebuild) :
+        StatusText(l10n::StringId::IndexLoadedCountFormat, static_cast<unsigned long long>(indexed_.load())));
     ready_ = true;
     return true;
 }
@@ -2982,7 +2987,7 @@ bool Engine::CatchUpVolume(VolState& v, bool* changed, bool* structural) {
             std::unique_lock state_lock(mutex_);
             GapFeed();
             v.journal_id = 0;
-            SetStatus(l10n::Format(l10n::StringId::IndexDriveTrackingLostFormat, letter));
+            SetStatus(StatusText(l10n::StringId::IndexDriveTrackingLostFormat, letter));
         }
         SetLastError(error);
         filename_timing_.End(FilenameStage::Journal, timing, applied, error, "read_failed", letter);
@@ -3307,7 +3312,7 @@ bool Engine::RebuildVolumeMft(const VolumeInfo& volume) {
         GapFeed();
         indexed_.store(build_.nodes.size());
     }
-    SetStatus(l10n::Format(l10n::StringId::IndexDriveRebuildingFormat, volume.mount_point.c_str()));
+    SetStatus(StatusText(l10n::StringId::IndexDriveRebuildingFormat, volume.mount_point.c_str()));
     if (!IndexVolumeMft(volume)) {
         std::unique_lock<std::shared_mutex> lock(mutex_);
         build_.Clear();
@@ -3346,7 +3351,7 @@ bool Engine::RebuildVolumeMft(const VolumeInfo& volume) {
     OpenDeltasLocked();
     building_ = false;
     ready_ = true;
-    SetStatus(l10n::Format(l10n::StringId::IndexDriveRebuiltFormat, volume.mount_point.c_str()));
+    SetStatus(StatusText(l10n::StringId::IndexDriveRebuiltFormat, volume.mount_point.c_str()));
     PingNotify(true);
     return true;
 }
@@ -3402,7 +3407,7 @@ void Engine::FullRebuild(const char* reason) {
     const auto previous_count = indexed_.load();
     IndexConfig config;
     if (MachineIndexScope() && !LoadMachineConfig(config, nullptr)) {
-        SetStatus(l10n::Get(l10n::StringId::IndexConfigUnreadablePreserved).c_str());
+        SetStatus(l10n::StringId::IndexConfigUnreadablePreserved);
         filename_timing_.End(FilenameStage::Rebuild, timing, previous_count, ERROR_INVALID_DATA, reason);
         PingNotify(true);
         return;
@@ -3418,8 +3423,8 @@ void Engine::FullRebuild(const char* reason) {
         building_ = true;
         build_vols_.clear();
     }
-    if (indexed_.load() == 0) SetStatus(l10n::Get(l10n::StringId::IndexBuilding).c_str());
-    else SetStatus(l10n::Format(l10n::StringId::IndexCountRebuildingFormat, static_cast<unsigned long long>(indexed_.load())));
+    if (indexed_.load() == 0) SetStatus(l10n::StringId::IndexBuilding);
+    else SetStatus(StatusText(l10n::StringId::IndexCountRebuildingFormat, static_cast<unsigned long long>(indexed_.load())));
     PingNotify(true);
 
     bool used_mft = false;
@@ -3436,7 +3441,7 @@ void Engine::FullRebuild(const char* reason) {
                     build_vols_.clear();
                     building_ = false;
                     indexed_.store(previous_count);
-                    SetStatus(l10n::Get(l10n::StringId::IndexRebuildFailedPreserved).c_str());
+                    SetStatus(l10n::StringId::IndexRebuildFailedPreserved);
                 }
                 PingNotify(true);
                 filename_timing_.End(FilenameStage::Rebuild, timing, previous_count, build_error, "volume_read_failed");
@@ -3476,7 +3481,7 @@ void Engine::FullRebuild(const char* reason) {
                 OpenDeltasLocked();
                 ready_ = true;
                 if (MachineIndexScope())
-                    SetStatus(StatusItemCount(indexed_.load(), l10n::Get(l10n::StringId::IndexFinalizing).c_str()));
+                    SetStatus(StatusItemCount(indexed_.load(), l10n::StringId::IndexFinalizing));
             } else {
                 if (wrote) build_error = GetLastError() ? GetLastError() : ERROR_WRITE_FAULT;
                 if (map_) { map_->Close(); map_.reset(); }
@@ -3508,8 +3513,8 @@ void Engine::FullRebuild(const char* reason) {
                 std::all_of(vols_.begin(), vols_.end(),
                             [](const VolState& v) { return v.journal_id != 0; });
             SetStatus(committed ? StatusItemCount(indexed_.load(),
-                      live_tracked ? l10n::Get(l10n::StringId::IndexLiveUpdates).c_str() : l10n::Get(l10n::StringId::IndexWatching).c_str())
-                      : l10n::Get(l10n::StringId::IndexAvailableSaveFailed).c_str());
+                      live_tracked ? l10n::StringId::IndexLiveUpdates : l10n::StringId::IndexWatching)
+                      : StatusText(l10n::StringId::IndexAvailableSaveFailed));
             ready_ = true;
             building_ = false;
             folder_size_gap_ = false;
@@ -3572,7 +3577,7 @@ void Engine::RecoverFailedVolumes(const std::vector<VolumeInfo>& volumes, ULONGL
             // Keep healthy collectors running and the last good snapshot
             // queryable. A persistent failed disk must not trigger full scans.
             volume_retry_after_[volume.id] = (std::max)(now, GetTickCount64()) + 60000;
-            SetStatus(l10n::Format(l10n::StringId::IndexDriveTrackingUnavailableFormat, volume.mount_point.c_str()));
+            SetStatus(StatusText(l10n::StringId::IndexDriveTrackingUnavailableFormat, volume.mount_point.c_str()));
             continue;
         }
         volume_retry_after_.erase(volume.id);
@@ -3594,7 +3599,7 @@ void Engine::Worker() {
     ResolveIndexDirFrn();
     IndexConfig startup_config;
     if (MachineIndexScope() && !LoadMachineConfig(startup_config, nullptr)) {
-        SetStatus(l10n::Get(l10n::StringId::IndexConfigUnreadableRestart).c_str());
+        SetStatus(l10n::StringId::IndexConfigUnreadableRestart);
         PingNotify(true);
         return;
     }
@@ -3668,7 +3673,7 @@ void Engine::Worker() {
                 }
             }
             if (fresh)
-                SetStatus(StatusItemCount(indexed_.load(), l10n::Get(l10n::StringId::IndexLiveUpdates).c_str()));
+                SetStatus(StatusItemCount(indexed_.load(), l10n::StringId::IndexLiveUpdates));
         }
     } else if (have_cache && !needs_search_rebuild && !IsAdmin()) {
         const uint64_t now = static_cast<uint64_t>(std::time(nullptr));
@@ -3683,7 +3688,7 @@ void Engine::Worker() {
         // become available immediately instead of appearing hung.
         if (!have_cache) {
             ready_ = true;
-            SetStatus(l10n::Get(l10n::StringId::IndexBackgroundBuilding).c_str());
+            SetStatus(l10n::StringId::IndexBackgroundBuilding);
             PingNotify(true);
         }
         FullRebuild(have_cache ? (needs_search_rebuild ? "snapshot_upgrade" : "startup_stale") : "cold_start");
@@ -3742,7 +3747,7 @@ void Engine::Worker() {
             IndexConfig topology_config;
             if (!MachineIndexScope() || LoadMachineConfig(topology_config, nullptr))
                 online = ConfiguredVolumes(topology_config);
-            else SetStatus(l10n::Get(l10n::StringId::IndexConfigPreviousVolumes).c_str());
+            else SetStatus(l10n::StringId::IndexConfigPreviousVolumes);
             topology_tick = loop_tick;
             filename_timing_.End(FilenameStage::Topology, timing, online.size(), ERROR_SUCCESS, "periodic");
         }
@@ -3774,7 +3779,7 @@ void Engine::Worker() {
                     const bool live_tracked = std::all_of(vols_.begin(), vols_.end(),
                         [](const VolState& v) { return v.journal_id != 0; });
                     SetStatus(StatusItemCount(indexed_.load(),
-                              live_tracked ? l10n::Get(l10n::StringId::IndexLiveUpdates).c_str() : l10n::Get(l10n::StringId::IndexSomeVolumesNotLive).c_str()));
+                              live_tracked ? l10n::StringId::IndexLiveUpdates : l10n::StringId::IndexSomeVolumesNotLive));
                 }
             }
         }

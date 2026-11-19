@@ -118,7 +118,7 @@ DWORD FileDropEffect(const AppState& s, const std::vector<std::wstring>& sources
 }
 
 bool IsRedundantFileDrop(const std::vector<std::wstring>& sources, const std::wstring& destination,
-                         const std::wstring& row_path) {
+                         const std::wstring& row_path, DWORD effect) {
     if (sources.empty()) return false;
     const auto without_trailing_slash = [](std::wstring_view value) {
         while (value.ends_with(L'\\')) value.remove_suffix(1);
@@ -128,7 +128,7 @@ bool IsRedundantFileDrop(const std::vector<std::wstring>& sources, const std::ws
     const auto target = without_trailing_slash(normalized_destination);
     const auto normalized_row = fs::NormalizePath(row_path);
     const auto row = without_trailing_slash(normalized_row);
-    bool all_in_target = true;
+    bool all_in_target = effect != DROPEFFECT_LINK;
     for (const auto& source : sources) {
         const auto normalized_source = fs::NormalizePath(source);
         const auto item = without_trailing_slash(normalized_source);
@@ -174,8 +174,7 @@ bool UpdateSplitterDrag(AppState& s, int mx, int my) {
     s.hoverControlIndex = s.splitterDragIndex;
     return true;
 }
-void ClearDropFeedback(AppState& s) {
-    ClearHeaderDropHint(s);
+static void ResetDropTarget(AppState& s) {
     s.dropRow = -1;
     s.dropPaneIndex = -1;
     s.dropHeader = false;
@@ -184,6 +183,11 @@ void ClearDropFeedback(AppState& s) {
     s.dropTray = false;
     s.dropBadge.clear();
     s.dropDestDir.clear();
+}
+
+void ClearDropFeedback(AppState& s) {
+    ClearHeaderDropHint(s);
+    ResetDropTarget(s);
     s.springRow = -1;
     s.springStart = 0;
     InvalidateRect(s.hwnd, nullptr, FALSE);
@@ -324,14 +328,7 @@ bool QueueHeaderDrop(AppState& s, const std::vector<std::wstring>& sources,
 static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>& sources,
                                   POINT pt, DWORD key_state, DWORD allowed, DWORD preferred,
                                   bool virtual_files) {
-    s.dropRow = -1;
-    s.dropPaneIndex = -1;
-    s.dropHeader = false;
-    s.dropBreadcrumb = -1;
-    s.dropSidebar = -1;
-    s.dropTray = false;
-    s.dropDestDir.clear();
-    s.dropBadge.clear();
+    ResetDropTarget(s);
 
     // Esc after a spring-loaded enter: go back instead of cancelling (self drags).
     if ((GetAsyncKeyState(VK_ESCAPE) & 0x8000) && s.springEntered) {
@@ -456,22 +453,17 @@ static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>&
             return DROPEFFECT_COPY; // staging never moves the source
         }
     }
-    if (s.dropDestDir.empty() || (!virtual_files && IsRedundantFileDrop(sources, s.dropDestDir, row_path))) {
-        s.dropRow = -1;
-        s.dropSidebar = -1;
-        s.dropBreadcrumb = -1;
+    const DWORD effect = s.dropDestDir.empty() ? DROPEFFECT_NONE : virtual_files ? (allowed & DROPEFFECT_COPY)
+        : FileDropEffect(s, sources, s.dropDestDir, key_state, allowed, preferred);
+    if (effect == DROPEFFECT_NONE || (!virtual_files &&
+        IsRedundantFileDrop(sources, s.dropDestDir, row_path, effect))) {
+        ResetDropTarget(s);
         s.springRow = -1;
-        s.dropDestDir.clear();
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return DROPEFFECT_NONE;
     }
 
-    DWORD effect = virtual_files ? (allowed & DROPEFFECT_COPY)
-        : FileDropEffect(s, sources, s.dropDestDir, key_state, allowed, preferred);
-    if (effect == DROPEFFECT_NONE) {
-        s.dropRow = -1;
-        s.springRow = -1;
-    } else if (s.dropRow >= 0) {
+    if (s.dropRow >= 0) {
         // Spring-load only when the folder can accept the drag.
         if (s.springRow != s.dropRow) {
             s.springRow = s.dropRow;
@@ -485,7 +477,7 @@ static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>&
             return DROPEFFECT_NONE;
         }
     }
-    if (effect != DROPEFFECT_NONE) s.dropBadge = (effect == DROPEFFECT_LINK ? l10n::Get(l10n::StringId::DropLink).c_str() :
+    s.dropBadge = (effect == DROPEFFECT_LINK ? l10n::Get(l10n::StringId::DropLink).c_str() :
         effect == DROPEFFECT_MOVE ? l10n::Get(l10n::StringId::DropMove).c_str() :
         l10n::Get(l10n::StringId::DropCopy).c_str()) + destName;
     s.dropBadgeX = (float)pt.x;
@@ -2945,7 +2937,8 @@ LRESULT HandleLButtonDblClk(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPA
             app::Tab* fitTab = fitPane ? fitPane->ActiveTab() : nullptr;
             if (fitTab && hit.pane_index >= 0 &&
                 hit.pane_index < static_cast<int>(vm.pane_slots.size())) {
-                if (fitTab->details_columns.configured) {
+                if (fitTab->details_columns.configured &&
+                    !vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane.is_search) {
                     auto configured = vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane;
                     s->renderer.AutoFitConfiguredColumn(configured,
                         s->renderer.PaneBodyBounds(configured, vm.pane_slots[static_cast<size_t>(hit.pane_index)].rect), hit.index);
@@ -3806,7 +3799,14 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         if (!editing) {
             const int command = app::LookupCommandShortcut(static_cast<unsigned>(wParam), ctrl, shift, alt);
             if (command != app::CmdNone) {
-                if (app::IsCommandEnabled(command, BuildCommandContext(*s))) DispatchMenuCommand(*s, command);
+                const auto dispatch = [command](AppState& state) {
+                    if (app::IsCommandEnabled(command, BuildCommandContext(state)))
+                        DispatchMenuCommand(state, command);
+                };
+                const bool needs_paths = command == app::CmdCut || command == app::CmdCopy ||
+                    command == app::CmdCopyPath || command == app::CmdDelete || command == app::CmdProperties ||
+                    command == app::CmdCopyToTarget || command == app::CmdMoveToTarget;
+                if (!needs_paths || !DeferContentSelection(*s, dispatch)) dispatch(*s);
                 return 0;
             }
         }
@@ -3852,8 +3852,8 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         } else if (wParam == VK_F4) {
             ShowOmnibar(*s, OmnibarMode::Path);
         } else if (wParam == VK_DELETE && shift && !ctrl && !alt) {
-            DeleteSelected(*s, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
-        } else if (wParam == VK_RETURN) {
+            DeleteSelected(*s, true);
+        } else if (wParam == VK_RETURN && !alt) {
             OpenSelected(*s);
         } else if (wParam == VK_BACK || (alt && wParam == VK_UP)) {
             GoUp(*s);

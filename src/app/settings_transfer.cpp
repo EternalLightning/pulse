@@ -9,6 +9,7 @@
 #include "../common/json_utils.h"
 #include "../common/utf8_file.h"
 #include "../index/content_search_protocol.h"
+#include "../model/path_aliases.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -37,6 +38,7 @@ constexpr FileSpec kFiles[] = {
     {L"content-index.config", kPrefs, false},
 };
 constexpr std::wstring_view kAppFile = L"app.json";
+constexpr std::wstring_view kAliasesFile = L"aliases.json";
 constexpr std::wstring_view kPlacesFile = L"places.json";
 constexpr std::wstring_view kTagsFile = L"tags.json";
 constexpr wchar_t kStageDir[] = L"\\settings_import";
@@ -63,6 +65,11 @@ std::wstring Trimmed(const std::wstring& text) {
 bool ValidContent(const std::wstring& text, bool legacy_hex) {
     const json::Document doc(text, legacy_hex);
     return doc.Is(json::Kind::Object) || doc.Is(json::Kind::Array);
+}
+
+bool ValidTransferContent(std::wstring_view name, const std::wstring& text, bool legacy_hex) {
+    if (name == kAliasesFile) return model::PathAliases{}.LoadJson(text);
+    return ValidContent(text, legacy_hex);
 }
 
 std::wstring Quote(const std::wstring& text) {
@@ -296,7 +303,7 @@ bool IsMachineLocalPref(std::wstring_view key) noexcept {
         L"integration_recycle_bin", L"integration_folders_compat",
         L"take_over_explorer_windows", L"take_over_win_e", L"take_over_this_pc",
         L"take_over_recycle_bin", L"shell_tag_menu",
-        L"experimental_explorer_takeover",
+        L"experimental_explorer_takeover", L"foreground_file_dialog_takeover",
         // History and one-time state.
         L"picker_folders", L"recent_tags", L"tips_seen", L"last_seen_version",
         L"duplicate_scan_folder", L"duplicate_scan_drive",
@@ -341,7 +348,7 @@ bool BuildBundle(const std::wstring& data_dir, uint32_t categories, const Export
         }
         text = Trimmed(text);
         if (text.empty()) continue;
-        if (!ValidContent(text, spec.legacy_hex)) return false;
+        if (!ValidTransferContent(spec.name, text, spec.legacy_hex)) return false;
         if (spec.name == kAppFile) {
             text = FilterObject(text, [](const std::wstring& key) { return !IsMachineLocalPref(key); });
         } else if (std::wstring_view(spec.name) == L"preferences.json") {
@@ -419,7 +426,7 @@ ParseResult ParseBundle(const std::wstring& input, Bundle& out) {
         } else {
             content = raw;
         }
-        if (!ValidContent(content, spec->legacy_hex)) {
+        if (!ValidTransferContent(name, content, spec->legacy_hex)) {
             valid = false;
             break;
         }
@@ -443,6 +450,10 @@ ParseResult ParseBundle(const std::wstring& input, Bundle& out) {
 bool StageImport(const std::wstring& data_dir, const Bundle& bundle, uint32_t categories) {
     categories &= bundle.categories & kAllCategories;
     if (!categories) return false;
+    if (categories & kAliases) {
+        const auto* aliases = bundle.File(kAliasesFile);
+        if (aliases && !ValidTransferContent(kAliasesFile, *aliases, false)) return false;
+    }
     std::wstring stage;
     if (!BeginStage(data_dir, stage)) return false;
     std::vector<std::wstring> lines{L"mode import"};
@@ -531,20 +542,21 @@ ApplyResult ApplyPendingImport(const std::wstring& data_dir) {
     for (const auto& [verb, name] : ops) {
         Planned change{name, {}, verb == L"delete"};
         if (!change.remove) {
+            const auto& spec = *FindSpec(name);
             std::wstring incoming, local;
             if (!ReadUtf8File(stage + L"\\" + name, incoming) ||
-                !ValidContent(incoming, FindSpec(name)->legacy_hex)) { invalid = true; break; }
+                !ValidTransferContent(name, incoming, spec.legacy_hex)) { invalid = true; break; }
             if (verb != L"put") {
                 if (Exists(live_path(name))) {
-                    if (!ReadUtf8File(live_path(name), local) || !ValidContent(local, FindSpec(name)->legacy_hex)) {
+                    if (!ReadUtf8File(live_path(name), local) || !ValidContent(local, spec.legacy_hex)) {
                         invalid = true; break;
                     }
                 } else local = L"{}";
             }
             if (verb == L"merge-prefs") change.text = MergePrefs(local, incoming);
             else if (verb == L"merge-object") change.text = MergeObjects(local, incoming);
-            else change.text = incoming;
-            if (change.text.empty() || !ValidContent(change.text, FindSpec(name)->legacy_hex)) { invalid = true; break; }
+            else change.text = std::move(incoming);
+            if (verb != L"put" && !ValidTransferContent(name, change.text, spec.legacy_hex)) { invalid = true; break; }
             if (name == L"content-index.config") {
                 std::vector<uint8_t> bytes;
                 if (!DecodeBinary(change.text, bytes)) { invalid = true; break; }

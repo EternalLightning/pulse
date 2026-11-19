@@ -45,6 +45,7 @@ void SeedSource(const fs::path& dir) {
     fs::create_directories(dir);
     Write(dir, L"app.json",
           L"{\n  \"version\":4,\n  \"launch_on_startup\":true,\n  \"integration_enabled\":true,\n"
+          L"  \"foreground_file_dialog_takeover\":true,\n"
           L"  \"theme_mode\":2,\n  \"language\":\"zh-CN\",\n  \"picker_folders\":[\"a|C:\\\\src\"],\n"
           L"  \"shortcuts\":[\"copy_path|Ctrl+Shift+C\"],\n  \"row_height\":32\n}\n");
     Write(dir, L"context_menu.json", L"{\"builtin_hidden\":12}");
@@ -66,6 +67,7 @@ void SeedTarget(const fs::path& dir) {
     fs::create_directories(dir);
     Write(dir, L"app.json",
           L"{\n  \"version\":4,\n  \"launch_on_startup\":false,\n  \"integration_enabled\":false,\n"
+          L"  \"foreground_file_dialog_takeover\":false,\n"
           L"  \"theme_mode\":1,\n  \"picker_folders\":[\"b|E:\\\\mine\"],\n  \"newer_key\":7\n}\n");
     Write(dir, L"places.json",
           L"{\n  \"places_version\":2,\n  \"tags_generation\":\"9\",\n"
@@ -101,7 +103,7 @@ int wmain() {
                       bundle_text, &included) && included == kAllCategories,
           L"export builds a bundle with every category");
     Check(!Contains(bundle_text, L"launch_on_startup") && !Contains(bundle_text, L"integration_enabled") &&
-          !Contains(bundle_text, L"picker_folders"),
+          !Contains(bundle_text, L"picker_folders") && !Contains(bundle_text, L"foreground_file_dialog_takeover"),
           L"export leaves machine-local preferences out");
     Check(!Contains(bundle_text, L"secret.txt"), L"export leaves recent items out");
     Check(Contains(bundle_text, L"\"theme_mode\":2") && Contains(bundle_text, L"copy_path|Ctrl+Shift+C"),
@@ -140,9 +142,22 @@ int wmain() {
     Check(ParseBundle(L"{\"format\":\"pulse-settings\",\"format_version\":1,\"files\":{"
                       L"\"aliases.json\":\"{broken\"}}", rejected) == ParseResult::Invalid,
           L"a damaged embedded file is rejected");
+    Check(ParseBundle(L"{\"format\":\"pulse-settings\",\"format_version\":1,\"files\":{"
+                      L"\"aliases.json\":{\"version\":2,\"aliases\":[]}}}", rejected) == ParseResult::Invalid,
+          L"import rejects a syntactically valid but unsupported aliases schema");
 
     // ---- import: settings, tags and aliases (not places, not searches) ----
     SeedTarget(target);
+    Bundle bad_aliases;
+    bad_aliases.categories = kAliases;
+    bad_aliases.files.emplace_back(L"aliases.json", L"{\"version\":2,\"aliases\":[]}");
+    std::wstring invalid_export;
+    Check(!BuildBundle(source.wstring(), kAliases, {L"local", L"x"}, invalid_export,
+          nullptr, &bad_aliases.files) && invalid_export.empty(),
+          L"export rejects an aliases schema this version cannot import");
+    Check(!StageImport(target.wstring(), bad_aliases, kAliases) && !HasPendingImport(target.wstring()) &&
+        Read(target, L"aliases.json") == L"{\"aliases\":{}}",
+        L"direct staging also rejects invalid aliases and retains the current file");
     Check(StageImport(target.wstring(), bundle, kPrefs | kTags | kAliases), L"import stages");
     Check(HasPendingImport(target.wstring()), L"staged import is pending");
     Check(Member(Read(target, L"app.json"), L"theme_mode") == L"1", L"staging leaves live files alone");
@@ -152,7 +167,7 @@ int wmain() {
     const std::wstring app = Read(target, L"app.json");
     Check(Member(app, L"theme_mode") == L"2" && Contains(app, L"copy_path"), L"imported preferences arrive");
     Check(Member(app, L"launch_on_startup") == L"false" && Member(app, L"integration_enabled") == L"false" &&
-          Contains(app, L"E:\\\\mine"),
+          Member(app, L"foreground_file_dialog_takeover") == L"false" && Contains(app, L"E:\\\\mine"),
           L"this PC's integration and picker history stay");
     Check(Member(app, L"newer_key") == L"7", L"preferences the bundle lacks stay");
     Check(pulse::json::Document(app).Is(pulse::json::Kind::Object), L"merged app.json is strict JSON");
@@ -191,8 +206,9 @@ int wmain() {
           L"nothing chosen, nothing staged");
 
     // ---- merge helpers ----
-    Check(MergePrefs(L"{\"a\":1,\"launch_on_startup\":true}", L"{\"a\":2,\"launch_on_startup\":false,\"b\":3}") ==
-          L"{\n  \"a\":2,\n  \"launch_on_startup\":true,\n  \"b\":3\n}\n",
+    Check(MergePrefs(L"{\"a\":1,\"launch_on_startup\":true,\"foreground_file_dialog_takeover\":false}",
+          L"{\"a\":2,\"launch_on_startup\":false,\"foreground_file_dialog_takeover\":true,\"b\":3}") ==
+          L"{\n  \"a\":2,\n  \"launch_on_startup\":true,\n  \"foreground_file_dialog_takeover\":false,\n  \"b\":3\n}\n",
           L"MergePrefs overlays choices and keeps this PC's members");
     Check(MergePrefs(L"garbage", L"{\"a\":1}") == L"{\n  \"a\":1\n}\n", L"MergePrefs survives an unreadable local file");
     Check(MergePrefs(L"{}", L"garbage").empty(), L"MergePrefs refuses an unreadable import");

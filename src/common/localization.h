@@ -1766,15 +1766,20 @@ inline const wchar_t* Pick(const wchar_t* chinese, const wchar_t* english) noexc
 }
 const wchar_t* LocaleName() noexcept;
 const std::wstring& Get(StringId id);
+const std::wstring& Get(StringId id, Language language);
 
 template<typename... Args>
-std::wstring Format(StringId id, Args... args) {
-    const auto& pattern = Get(id);
+std::wstring FormatIn(Language language, StringId id, Args... args) {
+    const auto& pattern = Get(id, language);
     const int length = _scwprintf(pattern.c_str(), args...);
     if (length < 0) return pattern;
     std::wstring result(static_cast<size_t>(length), L'\0');
     swprintf_s(result.data(), result.size() + 1, pattern.c_str(), args...);
     return result;
+}
+template<typename... Args>
+std::wstring Format(StringId id, Args... args) {
+    return FormatIn(effective_language(), id, args...);
 }
 
 } // namespace pulse::l10n
