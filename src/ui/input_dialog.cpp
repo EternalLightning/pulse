@@ -5,6 +5,7 @@
 #include "edit_host.h"
 #include "typography.h"
 #include "window_helpers.h"
+#include "../common/file_name.h"
 #include "../common/localization.h"
 #include "../common/windows_compat.h"
 
@@ -407,5 +408,20 @@ private:
 InputDialogResult ShowInputDialog(HWND owner, const InputDialogSpec& spec, bool dark, D2D1_COLOR_F accent) {
     InputWindow window;
     return window.Show(owner, spec, dark, accent);
+}
+
+std::wstring PromptFileName(HWND owner, InputDialogSpec spec, std::wstring initial, size_t limit,
+                            bool dark, D2D1_COLOR_F accent) {
+    using I = l10n::StringId;
+    const auto prompt = l10n::Get(I::CreateItemNamePrompt);
+    spec.select_all = !initial.empty();
+    spec.fields.push_back({100, prompt, std::move(initial), prompt, 100, limit});
+    spec.validate = [](const std::vector<std::wstring>& values) {
+        const bool valid = path::IsValidFileName(values.front());
+        return InputDialogValidation{valid, !valid && !values.front().empty() ?
+            l10n::Get(I::InvalidName) : std::wstring{}};
+    };
+    auto input = ShowInputDialog(owner, spec, dark, accent);
+    return input.accepted ? std::move(input.values.front()) : std::wstring{};
 }
 } // namespace pulse::ui

@@ -35,6 +35,7 @@ struct Appearance {
     bool dark = false;
     bool show_hidden = false;
     D2D1_COLOR_F accent{};
+    bool verify_copies = false;
 };
 
 struct PickerRequest {
@@ -152,6 +153,7 @@ void RunPicker(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
         spec.filter_index = source.filter_index;
         spec.allow_multiselect = source.allow_multiselect;
         spec.show_hidden = appearance.show_hidden;
+        spec.verify_copies = appearance.verify_copies;
         spec.software_device = true;
         spec.load_places = LoadFilePickerPlaces;
         spec.begin_submit = [&](const ui::FilePickerResult& result) {
@@ -338,13 +340,13 @@ void WatchDialogs(const std::shared_ptr<NativeDialogTakeover::Shared>& shared) {
 NativeDialogTakeover::~NativeDialogTakeover() { Stop(); }
 
 bool NativeDialogTakeover::Configure(bool enabled, bool dark, D2D1_COLOR_F accent, bool show_hidden,
-                                     std::wstring pulse_folder) {
-    return ConfigureImpl(enabled, dark, accent, show_hidden, std::move(pulse_folder), 0);
+                                     std::wstring pulse_folder, bool verify_copies) {
+    return ConfigureImpl(enabled, dark, accent, show_hidden, std::move(pulse_folder), 0, verify_copies);
 }
 
 bool NativeDialogTakeover::StartForTesting(DWORD source_process) {
     if (!source_process || source_process == GetCurrentProcessId()) return false;
-    return ConfigureImpl(true, false, D2D1::ColorF(0x0078d4), false, {}, source_process);
+    return ConfigureImpl(true, false, D2D1::ColorF(0x0078d4), false, {}, source_process, false);
 }
 
 bool NativeDialogTakeover::ReadyForTesting() const {
@@ -367,7 +369,7 @@ bool NativeDialogTakeover::ObserveForTesting(HWND source) {
 }
 
 bool NativeDialogTakeover::ConfigureImpl(bool enabled, bool dark, D2D1_COLOR_F accent, bool show_hidden,
-                                         std::wstring pulse_folder, DWORD source_process) {
+                                         std::wstring pulse_folder, DWORD source_process, bool verify_copies) {
     std::lock_guard owner(mutex_);
     if (stopped_) return !enabled;
     if (shared_ && shared_->source_process != source_process) return false;
@@ -381,7 +383,7 @@ bool NativeDialogTakeover::ConfigureImpl(bool enabled, bool dark, D2D1_COLOR_F a
     }
     {
         std::lock_guard lock(shared_->appearance_mutex);
-        shared_->appearance = {dark, show_hidden, accent};
+        shared_->appearance = {dark, show_hidden, accent, verify_copies};
         if (!pulse_folder.empty()) shared_->pulse_folder = std::move(pulse_folder);
     }
     if (enabled != IsEnabled(*shared_)) {

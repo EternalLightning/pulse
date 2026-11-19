@@ -202,6 +202,7 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner,
     for (const auto& filter : request.filters) spec.filters.push_back({Wide(filter.label), Wide(filter.pattern)});
     spec.allow_multiselect = (request.options & wire::AllowMultiSelect) != 0;
     spec.show_hidden = prefs.show_hidden_files || (request.options & wire::ShowHidden);
+    spec.verify_copies = prefs.verify_copies;
     spec.load_places = LoadFilePickerPlaces;
     bool use_windows = false;
     bool active_prompt = false;

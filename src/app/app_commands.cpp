@@ -42,6 +42,7 @@
 #include "view_mode_scroll_anchor.h"
 #include "batch_rename.h"
 #include "new_item_dialog.h"
+#include "../ui/input_dialog.h"
 #include "search_query.h"
 #include "link_resolve.h"
 #include "resource.h"
@@ -240,7 +241,7 @@ void CreateNewItem(AppState& s, bool folder, bool arbitrary_file) {
     const COLORREF accent = RGB(channel(s.accentColor.r), channel(s.accentColor.g),
                                 channel(s.accentColor.b));
     if (!app::PromptNewItemName(s.hwnd, l10n::Get(title), s.darkMode, accent, name,
-            !folder && !arbitrary_file ? 251 : 255)) return;
+            !folder && !arbitrary_file ? ui::kNewTextDocumentNameLimit : 255)) return;
     if (!folder && !arbitrary_file && name.find(L'.') == std::wstring::npos) {
         name += L".txt";
     }

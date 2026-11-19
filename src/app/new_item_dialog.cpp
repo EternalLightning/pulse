@@ -4,7 +4,6 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "new_item_dialog.h"
-#include "batch_rename.h"
 #include "../ui/input_dialog.h"
 #include "../ui/edit_host.h"
 #include "../common/localization.h"
@@ -17,15 +16,9 @@ bool PromptNewItemName(HWND owner, const std::wstring& title, bool dark,
     spec.title = title;
     spec.glyph = L"\xE710";
     spec.confirm_text = l10n::Get(l10n::StringId::CreateItemAction);
-    const auto prompt = l10n::Get(l10n::StringId::CreateItemNamePrompt);
-    spec.fields.push_back({100, prompt, {}, prompt, 100, max_length});
-    spec.validate = [](const std::vector<std::wstring>& values) {
-        const bool valid = IsValidFileName(values.front());
-        return ui::InputDialogValidation{valid, !values.front().empty() && !valid
-            ? l10n::Get(l10n::StringId::InvalidName) : std::wstring{}};
-    };
-    auto input = ui::ShowInputDialog(owner, spec, dark, ui::ChildEditColor(accent));
-    if (input.accepted) result = std::move(input.values.front());
-    return input.accepted;
+    auto name = ui::PromptFileName(owner, std::move(spec), {}, max_length, dark, ui::ChildEditColor(accent));
+    if (name.empty()) return false;
+    result = std::move(name);
+    return true;
 }
 } // namespace pulse::app

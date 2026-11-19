@@ -44,6 +44,10 @@ struct InputDialogResult {
 InputDialogResult ShowInputDialog(HWND owner, const InputDialogSpec& spec,
                                  bool dark, D2D1_COLOR_F accent);
 
+inline constexpr size_t kNewTextDocumentNameLimit = 251;
+std::wstring PromptFileName(HWND owner, InputDialogSpec spec, std::wstring initial, size_t limit,
+                            bool dark, D2D1_COLOR_F accent);
+
 #ifdef PULSE_UI_TEST_HOOKS
 // Nonzero wParam renders without Present so UI-thread readbacks retain the frame.
 inline constexpr UINT kInputDialogInspectMessage = WM_APP + 0x2D0;

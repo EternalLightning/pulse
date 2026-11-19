@@ -121,7 +121,7 @@ bool ConfigureFileDialogs(SystemIntegration::Shared& shared, AppState& state) {
     const auto* tab = active ? ActiveTab(*active) : nullptr;
     const auto folder = tab && !fs::IsVirtualPath(tab->current_path) ? ShellPathText(tab->current_path) : L"";
     return shared.file_dialog_takeover.Configure(true, state.darkMode, state.accentColor,
-        state.appPrefs.show_hidden_files, folder);
+        state.appPrefs.show_hidden_files, folder, state.appPrefs.verify_copies);
 }
 void Submit(const std::shared_ptr<SystemIntegration::Shared>& shared,
             SystemIntegration::Shared::Task task) {

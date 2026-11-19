@@ -9,7 +9,7 @@
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
 #include "../ui/file_operation_dialog.h"
-#include "../ui/batch_conflict_dialog.h"
+#include "../ui/file_conflict_prompt.h"
 #include "../ui/batch_rename_dialog.h"
 #include "../ui/quick_preview_window.h"
 #include "../ui/typography.h"
@@ -379,30 +379,7 @@ void UpdateOperationWindow(AppState& s, bool allow_conflict_dialog) {
         if (const auto conflict = s.ops.PendingConflict();
             conflict && conflict->token != s.conflictUiToken) {
             s.conflictUiToken = conflict->token;
-            if (conflict->rows.size() > 1 && !conflict->link_confirmation) {
-                using I = l10n::StringId;
-                ui::BatchConflictLabels labels;
-                labels.title = l10n::Get(I::OpConflictTitle);
-                labels.instruction = l10n::Get(I::BatchConflictInstruction);
-                labels.source = l10n::Get(I::OpSource);
-                labels.destination = l10n::Get(I::OpExisting);
-                labels.replace = l10n::Get(I::OpReplaceFile);
-                labels.skip = l10n::Get(I::OpSkipFile);
-                labels.keep_both = l10n::Get(I::OpKeepBoth);
-                labels.apply_all = l10n::Get(I::BatchConflictApplyAll);
-                labels.confirm = l10n::Get(I::BatchConflictContinue);
-                labels.cancel = l10n::Get(I::Cancel);
-                labels.folder = l10n::Get(I::TypeFolder);
-                labels.reparse = l10n::Get(I::BatchConflictLink);
-                labels.unknown = l10n::Get(I::BatchConflictUnknown);
-                const auto result = ui::ShowBatchFileConflictDialog(s.hwnd, *conflict, labels, s.darkMode, s.accentColor);
-                if (result) s.ops.ResolveConflicts(conflict->token, *result);
-                else s.ops.ResolveConflict(conflict->token, ops::ConflictChoice::Cancel, false);
-            } else {
-                const ui::ConflictDialogResult result = ui::ShowFileConflictDialog(
-                    s.hwnd, *conflict, s.darkMode, s.accentColor);
-                s.ops.ResolveConflict(conflict->token, result.choice, result.apply_to_all);
-            }
+            ui::ResolveFileConflict(s.hwnd, s.ops, *conflict, s.darkMode, s.accentColor);
         }
     }
 

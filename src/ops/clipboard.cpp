@@ -126,27 +126,30 @@ bool WriteClipboardText(const std::wstring& text) {
     return true;
 }
 
-bool ReadClipboard(ClipboardData& out) {
+namespace {
+HRESULT CaptureClipboardPaths(ClipboardData& out, uint32_t expected_sequence) {
     out = {};
-    if (!IsClipboardFormatAvailable(CF_HDROP)) return false;
-    if (!OpenClipboardWithRetry(nullptr)) return false;
+    if (!OpenClipboardWithRetry(nullptr)) return HRESULT_FROM_WIN32(ERROR_BUSY);
+    struct ClipboardLock { ~ClipboardLock() { CloseClipboard(); } } clipboard;
+    if (expected_sequence && GetClipboardSequenceNumber() != expected_sequence)
+        return HRESULT_FROM_WIN32(ERROR_CANCELLED);
 
-    bool ok = false;
     if (HANDLE h = GetClipboardData(CF_HDROP)) {
         if (HDROP hdrop = static_cast<HDROP>(GlobalLock(h))) {
+            struct DropLock { HANDLE data; ~DropLock() { GlobalUnlock(data); } } drop{h};
             UINT count = DragQueryFileW(hdrop, 0xFFFFFFFF, nullptr, 0);
+            out.paths.reserve(count);
             for (UINT i = 0; i < count; ++i) {
                 UINT len = DragQueryFileW(hdrop, i, nullptr, 0);
                 std::wstring path(static_cast<size_t>(len) + 1, L'\0');
                 const UINT copied = DragQueryFileW(hdrop, i, path.data(), len + 1);
-                if (copied == 0 && len != 0) continue;
+                if (!copied) continue;
                 path.resize(copied);
                 out.paths.push_back(std::move(path));
             }
-            GlobalUnlock(h);
         }
-        ok = !out.paths.empty();
     }
+    if (out.paths.empty()) return S_FALSE;
     UINT fmtEffect = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
     if (HANDLE h = GetClipboardData(fmtEffect)) {
         if (DWORD* effect = static_cast<DWORD*>(GlobalLock(h))) {
@@ -154,13 +157,25 @@ bool ReadClipboard(ClipboardData& out) {
             GlobalUnlock(h);
         }
     }
-    if (ok) out.sequence = GetClipboardSequenceNumber();
-    CloseClipboard();
-    if (ok && out.sequence != GetClipboardSequenceNumber()) {
+    // The same owner can advance the sequence while rendering data under this lock.
+    out.sequence = GetClipboardSequenceNumber();
+    return S_OK;
+}
+} // namespace
+
+HRESULT ReadClipboardForPaste(uint32_t expected_sequence, ClipboardData& out) {
+    const HRESULT result = CaptureClipboardPaths(out, expected_sequence);
+    if (result == S_OK && out.sequence != GetClipboardSequenceNumber()) {
         out = {};
-        return false;
+        return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     }
-    return ok;
+    return result;
+}
+
+bool ReadClipboard(ClipboardData& out) {
+    if (IsClipboardFormatAvailable(CF_HDROP)) return ReadClipboardForPaste(0, out) == S_OK;
+    out = {};
+    return false;
 }
 
 namespace {
@@ -183,7 +198,14 @@ public:
         return refs;
     }
     HRESULT STDMETHODCALLTYPE GetData(FORMATETC* format, STGMEDIUM* medium) override {
-        return Cancelled() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : data_->GetData(format, medium);
+        if (Cancelled()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+        const HRESULT result = data_->GetData(format, medium);
+        if (SUCCEEDED(result) && Cancelled()) {
+            ReleaseStgMedium(medium);
+            *medium = {};
+            return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+        }
+        return result;
     }
     HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC* format, STGMEDIUM* medium) override {
         return Cancelled() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : data_->GetDataHere(format, medium);
@@ -326,7 +348,8 @@ HRESULT ResolveShellClipboardItems(IDataObject* data, IShellItemArray** out) {
 
 HRESULT PasteShellDataToFolder(IDataObject* data, IShellItem* destination, DWORD preferred_effect,
                                const std::atomic_bool* cancelled, HWND owner,
-                               std::vector<std::wstring>* completed_names = nullptr) {
+                               std::vector<std::wstring>* completed_names = nullptr,
+                               const std::function<bool()>& begin_transfer = {}) {
     if (cancelled && cancelled->load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     Microsoft::WRL::ComPtr<IDataObject> synchronous;
     synchronous.Attach(new SynchronousShellData(data, cancelled));
@@ -337,7 +360,6 @@ HRESULT PasteShellDataToFolder(IDataObject* data, IShellItem* destination, DWORD
         Microsoft::WRL::ComPtr<IFileOperation> operation;
         HRESULT hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_INPROC_SERVER,
             IID_PPV_ARGS(&operation));
-        if (SUCCEEDED(hr) && owner) hr = operation->SetOwnerWindow(owner);
         DWORD flags = FOF_NOCONFIRMMKDIR;
         DWORD count = 0;
         bool same_folder = SUCCEEDED(hr) && SUCCEEDED(items->GetCount(&count)) && count != 0;
@@ -348,6 +370,8 @@ HRESULT PasteShellDataToFolder(IDataObject* data, IShellItem* destination, DWORD
                 SUCCEEDED(parent->Compare(destination, SICHINT_CANONICAL, &order)) && order == 0;
         }
         if (same_folder && !PreferredEffectIsCut(preferred_effect)) flags |= FOF_RENAMEONCOLLISION;
+        if (SUCCEEDED(hr) && begin_transfer && !begin_transfer()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+        if (SUCCEEDED(hr) && owner) hr = operation->SetOwnerWindow(owner);
         if (SUCCEEDED(hr)) hr = operation->SetOperationFlags(flags);
         if (SUCCEEDED(hr)) hr = PreferredEffectIsCut(preferred_effect)
             ? operation->MoveItems(items.Get(), destination)
@@ -357,18 +381,19 @@ HRESULT PasteShellDataToFolder(IDataObject* data, IShellItem* destination, DWORD
         return SUCCEEDED(hr) ? PerformShellOperation(operation.Get(), destination, completed_names, cancelled) : hr;
     }
     if (resolved != DV_E_FORMATETC) return resolved;
-    IDropTarget* drop = nullptr;
+    Microsoft::WRL::ComPtr<IDropTarget> drop;
     const HRESULT bound = destination->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(&drop));
     if (FAILED(bound)) return bound;
 
     HRESULT result = E_NOINTERFACE;
     if (drop) {
+        if (begin_transfer && !begin_transfer()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
         const DWORD wanted = PreferredEffectIsCut(preferred_effect) ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
         DWORD effect = wanted;
         const DWORD keys = MK_LBUTTON | (wanted == DROPEFFECT_MOVE ? MK_SHIFT : MK_CONTROL);
         POINTL point{0, 0};
         if (SUCCEEDED(drop->DragEnter(data, keys, point, &effect))) {
-            if (effect & wanted) {
+            if ((effect & wanted) && (!cancelled || !cancelled->load())) {
                 effect = wanted;
                 result = drop->Drop(data, keys, point, &effect);
                 if (SUCCEEDED(result) && effect != wanted) result = E_FAIL;
@@ -376,7 +401,6 @@ HRESULT PasteShellDataToFolder(IDataObject* data, IShellItem* destination, DWORD
                 drop->DragLeave();
             }
         }
-        drop->Release();
     }
     return cancelled && cancelled->load() ? HRESULT_FROM_WIN32(ERROR_CANCELLED) : result;
 }
@@ -411,15 +435,37 @@ HRESULT PasteShellData(IDataObject* data, const std::wstring& dir, DWORD preferr
     return PasteShellDataToFolder(data, destination.Get(), preferred_effect, cancelled, nullptr);
 }
 
-bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
+namespace {
+HRESULT PasteClipboard(const std::wstring& dir, uint32_t expected_sequence,
+                        const std::atomic_bool* cancelled, HWND owner,
+                        const std::function<bool()>& begin_transfer) {
     const HRESULT ole = OleInitialize(nullptr);
-    if (FAILED(ole)) return false;
+    if (FAILED(ole)) return ole;
     struct OleDone { ~OleDone() { OleUninitialize(); } } ole_done;
 
-    if (GetClipboardSequenceNumber() != expected_sequence) return false;
+    if (GetClipboardSequenceNumber() != expected_sequence) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     Microsoft::WRL::ComPtr<IDataObject> data;
-    if (FAILED(OleGetClipboard(&data)) || !data || GetClipboardSequenceNumber() != expected_sequence) return false;
-    return SUCCEEDED(PasteShellData(data.Get(), dir, ShellClipboardEffect(data.Get())));
+    const HRESULT captured = OleGetClipboard(&data);
+    if (FAILED(captured)) return captured;
+    if (!data) return DV_E_FORMATETC;
+    if (GetClipboardSequenceNumber() != expected_sequence || (cancelled && cancelled->load()))
+        return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    const auto effect = ShellClipboardEffect(data.Get());
+    Microsoft::WRL::ComPtr<IShellItem> folder;
+    const HRESULT located = shell_id::CreateItem(path::StripExtendedPathPrefix(dir), IID_PPV_ARGS(&folder));
+    if (FAILED(located)) return located;
+    return PasteShellDataToFolder(data.Get(), folder.Get(), effect, cancelled, owner, nullptr, begin_transfer);
+}
+} // namespace
+
+bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence) {
+    return SUCCEEDED(PasteClipboard(dir, expected_sequence, nullptr, nullptr, {}));
+}
+
+HRESULT PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence,
+                            const std::atomic_bool& cancelled, HWND owner,
+                            const std::function<bool()>& begin_transfer) {
+    return PasteClipboard(dir, expected_sequence, &cancelled, owner, begin_transfer);
 }
 
 HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner, std::vector<std::wstring>& completed_names) {
@@ -444,7 +490,7 @@ bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t 
 }
 #endif
 
-bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& expected_paths) {
+bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& expected_paths, HWND owner) {
     if (sequence == 0 || expected_paths.empty() || GetClipboardSequenceNumber() != sequence)
         return false;
     ClipboardData current;
@@ -453,7 +499,7 @@ bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& ex
     for (size_t i = 0; i < expected_paths.size(); ++i) {
         if (_wcsicmp(current.paths[i].c_str(), expected_paths[i].c_str()) != 0) return false;
     }
-    if (!OpenClipboardWithRetry(ClipboardOwner())) return false;
+    if (!OpenClipboardWithRetry(owner ? owner : ClipboardOwner())) return false;
     if (GetClipboardSequenceNumber() != sequence || !EmptyClipboard()) {
         CloseClipboard();
         return false;

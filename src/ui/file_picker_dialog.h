@@ -55,6 +55,7 @@ struct FilePickerSpec {
     bool allow_multiselect = false;
     bool show_hidden = false;
     bool software_device = false;
+    bool verify_copies = false;
 
     // Called on a worker when opening the picker.
     PickerPlacesLoader load_places;

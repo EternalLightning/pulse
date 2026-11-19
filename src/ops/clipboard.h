@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,8 @@ bool WriteClipboardText(const std::wstring& text);
 
 // Reads an Explorer copy/cut (CF_HDROP). Returns false if no files present.
 bool ReadClipboard(ClipboardData& out);
+// Captures the selected clipboard under its lock. S_FALSE means there are no HDROP paths.
+HRESULT ReadClipboardForPaste(uint32_t expected_sequence, ClipboardData& out);
 
 // Shell virtual files (for example files copied from RDP, archives or Outlook)
 // have no filesystem paths. Shell items use IFileOperation through completion;
@@ -47,6 +50,9 @@ inline bool ClipboardHasShellFiles() {
 }
 
 bool PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence);
+HRESULT PasteShellClipboard(const std::wstring& dir, uint32_t expected_sequence,
+                            const std::atomic_bool& cancelled, HWND owner,
+                            const std::function<bool()>& begin_transfer);
 // The broker STA is already OLE-initialized and has resolved the device PIDL.
 HRESULT PasteShellClipboardToFolder(IShellItem* folder, HWND owner, std::vector<std::wstring>& completed_names);
 HRESULT PerformShellOperation(IFileOperation* operation, IShellItem* destination = nullptr,
@@ -66,6 +72,6 @@ bool PasteShellDataForTest(IDataObject* data, const std::wstring& dir, uint32_t 
 
 // Clears a completed cut only if the clipboard still contains the exact cut
 // captured by ReadClipboard. This never clears a newer clipboard value.
-bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& expected_paths);
+bool CompleteCutClipboard(uint32_t sequence, const std::vector<std::wstring>& expected_paths, HWND owner = nullptr);
 
 } // namespace pulse::ops
