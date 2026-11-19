@@ -32,7 +32,11 @@ jobs:
         run: |
           ./scripts/build_release_ci.ps1
           ./scripts/package_portable.ps1 -BuildDir build-ci
-          ./scripts/verify_release_artifacts.ps1 -BuildDir build-ci
+          $version = (Get-Content version.txt -Raw).Trim()
+          ./scripts/verify_release_artifacts.ps1 -BuildDir build-ci `
+            -ZipPath "dist/Pulse-$version-portable-win-x64.zip" `
+            -InstallerPath "dist/PulseSetup-$version.exe" `
+            -OutputJson "build-ci/release-artifacts.json"
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -47,6 +51,7 @@ jobs:
           path: |
             bench_data/selftest_1b2_last.log
             build-ci/*.log
+            build-ci/release-artifacts.json
           if-no-files-found: ignore
 
   publish:
