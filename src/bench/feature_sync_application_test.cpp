@@ -11,6 +11,7 @@
 #include "../ui/ui_renderer_internal.h"
 #include "../ui/cloud_status.h"
 #include "snapshot_output.h"
+#include <cstdio>
 #include <filesystem>
 #include <iostream>
 
@@ -20,6 +21,104 @@
 #include "cloud_columns_cases.h"
 #include "cloud_sidebar_cases.h"
 #include "native_material_layer_cases.h"
+
+namespace {
+int CheckFileDrag(pulse::AppState& s) {
+    using namespace pulse;
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    int failures = 0;
+    const auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+        failures += !ok;
+    };
+    auto& tab = *ActiveTab(s);
+    tab.current_path = fs::NormalizePath(LR"(C:\PulseDragFixture)");
+    tab.loading = false;
+    tab.view_mode = ui::ViewMode::Details;
+    auto rows = std::make_shared<std::vector<fs::DirEntry>>(2);
+    auto& folder = rows->front();
+    folder.name = L"Folder";
+    folder.is_dir = true;
+    folder.attrs = FILE_ATTRIBUTE_DIRECTORY;
+    rows->back().name = L"ordinary file name.txt";
+    tab.SetSnapshot(rows);
+    auto vm = BuildVm(s, false);
+    const auto window = D2D1::RectF(0, 0, static_cast<float>(s.compositor.Width()),
+        static_cast<float>(s.compositor.Height()));
+    const auto pane = s.renderer.ContentRect(window.right, window.bottom);
+    POINT folder_point{}, file_point{}, blank_point{};
+    const auto x = static_cast<LONG>(pane.left + 40 * s.scale);
+    for (LONG y = static_cast<LONG>(pane.top + s.renderer.PaneHeaderHeight()); y < pane.bottom; ++y) {
+        const auto hit = s.renderer.HitTest(vm, window, static_cast<float>(x), static_cast<float>(y));
+        if (hit.region == ui::HitTestResult::Row && hit.index == 0) folder_point = {x, y};
+        if (hit.region == ui::HitTestResult::Row && hit.index == 1) file_point = {x, y};
+        if (hit.region == ui::HitTestResult::Pane && hit.pane_index >= 0) blank_point = {x, y};
+    }
+    check(folder_point.y && file_point.y && blank_point.y, "hit-test finds both items and the pane background");
+    if (folder_point.y && file_point.y && blank_point.y) {
+        const std::wstring source_folder = LR"(c:\pulsedragfixture\folder)";
+        const std::wstring source_file = LR"(C:\PulseDragFixture\ordinary file name.txt)";
+        const DWORD allowed = DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK;
+        const auto ignored = [&](const std::vector<std::wstring>& sources, POINT point, DWORD keys) {
+            return ResolveDropTarget(s, sources, point, keys, allowed) == DROPEFFECT_NONE &&
+                s.dropBadge.empty() && s.dropRow == -1 && s.springRow == -1 &&
+                DropExecute(s, sources, point, keys, allowed, 0) == DROPEFFECT_NONE;
+        };
+        s.springRow = 0;
+        s.springStart = GetTickCount64() - 1000;
+        check(ignored({source_file, source_folder}, folder_point, 0) && !s.springEntered,
+            "folder within the dragged selection rejects itself before spring navigation");
+        check(ignored({source_file}, file_point, 0), "file rejects a drop onto its own row");
+        check(ignored({source_folder, source_file}, blank_point, MK_CONTROL),
+            "the source directory's blank space rejects an explicit copy");
+        check(ResolveDropTarget(s, {source_file}, folder_point, 0, allowed) == DROPEFFECT_MOVE &&
+            s.dropRow == 0 && !s.dropBadge.empty() && s.springRow == 0,
+            "another folder still accepts the drag and displays its action");
+        check(ignored({source_file}, blank_point, 0),
+            "moving back to a redundant target clears the previous folder feedback");
+        check(ResolveDropTarget(s, {LR"(C:\PulseOtherFixture\new.txt)"}, blank_point, MK_CONTROL, allowed)
+            == DROPEFFECT_COPY, "blank space accepts a file from a different folder");
+        ClearDropFeedback(s);
+    }
+
+    const auto theme = ui::MakeTheme(false, s.accentColor);
+    bool drew_icon = false, drew_name = false;
+    const auto bitmap_info = [&](ui::ViewMode mode) {
+        vm.pane.view_mode = mode;
+        const HBITMAP preview = s.renderer.CreateDragPreview(vm.pane, 1, theme);
+        BITMAP bitmap{};
+        if (preview) {
+            GetObjectW(preview, sizeof(bitmap), &bitmap);
+            if (mode == ui::ViewMode::Details && bitmap.bmBits && bitmap.bmWidth > 35 && bitmap.bmHeight == 28) {
+                const auto* pixels = static_cast<const uint32_t*>(bitmap.bmBits);
+                const auto background = pixels[14 * bitmap.bmWidth + 25];
+                for (LONG y = 6; y < 22; ++y) {
+                    const auto* line = pixels + y * bitmap.bmWidth;
+                    drew_icon |= std::any_of(line + 6, line + 22, [&](auto pixel) { return pixel != background; });
+                    drew_name |= std::any_of(line + 28, line + bitmap.bmWidth - 6,
+                        [&](auto pixel) { return pixel != background; });
+                }
+            }
+            DeleteObject(preview);
+        }
+        return bitmap;
+    };
+    const auto details = bitmap_info(ui::ViewMode::Details);
+    const auto list = bitmap_info(ui::ViewMode::List);
+    const auto icon = bitmap_info(ui::ViewMode::LargeIcons);
+    check(details.bmWidth > 3 * details.bmHeight && details.bmHeight > 0 &&
+        list.bmWidth == details.bmWidth && list.bmHeight == details.bmHeight,
+        "Details and List produce a compact icon-and-name bitmap");
+    check(drew_icon, "Details preview paints the icon with a cold Shell icon cache");
+    check(drew_name, "Details preview paints the filename");
+    check(icon.bmWidth == icon.bmHeight && icon.bmHeight > details.bmHeight,
+        "Large Icons produces a larger square bitmap without a filename column");
+    vm.pane.filter_map = std::make_shared<const std::vector<int>>(std::vector<int>{1});
+    check(bitmap_info(ui::ViewMode::Details).bmWidth == details.bmWidth && details.bmWidth > 0,
+        "filtered results use the selected item's source index for the preview");
+    return failures ? 1 : 0;
+}
+}
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::string_view(argv[1]) == "--native-material-layers-only")
@@ -41,12 +140,15 @@ int main(int argc, char** argv) {
         catch(const std::exception& error) { std::cerr<<"[FAIL] settings fixture: "<<error.what()<<std::endl;return 2; }
     }
     using namespace pulse;
+    const bool file_drag_only = argc == 2 && std::string_view(argv[1]) == "--file-drag-only";
     if (FAILED(OleInitialize(nullptr))) return 2;
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     const auto output = std::filesystem::absolute(L"docs/validation/upstream-features-20261028/screenshots");
-    std::filesystem::create_directories(output);
-    SetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", output.c_str());
-    SetEnvironmentVariableW(L"PULSE_TEST_CLOUD_SYNC", L"仅在线文档.txt=0;本地可用文档.txt=0;始终保留的文档.txt=0");
+    if (!file_drag_only) {
+        std::filesystem::create_directories(output);
+        SetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", output.c_str());
+        SetEnvironmentVariableW(L"PULSE_TEST_CLOUD_SYNC", L"仅在线文档.txt=0;本地可用文档.txt=0;始终保留的文档.txt=0");
+    }
     int failures = 0;
     const auto check = [&](bool ok, const char* name) {
         std::cout << (ok ? "[PASS] " : "[FAIL] ") << name << std::endl;
@@ -65,6 +167,18 @@ int main(int argc, char** argv) {
     state.renderer.SetCompositor(&state.compositor);
     state.window_tabs.EnsureDefault();
     BindCurrentLayout(state);
+    if (file_drag_only) {
+        SetWindowLongPtrW(state.hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&state));
+        state.compositor.RecreateTextFormats(state.scale);
+        const int result = CheckFileDrag(state);
+        state.renderer.SetCompositor(nullptr);
+        state.compositor.Shutdown();
+        DestroyWindow(state.hwnd);
+        state.hwnd = nullptr;
+        owned.reset();
+        OleUninitialize();
+        return result;
+    }
     auto* tab = ActiveTab(state);
     tab->current_path = L"C:\\PulseFixtureCloud";
     tab->view_mode = ui::ViewMode::Details;

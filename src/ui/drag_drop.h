@@ -104,6 +104,7 @@ private:
 
 class ListDropSource final : public IDropSource {
 public:
+    ListDropSource(HWND owner = nullptr, HBITMAP preview = nullptr, BYTE opacity = 255);
     // When set and returning true, Esc is consumed by the drop target
     // (spring-loaded "go back") instead of cancelling the drag.
     void SetEscHook(std::function<bool()> hook) { esc_hook_ = std::move(hook); }
@@ -112,16 +113,28 @@ public:
     IFACEMETHODIMP_(ULONG) AddRef() override { return ++ref_; }
     IFACEMETHODIMP_(ULONG) Release() override;
     IFACEMETHODIMP QueryContinueDrag(BOOL escape_pressed, DWORD key_state) override;
-    IFACEMETHODIMP GiveFeedback(DWORD) override { return DRAGDROP_S_USEDEFAULTCURSORS; }
+    IFACEMETHODIMP GiveFeedback(DWORD) override;
 
 private:
+    ~ListDropSource();
+    void ClosePreview();
+    void MovePreview(POINT cursor);
+    POINT PreviewPosition(POINT cursor) const;
+    static LRESULT CALLBACK TrackPreviewMouse(int code, WPARAM message, LPARAM data);
+    static thread_local ListDropSource* tracking_preview_;
+
     LONG ref_ = 1;
     std::function<bool()> esc_hook_;
+    HWND preview_ = nullptr;
+    SIZE preview_size_{};
+    POINT preview_cursor_{};
+    LONG preview_gap_ = 0;
+    HHOOK preview_hook_ = nullptr;
 };
 
 // Runs the modal DoDragDrop loop. Returns the performed DROPEFFECT_*.
 DWORD DoFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effects,
-                     std::function<bool()> esc_consumed);
+                     std::function<bool()> esc_consumed, HWND owner, HBITMAP preview, BYTE opacity);
 
 #ifdef PULSE_DRAG_DROP_TESTING
 namespace testing {

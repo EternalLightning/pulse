@@ -24,7 +24,8 @@ void InvalidateColumnStripPath(AppState& s, const std::wstring& path,
 // Called for every worker result before pane handling.
 void NoteColumnStripResult(AppState& s, const app::WorkResult& res);
 // Empty for invalid/stale row hits; blank and file rows use the column's folder.
-std::wstring ColumnStripDropDirectory(app::Tab& tab, int column_id, int row = -1);
+std::wstring ColumnStripDropDirectory(app::Tab& tab, int column_id, int row = -1,
+                                     std::wstring* row_path = nullptr);
 
 // Mouse-down on column-view regions (toggle button, rows, dividers).
 // Returns true when consumed.

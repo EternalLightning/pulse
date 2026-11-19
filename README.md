@@ -142,7 +142,7 @@ pwsh -NoProfile -File .\scripts\verify_release_artifacts.ps1 `
 
 ## CI 与正式发布
 
-GitHub Actions 发布时，先向 Release 草稿上传便携 ZIP，再推送与 `version.txt` 匹配的标签，例如 `v1.5.5.0`。工作流运行回归测试、生成安装包，然后将安装包与草稿里的 ZIP 一起发布。签名通过独立的 `scripts/package_release.ps1` 执行，默认使用 `build-release`。[发布工作流](.github/workflows/release.yml) · [发布与签名步骤](scripts/RELEASE.md)
+推送与 `version.txt` 匹配的标签即可触发 GitHub Actions 发布，例如 `v1.5.5.1`。工作流运行回归测试，从同一次生产构建生成安装包和便携 ZIP，校验后发布。签名通过独立的 `scripts/package_release.ps1` 执行，默认使用 `build-release`。[发布工作流](.github/workflows/release.yml) · [发布与签名步骤](scripts/RELEASE.md)
 
 源码构建和发行包使用固定的 LumaText SDK。运行库与 SDK 版本的维护方法见[运行库与 SDK 文档](docs/static-runtime-packaging.md)。
 

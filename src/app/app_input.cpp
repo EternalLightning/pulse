@@ -116,6 +116,31 @@ DWORD FileDropEffect(const AppState& s, const std::vector<std::wstring>& sources
         })) effect = DROPEFFECT_COPY;
     return effect;
 }
+
+bool IsRedundantFileDrop(const std::vector<std::wstring>& sources, const std::wstring& destination,
+                         const std::wstring& row_path) {
+    if (sources.empty()) return false;
+    const auto without_trailing_slash = [](std::wstring_view value) {
+        while (value.ends_with(L'\\')) value.remove_suffix(1);
+        return value;
+    };
+    const auto normalized_destination = fs::NormalizePath(destination);
+    const auto target = without_trailing_slash(normalized_destination);
+    const auto normalized_row = fs::NormalizePath(row_path);
+    const auto row = without_trailing_slash(normalized_row);
+    bool all_in_target = true;
+    for (const auto& source : sources) {
+        const auto normalized_source = fs::NormalizePath(source);
+        const auto item = without_trailing_slash(normalized_source);
+        if (path::EqualInsensitive(item, target) || (!row.empty() && path::EqualInsensitive(item, row)))
+            return true;
+        if (all_in_target) {
+            const auto parent = fs::ParentPath(std::wstring(item));
+            all_in_target = path::EqualInsensitive(without_trailing_slash(parent), target);
+        }
+    }
+    return all_in_target;
+}
 }
 bool HandleBrowserNavigation(AppState& s, LPARAM command) {
     switch (GET_APPCOMMAND_LPARAM(command)) {
@@ -324,11 +349,13 @@ static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>&
     if (!tab) return DROPEFFECT_NONE;
 
     std::wstring destName;
+    std::wstring row_path;
     if (hit.region == ui::HitTestResult::ColumnStripRow ||
         hit.region == ui::HitTestResult::ColumnStripBlank) {
         if (hit.region == ui::HitTestResult::ColumnStripBlank || hit.index >= 0)
             s.dropDestDir = ColumnStripDropDirectory(*tab, hit.sub_index,
-                hit.region == ui::HitTestResult::ColumnStripRow ? hit.index : -1);
+                hit.region == ui::HitTestResult::ColumnStripRow ? hit.index : -1,
+                virtual_files ? nullptr : &row_path);
         s.dropPaneIndex = hit.pane_index;
         destName = BaseName(s.dropDestDir);
         s.springRow = -1;
@@ -345,18 +372,6 @@ static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>&
         s.dropRow = hit.index;
         s.dropPaneIndex = hit.pane_index;
         destName = tab->EntryAt(hit.index).name;
-
-        // Spring-loaded: hover 800ms on a folder row enters it (ui.md §7.8).
-        if (s.springRow != hit.index) {
-            s.springRow = hit.index;
-            s.springStart = GetTickCount64();
-        } else if (!s.springEntered && GetTickCount64() - s.springStart >= 800) {
-            s.springEntered = true;
-            s.springRow = -1;
-            if (hitPane && hitPane != s.pane) FocusPane(s, hitPane);
-            NavigateTo(s, full, ui::SurfaceMotion::Forward);
-            return DROPEFFECT_NONE;
-        }
     } else if (hit.region == ui::HitTestResult::BreadcrumbSegment && !hit.path.empty()) {
         s.dropDestDir = hit.path;
         s.dropBreadcrumb = hit.index;
@@ -419,6 +434,7 @@ static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>&
                hit.region == ui::HitTestResult::ColumnHeader ||
                hit.region == ui::HitTestResult::FilterBox ||
                hit.region == ui::HitTestResult::Scrollbar) {
+        if (!virtual_files && hit.region == ui::HitTestResult::Row) row_path = EntryFullPath(*tab, hit.index);
         s.dropDestDir = tab->current_path;
         s.dropPaneIndex = hit.pane_index;
         destName = BaseName(tab->current_path);
@@ -440,15 +456,36 @@ static DWORD ResolveDropTargetImpl(AppState& s, const std::vector<std::wstring>&
             return DROPEFFECT_COPY; // staging never moves the source
         }
     }
-    if (s.dropDestDir.empty()) {
+    if (s.dropDestDir.empty() || (!virtual_files && IsRedundantFileDrop(sources, s.dropDestDir, row_path))) {
+        s.dropRow = -1;
+        s.dropSidebar = -1;
+        s.dropBreadcrumb = -1;
+        s.springRow = -1;
+        s.dropDestDir.clear();
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return DROPEFFECT_NONE;
     }
 
     DWORD effect = virtual_files ? (allowed & DROPEFFECT_COPY)
         : FileDropEffect(s, sources, s.dropDestDir, key_state, allowed, preferred);
-    if (effect == DROPEFFECT_NONE) s.dropBadge.clear();
-    else s.dropBadge = (effect == DROPEFFECT_LINK ? l10n::Get(l10n::StringId::DropLink).c_str() :
+    if (effect == DROPEFFECT_NONE) {
+        s.dropRow = -1;
+        s.springRow = -1;
+    } else if (s.dropRow >= 0) {
+        // Spring-load only when the folder can accept the drag.
+        if (s.springRow != s.dropRow) {
+            s.springRow = s.dropRow;
+            s.springStart = GetTickCount64();
+        } else if (!s.springEntered && GetTickCount64() - s.springStart >= 800) {
+            const auto folder = s.dropDestDir;
+            s.springEntered = true;
+            s.springRow = -1;
+            if (hitPane && hitPane != s.pane) FocusPane(s, hitPane);
+            NavigateTo(s, folder, ui::SurfaceMotion::Forward);
+            return DROPEFFECT_NONE;
+        }
+    }
+    if (effect != DROPEFFECT_NONE) s.dropBadge = (effect == DROPEFFECT_LINK ? l10n::Get(l10n::StringId::DropLink).c_str() :
         effect == DROPEFFECT_MOVE ? l10n::Get(l10n::StringId::DropMove).c_str() :
         l10n::Get(l10n::StringId::DropCopy).c_str()) + destName;
     s.dropBadgeX = (float)pt.x;
@@ -574,9 +611,15 @@ void StartDragOut(AppState& s) {
 
     s.clickCollapseIndex = -1;
     CancelScrollAnimation(s); // DoDragDrop's modal loop coexists with on-demand render
+    const bool high_contrast = ui::IsHighContrast();
+    const auto theme = high_contrast ? ui::MakeHighContrastTheme() : ui::MakeTheme(s.darkMode, s.accentColor);
+    ui::PaneViewModel pane;
+    app::FillPaneViewModel(pane, *s.pane, &s.places);
+    const HBITMAP preview = s.renderer.CreateDragPreview(pane, tab->selected_index, theme);
     internal_file_drag = true;
     DWORD effect = ui::DoFileDragDrop(paths, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK,
-        [&s] { return s.springEntered; }); // Esc = 退回 when spring-entered
+        [&s] { return s.springEntered; }, s.hwnd, preview, high_contrast ? 255 : 220);
+    if (preview) DeleteObject(preview);
     internal_file_drag = false;
     s.springEntered = false;
     ClearDropFeedback(s);

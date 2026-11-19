@@ -584,6 +584,85 @@ HRESULT FileDataObject::EnumFormatEtc(DWORD dir, IEnumFORMATETC** out) {
 // ---------------------------------------------------------------------------
 // ListDropSource
 // ---------------------------------------------------------------------------
+thread_local ListDropSource* ListDropSource::tracking_preview_ = nullptr;
+
+ListDropSource::ListDropSource(HWND owner, HBITMAP preview, BYTE opacity) {
+    BITMAP bitmap{};
+    POINT cursor{};
+    if (!owner || !preview || !GetObjectW(preview, sizeof(bitmap), &bitmap) ||
+        !GetCursorPos(&cursor)) return;
+    preview_size_ = {bitmap.bmWidth, bitmap.bmHeight};
+    preview_gap_ = MulDiv(12, GetDpiForWindow(owner), 96);
+    preview_cursor_ = cursor;
+    preview_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE |
+        WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"STATIC", nullptr, WS_POPUP,
+        0, 0, 0, 0, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!preview_) return;
+
+    HDC memory = CreateCompatibleDC(nullptr);
+    const auto previous = memory ? SelectObject(memory, preview) : nullptr;
+    POINT origin{};
+    POINT position = PreviewPosition(cursor);
+    BLENDFUNCTION blend{AC_SRC_OVER, 0, opacity, AC_SRC_ALPHA};
+    const BOOL presented = previous && previous != HGDI_ERROR && UpdateLayeredWindow(preview_, nullptr, &position,
+        &preview_size_, memory, &origin, 0, &blend, ULW_ALPHA);
+    if (previous && previous != HGDI_ERROR) SelectObject(memory, previous);
+    if (memory) DeleteDC(memory);
+    if (!presented) {
+        ClosePreview();
+        return;
+    }
+    ShowWindow(preview_, SW_SHOWNOACTIVATE);
+    // OLE may stop issuing feedback when the pointer is outside a drop target.
+    if (!tracking_preview_) {
+        preview_hook_ = SetWindowsHookExW(WH_MOUSE, TrackPreviewMouse, nullptr, GetCurrentThreadId());
+        if (preview_hook_) tracking_preview_ = this;
+    }
+}
+
+ListDropSource::~ListDropSource() {
+    ClosePreview();
+}
+
+void ListDropSource::ClosePreview() {
+    if (preview_hook_) {
+        UnhookWindowsHookEx(preview_hook_);
+        preview_hook_ = nullptr;
+        tracking_preview_ = nullptr;
+    }
+    if (preview_) {
+        DestroyWindow(preview_);
+        preview_ = nullptr;
+    }
+}
+
+LRESULT CALLBACK ListDropSource::TrackPreviewMouse(int code, WPARAM message, LPARAM data) {
+    if (code == HC_ACTION && tracking_preview_ && (message == WM_MOUSEMOVE || message == WM_NCMOUSEMOVE))
+        tracking_preview_->MovePreview(reinterpret_cast<const MOUSEHOOKSTRUCT*>(data)->pt);
+    return CallNextHookEx(nullptr, code, message, data);
+}
+
+void ListDropSource::MovePreview(POINT cursor) {
+    if (cursor.x == preview_cursor_.x && cursor.y == preview_cursor_.y) return;
+    preview_cursor_ = cursor;
+    const auto position = PreviewPosition(cursor);
+    SetWindowPos(preview_, nullptr, position.x, position.y, 0, 0,
+                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+POINT ListDropSource::PreviewPosition(POINT cursor) const {
+    POINT position{cursor.x + preview_gap_, cursor.y - preview_gap_ - preview_size_.cy};
+    MONITORINFO info{sizeof(info)};
+    if (GetMonitorInfoW(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &info)) {
+        const auto& bounds = info.rcMonitor;
+        if (position.y < bounds.top || position.x + preview_size_.cx > bounds.right)
+            position.x = cursor.x - preview_gap_ - preview_size_.cx;
+        position.x = std::max(bounds.left, position.x);
+        position.y = std::max(bounds.top, position.y);
+    }
+    return position;
+}
+
 HRESULT ListDropSource::QueryInterface(REFIID riid, void** out) {
     if (!out) return E_POINTER;
     if (riid == IID_IUnknown || riid == IID_IDropSource) {
@@ -602,19 +681,24 @@ ULONG ListDropSource::Release() {
 }
 
 HRESULT ListDropSource::QueryContinueDrag(BOOL escape_pressed, DWORD key_state) {
-    if (escape_pressed) {
-        if (esc_hook_ && esc_hook_()) return S_OK; // target consumed Esc (spring-back)
-        return DRAGDROP_S_CANCEL;
-    }
-    if (!(key_state & (MK_LBUTTON | MK_RBUTTON))) return DRAGDROP_S_DROP;
-    return S_OK;
+    if (escape_pressed && esc_hook_ && esc_hook_()) return S_OK; // spring-back
+    if (!escape_pressed && (key_state & (MK_LBUTTON | MK_RBUTTON))) return S_OK;
+    ClosePreview();
+    return escape_pressed ? DRAGDROP_S_CANCEL : DRAGDROP_S_DROP;
+}
+
+HRESULT ListDropSource::GiveFeedback(DWORD) {
+    POINT cursor{};
+    if (preview_ && !preview_hook_ && GetCursorPos(&cursor)) MovePreview(cursor);
+    return DRAGDROP_S_USEDEFAULTCURSORS;
 }
 
 namespace {
 
 DWORD RunFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effects,
                       std::function<bool()> esc_consumed,
-                      HRESULT (WINAPI *loop)(IDataObject*, IDropSource*, DWORD, DWORD*)) {
+                      HRESULT (WINAPI *loop)(IDataObject*, IDropSource*, DWORD, DWORD*),
+                      HWND owner = nullptr, HBITMAP preview = nullptr, BYTE opacity = 255) {
     if (paths.empty()) return DROPEFFECT_NONE;
 
     auto* data = FileDataObject::Create(paths);
@@ -631,7 +715,7 @@ DWORD RunFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effe
         } else ReleaseStgMedium(&medium);
     }
 
-    auto* source = new ListDropSource();
+    auto* source = new ListDropSource(owner, preview, opacity);
     source->SetEscHook(std::move(esc_consumed));
     DWORD effect = DROPEFFECT_NONE;
     const HRESULT result = loop(data, source, allowed_effects, &effect);
@@ -645,8 +729,9 @@ DWORD RunFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effe
 } // namespace
 
 DWORD DoFileDragDrop(const std::vector<std::wstring>& paths, DWORD allowed_effects,
-                     std::function<bool()> esc_consumed) {
-    return RunFileDragDrop(paths, allowed_effects, std::move(esc_consumed), ::DoDragDrop);
+                     std::function<bool()> esc_consumed, HWND owner, HBITMAP preview, BYTE opacity) {
+    return RunFileDragDrop(paths, allowed_effects, std::move(esc_consumed), ::DoDragDrop,
+                           owner, preview, opacity);
 }
 
 #ifdef PULSE_DRAG_DROP_TESTING

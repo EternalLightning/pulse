@@ -114,8 +114,11 @@ inline bool RunColumnNavigationChecks(pulse::AppState& s, const std::filesystem:
             const auto hit = s.renderer.HitTest(vm, window, static_cast<float>(point.x), static_cast<float>(y));
             if (hit.region != ui::HitTestResult::ColumnStripBlank || hit.sub_index != column_id) continue;
             blank_found = true;
-            ResolveDropTarget(s, sources, POINT{point.x, y}, MK_CONTROL, DROPEFFECT_COPY, 0);
-            check(s.dropDestDir == normalized_root, "ancestor blank drop targets that column's containing directory");
+            const POINT blank{point.x, y};
+            check(ResolveDropTarget(s, sources, blank, MK_CONTROL, DROPEFFECT_COPY, 0) == DROPEFFECT_NONE,
+                "ancestor blank space rejects a source already in that column's directory");
+            check(ResolveDropTarget(s, {deep.wstring()}, blank, MK_CONTROL, DROPEFFECT_COPY, 0) == DROPEFFECT_COPY &&
+                s.dropDestDir == normalized_root, "ancestor blank drop from another directory still targets that column");
             break;
         }
         check(blank_found, "production hit test finds ancestor blank space");

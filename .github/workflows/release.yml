@@ -29,11 +29,16 @@ jobs:
           }
       - name: Build, test and package
         shell: pwsh
-        run: ./scripts/build_release_ci.ps1
+        run: |
+          ./scripts/build_release_ci.ps1
+          ./scripts/package_portable.ps1 -BuildDir build-ci
+          ./scripts/verify_release_artifacts.ps1 -BuildDir build-ci
       - uses: actions/upload-artifact@v4
         with:
-          name: installer-windows
-          path: dist/PulseSetup-*.exe
+          name: release-windows
+          path: |
+            dist/PulseSetup-*.exe
+            dist/Pulse-*-portable-win-x64.zip
           if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
@@ -56,9 +61,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          pattern: installer-*
+          name: release-windows
           path: dist
-          merge-multiple: true
       - name: Publish installer and portable archive
         shell: pwsh
         env:

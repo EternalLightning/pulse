@@ -33,10 +33,21 @@ namespace {
 using l10n::Get;
 using l10n::StringId;
 constexpr wchar_t kPickerClass[] = L"PulseFilePicker";
+constexpr wchar_t kPickerSizeKey[] = L"Software\\Pulse";
+constexpr wchar_t kOpenPickerSizeValue[] = L"OpenFilePickerSizeDip";
 constexpr UINT_PTR kWatchTimer = 1;
 constexpr UINT_PTR kScrollTimer = 2;
-constexpr float kWidth = 1000.0f, kHeight = 680.0f;
 constexpr float kMinimumWidth = 500.0f, kMinimumHeight = 372.0f;
+
+SIZE PreferredSize(PickerMode mode) {
+    if (mode != PickerMode::Open) return {1000, 680};
+    SIZE size{};
+    DWORD bytes = sizeof(size);
+    if (RegGetValueW(HKEY_CURRENT_USER, kPickerSizeKey, kOpenPickerSizeValue, RRF_RT_REG_BINARY,
+            nullptr, &size, &bytes) == ERROR_SUCCESS && bytes == sizeof(size) &&
+        size.cx > 0 && size.cx <= MAXWORD && size.cy > 0 && size.cy <= MAXWORD) return size;
+    return {1120, 760};
+}
 
 enum Control {
     None, Close, Back, Up, Address, Locations,
@@ -132,7 +143,11 @@ public:
 
     bool Show(HWND source, FilePickerResult& result) {
         source_ = source;
-        scale_ = compat::WindowDpi(source ? source : GetDesktopWindow()) / 96.0f;
+        const HMONITOR target_monitor = MonitorFromWindow(source, MONITOR_DEFAULTTONEAREST);
+        UINT dpi = 0, vertical_dpi = 0;
+        if (FAILED(GetDpiForMonitor(target_monitor, MDT_EFFECTIVE_DPI, &dpi, &vertical_dpi)) || !dpi)
+            dpi = compat::WindowDpi(source ? source : GetDesktopWindow());
+        scale_ = dpi / 96.0f;
         WNDCLASSEXW existing{sizeof(existing)};
         const auto instance = GetModuleHandleW(nullptr);
         if (!GetClassInfoExW(instance, kPickerClass, &existing)) {
@@ -145,13 +160,17 @@ public:
             if (!RegisterClassExW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
         }
         MONITORINFO monitor{sizeof(monitor)};
-        GetMonitorInfoW(MonitorFromWindow(source, MONITOR_DEFAULTTONEAREST), &monitor);
+        const bool has_work_area = GetMonitorInfoW(target_monitor, &monitor) != FALSE;
         const int work_width = static_cast<int>(monitor.rcWork.right - monitor.rcWork.left);
         const int work_height = static_cast<int>(monitor.rcWork.bottom - monitor.rcWork.top);
-        const int width = work_width > 0 ? std::min(Pixels(kWidth), work_width) : Pixels(kWidth);
-        const int height = work_height > 0 ? std::min(Pixels(kHeight), work_height) : Pixels(kHeight);
+        const auto preferred = PreferredSize(spec_.mode);
+        const int preferred_width = Pixels(std::max(kMinimumWidth, static_cast<float>(preferred.cx)));
+        const int preferred_height = Pixels(std::max(kMinimumHeight, static_cast<float>(preferred.cy)));
+        const int width = work_width > 0 ? std::min(preferred_width, work_width) : preferred_width;
+        const int height = work_height > 0 ? std::min(preferred_height, work_height) : preferred_height;
         if (!CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW, kPickerClass, title_.c_str(),
-            WS_POPUP | WS_SYSMENU | WS_THICKFRAME, CW_USEDEFAULT, CW_USEDEFAULT,
+            WS_POPUP | WS_SYSMENU | WS_THICKFRAME, has_work_area ? monitor.rcWork.left : CW_USEDEFAULT,
+            has_work_area ? monitor.rcWork.top : CW_USEDEFAULT,
             width, height, nullptr, nullptr, instance, this)) return false;
         const int measured_width = std::clamp(MinimumTrackWidth(), width, std::max(width, work_width));
         CenterOwnedWindow(window_, source, measured_width, height);
@@ -177,6 +196,14 @@ public:
 private:
     float Px(float dip) const { return ScaleDip(scale_, dip); }
     int Pixels(float dip) const { return static_cast<int>(std::lround(Px(dip))); }
+
+    SIZE SizeInDips() const {
+        RECT bounds{};
+        if (!GetWindowRect(window_, &bounds)) return {};
+        return {std::lround((bounds.right - bounds.left) / static_cast<double>(scale_)),
+            std::lround((bounds.bottom - bounds.top) / static_cast<double>(scale_))};
+    }
+
     const D2D1_RECT_F& Bounds(Control id) const { return controls_[id]; }
     void Invalidate() const { if (window_) InvalidateRect(window_, nullptr, FALSE); }
     size_t Size() const { return entries_.size(); }
@@ -960,6 +987,22 @@ private:
             if (compositor_.Dc()) { compositor_.Resize(LOWORD(lparam), HIWORD(lparam)); Layout(); }
             Invalidate();
             return 0;
+        case WM_ENTERSIZEMOVE:
+            if (spec_.mode == PickerMode::Open) resize_start_ = SizeInDips();
+            return 0;
+        case WM_SIZING:
+            if (spec_.mode == PickerMode::Open) resized_ = true;
+            return TRUE;
+        case WM_EXITSIZEMOVE:
+            if (resized_) {
+                resized_ = false;
+                const auto size = SizeInDips();
+                if (size.cx > 0 && size.cy > 0 && (size.cx != resize_start_.cx || size.cy != resize_start_.cy)) {
+                    RegSetKeyValueW(HKEY_CURRENT_USER, kPickerSizeKey, kOpenPickerSizeValue,
+                        REG_BINARY, &size, sizeof(size));
+                }
+            }
+            return 0;
         case WM_MOVE:
             compositor_.UpdateTextRenderingParams(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST));
             menu_.SetScale(scale_);
@@ -1145,11 +1188,12 @@ private:
     size_t applied_filter_ = 0, filter_index_ = 0;
     uint64_t prefix_time_ = 0;
     float scale_ = 1.0f, row_height_ = 28.0f, offset_ = 0.0f, drag_offset_ = 0.0f;
+    SIZE resize_start_{};
     int focus_ = Files, cursor_ = -1, anchor_ = -1, pressed_row_ = -1, hover_row_ = -1;
     Control pressed_ = None, hover_ = None;
     bool done_ = false, accepted_ = false, backdrop_ = false, loaded_ = false, filtered_ = false, waiting_ = false;
     bool cancelling_ = false, submit_locked_ = false, updating_filename_ = false, filename_from_selection_ = false;
-    bool dragging_ = false, hover_scrollbar_ = false;
+    bool dragging_ = false, hover_scrollbar_ = false, resized_ = false;
 };
 
 } // namespace

@@ -323,7 +323,7 @@ bool ClickRow(AppState& s, app::Tab& tab, const ui::WindowViewModel& vm,
 
 } // namespace
 
-std::wstring ColumnStripDropDirectory(app::Tab& tab, int column_id, int row) {
+std::wstring ColumnStripDropDirectory(app::Tab& tab, int column_id, int row, std::wstring* row_path) {
     if (!Eligible(tab) || !SamePath(tab.column_strip.for_path, tab.current_path)) return {};
     const auto* col = StripColumn(tab, column_id);
     if (!col) return {};
@@ -334,7 +334,10 @@ std::wstring ColumnStripDropDirectory(app::Tab& tab, int column_id, int row) {
     if (source < 0 || static_cast<size_t>(source) >= col->rows_snapshot->size()) return {};
     const auto& entry = (*col->rows_snapshot)[static_cast<size_t>(source)];
     if (entry.change_record_only) return {};
-    if (entry.is_dir) return fs::NormalizePath(Join(col->path, entry.name));
+    std::wstring item_path;
+    if (row_path || entry.is_dir) item_path = fs::NormalizePath(Join(col->path, entry.name));
+    if (row_path) *row_path = item_path;
+    if (entry.is_dir) return item_path;
     if (entry.link_target_is_dir && !entry.link_target.empty()) return fs::NormalizePath(entry.link_target);
     return col->path;
 }

@@ -28,22 +28,21 @@ pwsh -NoProfile -File .\scripts\build_release_ci.ps1 -BuildDir build-ci
 当前限制：
 
 - CI 不调用 `stage_installer_runtime.ps1 -RequireStaticRuntime`；本地安装批处理才包含该扫描。SDK 固定校验不能替代所有交付文件的运行库扫描。
-- CI 只生成安装包，不生成便携 ZIP、`.sha256` 文件、签名或符号归档。
+- 单独运行 `build_release_ci.ps1` 生成安装包。GitHub Actions 接着从同一个构建目录生成便携 ZIP，并校验交付产物。
+- CI 不生成单独的 `.sha256` 文件、签名或符号归档。
 
 本次文档更新没有修改这些脚本，也没有重新运行 CI；流程说明不代表当前版本的测试已经通过。
 
 ## GitHub Actions 与发布
 
-[release.yml](../.github/workflows/release.yml) 由 `v[0-9]*` 标签推送或手动触发，要求运行引用严格为 `refs/tags/v<version.txt>`；手动运行也应选择对应标签。构建作业运行 CI 脚本并上传 `installer-windows`，另保存可用的诊断日志。
+[release.yml](../.github/workflows/release.yml) 由 `v[0-9]*` 标签推送或手动触发，要求运行引用严格为 `refs/tags/v<version.txt>`；手动运行也应选择对应标签。构建作业将安装包和便携 ZIP 一起上传为 `release-windows`，另保存可用的诊断日志。
 
-发布作业下载安装包后调用 `scripts/publish_release.ps1`。该脚本固定操作 `EternalLightning/pulse`，需要已认证且有写权限的 GitHub CLI（工作流使用 `GH_TOKEN`）：
+发布作业下载两个产物后调用 `scripts/publish_release.ps1`。该脚本固定操作 `EternalLightning/pulse`，需要已认证且有写权限的 GitHub CLI（工作流使用 `GH_TOKEN`）：
 
 1. 检查安装包，查找本地便携 ZIP；缺失时从同版本 Release 草稿下载该 ZIP。
 2. 读取 `docs/releases/<version>.md` 生成说明；不存在时使用脚本内的默认说明，写入 `dist/release-notes.md`。
 3. 创建或更新草稿，将安装包和便携 ZIP 上传（同名附件使用 `--clobber`）。
 4. 将草稿公开发布并标记为 latest。若该版本已公开，脚本拒绝继续，需使用新版本。
-
-工作流不生成或传递便携 ZIP，所以在发布作业运行前，必须已经向匹配标签的草稿上传当前版本 ZIP；仅在本地生成 ZIP 不会将其传给发布作业。
 
 本地直接调用 `publish_release.ps1` 会执行上传并公开发布，不是预览命令；它不会重新构建或验证 ZIP 与安装包是否来自同一批文件。发布前应完成相关功能检查、产物比对和说明整理。
 

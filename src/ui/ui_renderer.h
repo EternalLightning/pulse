@@ -1189,6 +1189,8 @@ public:
 
     HitTestResult HitTest(const WindowViewModel& vm, const D2D1_RECT_F& rect,
                           float x, float y) const;
+    // The caller owns the premultiplied bitmap.
+    HBITMAP CreateDragPreview(const PaneViewModel& pane, int index, const Theme& theme);
     float SettingsMenuRowStart(const WindowViewModel& vm, const D2D1_RECT_F& rect, int item);
     model::BuiltinMenuOrder SettingsMenuDropOrder(const WindowViewModel& vm, const D2D1_RECT_F& rect, float x, float y);
     float SysCtxPreviewItemTop(const WindowViewModel& vm, const D2D1_RECT_F& rect, int item);
