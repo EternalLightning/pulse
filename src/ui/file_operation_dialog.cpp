@@ -1312,13 +1312,17 @@ void FileOperationWindow::Show(bool activate) {
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER |
                  (activate ? 0 : SWP_NOACTIVATE));
     ShowDialogWithFade(hwnd_, activate ? SW_SHOW : SW_SHOWNOACTIVATE);
+    if (IsVisible() && !IsIconic(hwnd_)) SetTimer(hwnd_, kRenderTimer, 100, nullptr);
     if (activate) SetForegroundWindow(hwnd_);
 }
 
 void FileOperationWindow::Hide() {
     completion_reveal_.Sample(AnimationTimeMs(), false);
     failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
-    if (hwnd_) KillTimer(hwnd_, kScrollTimer);
+    if (hwnd_) {
+        KillTimer(hwnd_, kScrollTimer);
+        KillTimer(hwnd_, kRenderTimer);
+    }
     if (hwnd_) HideComposedDialog(hwnd_, options_.modal_owner ? owner_ : nullptr);
     options_.modal_owner = false;
 }
@@ -1815,7 +1819,6 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         compositor_.RecreateTextFormats(scale_);
         painter_.SetCompositor(&compositor_);
         painter_.SetScale(scale_);
-        SetTimer(hwnd_, kRenderTimer, 100, nullptr);
         return 0;
     case WM_NCCALCSIZE:
         return 0;
@@ -1839,7 +1842,12 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
             chrome.close);
     }
     case WM_SIZE:
-        if (wparam == SIZE_MINIMIZED) completion_reveal_.Sample(AnimationTimeMs(), false);
+        if (wparam == SIZE_MINIMIZED) {
+            completion_reveal_.Sample(AnimationTimeMs(), false);
+            KillTimer(hwnd_, kRenderTimer);
+        } else if (IsVisible()) {
+            SetTimer(hwnd_, kRenderTimer, 100, nullptr);
+        }
         failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
         KillTimer(hwnd_, kScrollTimer);
         if (compositor_.Dc() && wparam != SIZE_MINIMIZED)
@@ -1858,7 +1866,8 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
         if (!wparam) {
             failure_scroll_animation_.Tick(failure_scroll_, failure_scroll_max_, AnimationTimeMs(), false);
             KillTimer(hwnd_, kScrollTimer);
-        }
+            KillTimer(hwnd_, kRenderTimer);
+        } else if (!IsIconic(hwnd_)) SetTimer(hwnd_, kRenderTimer, 100, nullptr);
         break;
     case WM_MOVE:
         compositor_.UpdateTextRenderingParams(
@@ -1883,6 +1892,7 @@ LRESULT FileOperationWindow::HandleMessage(UINT message, WPARAM wparam, LPARAM l
             return 0;
         }
         if (wparam == kRenderTimer && IsWindowVisible(hwnd_) && !IsIconic(hwnd_)) {
+            if (callbacks_.refresh_progress) callbacks_.refresh_progress();
             bool dirty = NeedsAnimationFrame() || compositor_.NeedsRecovery();
             if (TransferStatisticsActive(status_)) {
                 const ULONGLONG now = GetTickCount64();

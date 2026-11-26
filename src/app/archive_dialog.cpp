@@ -8,13 +8,13 @@
 #include "../ui/edit_host.h"
 #include "../common/localization.h"
 #include "../common/path_utils.h"
-#include "../ipc/shell_interaction_client.h"
 #include <filesystem>
 
 namespace pulse::app {
 bool ShowArchiveExtractDialog(HWND owner, bool dark, COLORREF accent,
                               const std::wstring& archive_path, bool all,
-                              ArchiveExtractOptions& options) {
+                              ArchiveExtractOptions& options,
+                              const std::function<bool(HWND, std::wstring&)>& pick_folder) {
     const std::filesystem::path archive(archive_path);
     const auto destination = options.destination.empty()
         ? path::StripExtendedPathPrefix(archive.parent_path().wstring()) : options.destination;
@@ -29,11 +29,8 @@ bool ShowArchiveExtractDialog(HWND owner, bool dark, COLORREF accent,
     spec.fields.push_back({100, l10n::Get(l10n::StringId::ArchiveDestination), destination, {}, 100, 32767});
     spec.fields.push_back({101, l10n::Get(l10n::StringId::ArchiveOptionalPassword), options.password, {}, 192, 4096, true});
     spec.browse_text = l10n::Get(l10n::StringId::DupBrowse);
-    spec.browse = [](HWND dialog, std::wstring& value) {
-        std::wstring selected;
-        if (!ipc::PickShellPath(dialog, true, l10n::Get(l10n::StringId::ArchivePickDestination), selected, {}, value)) return false;
-        value = std::move(selected);
-        return true;
+    spec.browse = [pick_folder](HWND dialog, std::wstring& value) {
+        return pick_folder && pick_folder(dialog, value);
     };
     if (all) {
         spec.checkbox_text = l10n::Get(l10n::StringId::ArchiveCreateFolderPrefix) + archive.stem().wstring();

@@ -53,6 +53,10 @@ std::vector<HitTestResult> MainRenderer::SettingsControls(const WindowViewModel&
         add(l.effect_choice, H::SettingsDropdown, 0);
         add(l.language_choice, H::SettingsDropdown, 1);
         add(l.external_open_choice, H::SettingsDropdown, 2);
+        add(l.terminal_shell_choice, H::SettingsDropdown, 3);
+        add(l.terminal_font_choice, H::SettingsDropdown, 4);
+        add(l.terminal_size_choice, H::SettingsDropdown, 5);
+        toggle(l.terminal_follow_row, 39);
         segments(l.language_segment, H::SettingsLanguage);
         segments(l.density_row, H::SettingsDensity);
         segments(l.text_render_row, H::SettingsTextRender);
@@ -77,7 +81,6 @@ std::vector<HitTestResult> MainRenderer::SettingsControls(const WindowViewModel&
         toggle(l.blank_click_row, 7);
         toggle(l.change_tracking_row, 8);
         segments(l.change_days, H::SettingsChangeDays);
-        toggle(l.startup_tray_row, 31);
         toggle(l.explorer_takeover_row, 24);
         toggle(l.file_dialog_bridge_row, 38, !vm.settings_system_pending);
         toggle(l.file_dialog_takeover_row, 37);

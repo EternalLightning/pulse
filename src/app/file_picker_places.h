@@ -6,5 +6,6 @@
 namespace pulse::app {
 
 ui::PickerPlaces LoadFilePickerPlaces(const std::function<bool()>& cancelled);
+ui::PickerPlaces LoadTakeoverPickerPlaces(const std::function<bool()>& cancelled);
 
 } // namespace pulse::app

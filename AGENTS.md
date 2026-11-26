@@ -23,27 +23,27 @@ Split features into focused `.h/.cpp` files instead of growing unrelated logic i
 
 ## Build, Test, and Development Commands
 
-Use an x64 Visual Studio developer prompt with MSVC, CMake 3.25+, and Ninja:
-
-以下为按需选择的命令，不是每次任务必须依次执行的清单：
+日常使用独立的 `build-dev`，由 `scripts/build.ps1` 初始化 x64 MSVC、CMake 和 Ninja。首次构建或需要重新配置时运行：
 
 ```powershell
-# 默认：在已配置的 Ninja 目录中仅构建受影响目标，此处以主程序为例
-cmake --build build-release --target pulse
-# 仅涉及对应模块时运行；必要时先构建对应测试目标
-.\build-release\pulse_preview_test.exe
-.\build-release\pulse_ops_test.exe
-# 需要更新完整生产交付文件时使用；不运行测试
-.\build_release.bat
+.\scripts\build.ps1 -BuildDir build-dev -Targets pulse -Parallel 8 -Configure -CMakeArgs @(
+    '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
+    '-DCMAKE_TRY_COMPILE_CONFIGURATION=Release',
+    '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded'
+)
 ```
 
-`build_release.bat` defaults to `build-release` (Ninja, Release, `/MT`, `PULSE_WITH_SELFTEST=OFF`) and builds the six production executables and their dependencies, without running tests. It explicitly builds `pulse`, `pulse_index`, `pulse_shell`, `pulse_preview`, and `pulse_document`; `pulse_integration` is a dependency of `pulse`. Build only affected targets during iteration. The main `pulse` target depends on all five packaged helpers, including `pulse_document` through the CMake document-target loop.
+后续复用同一目录和缓存，只构建受影响的目标。例如主程序用 `.\scripts\build.ps1 -BuildDir build-dev -Targets pulse -Parallel 8`。此配置保留 `/O2` 和调试符号，允许增量链接。日常构建无需重复配置或清理缓存；同一目录一次只运行一个构建。需要验证 Shell 接管或文件操作时，使用中完整性测试宿主和隔离夹具；若构建产物带低完整性标签，复制匹配的测试程序及其依赖到中完整性目录，核对哈希和进程完整性后再复测。
+
+正式交付使用独立的 `build-release`（Ninja、Release、`/MT`、`PULSE_WITH_SELFTEST=OFF`）。`build_release.bat` 构建六个生产程序及其依赖。`pulse` 目标依赖全部五个辅助程序。
 
 Both batch scripts take the build directory as their second argument, e.g. `.\build_release.bat "" build-custom`. `/clean` refreshes and cleans a Ninja directory; an existing NMake cache is rejected even with `/clean`. For optional embedded selftests, use a separate directory with `-DPULSE_WITH_SELFTEST=ON`, select relevant cases and explicitly wait for the process to exit. Rebuild production with selftests disabled before packaging.
 
 `build_installer.bat` builds Release, checks versions, filenames, selftest markers and MSVC runtime dependencies, then compiles `dist\PulseSetup-<version>.exe` with Inno Setup 6 using `installer/PulseSetup.iss`. `/skipbuild build-release` reuses existing binaries without checking source freshness. `pwsh -NoProfile -File scripts/package_portable.ps1 -BuildDir build-release` separately packages the existing payload as `dist\Pulse-<version>-portable-win-x64.zip` (PowerShell 7.2+). Back up same-version artifacts when needed; packaging overwrites them without automatic backup.
 
 Use `scripts/verify_release_artifacts.ps1` with an explicit `-BuildDir` to compare ZIP contents to their sources and record installer identity. It does not validate installer contents or installation behavior. Building, packaging, replacing an installed copy and publishing are separate operations. Current commands and CI/signing limitations are documented in [docs/build-and-package.md](docs/build-and-package.md) and [scripts/RELEASE.md](scripts/RELEASE.md).
+
+发布时核对 `version.txt`、`docs/releases/<version>.md` 和对应的 `v<version>` 标签。安装包与便携包使用同一次生产构建，校验通过后按发布指南交给 GitHub Actions，或使用 `scripts/publish_release.ps1` 发布本地已校验产物。最后核对公开 Release 的版本和两个附件的 SHA-256。
 
 The installer requires admin, optionally registers and starts the `PulseIndex` service for full-disk MFT/USN indexing, and removes it on uninstall. Extracting the portable ZIP does not register the service; preferences, caches and logs remain in user application-data directories. Crash logs live in `%LOCALAPPDATA%\Pulse` (`pulse_crash.log`, `pulse_shell_host.log`) so installed copies under Program Files can write them.
 

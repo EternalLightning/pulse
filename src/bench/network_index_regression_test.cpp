@@ -40,6 +40,20 @@ struct NetworkIndexAccess {
         info.online = online; info.building = building;
         info.error = failed ? L"injected synchronization failure" : L"";
     }
+    static bool StartWatching(NetworkIndex& index, const std::wstring& first, const std::wstring& second) {
+        Seed(index, first);
+        Seed(index, second);
+        for (auto& root : index.roots_) root.info.online = true;
+        index.watch_wake_event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!index.watch_wake_event_) return false;
+        index.watch_thread_ = std::thread([&index] { index.WatchLoop(); });
+        return true;
+    }
+    static bool WakeWatch(NetworkIndex& index) { return SetEvent(index.watch_wake_event_) != FALSE; }
+    static size_t DirtyRoots(NetworkIndex& index) {
+        std::lock_guard lock(index.mu_);
+        return index.dirty_roots_.size();
+    }
     static SearchResult Search(NetworkIndex& index, const std::wstring& prefix) {
         Query query; query.path_prefix = prefix; query.limit = 100;
         return Search(index, query);
@@ -67,6 +81,9 @@ Scan scan = Scan::Complete;
 unsigned root_next = 0;
 unsigned universal_calls = 0;
 int failures = 0;
+HANDLE watches_armed = nullptr;
+std::atomic<bool> first_watch_wait{true};
+std::atomic<DWORD> simultaneous_watch_result{WAIT_FAILED};
 
 void Check(bool ok, const wchar_t* name) {
     const int bytes = WideCharToMultiByte(CP_UTF8, 0, name, -1, nullptr, 0, nullptr, nullptr);
@@ -158,6 +175,52 @@ std::vector<char> Read(const std::wstring& path) {
     std::ifstream stream(std::filesystem::path(path), std::ios::binary);
     return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
+}
+
+int RunNetworkWatchRegressionTests() {
+    using namespace pulse::index::testing;
+    const auto directory = std::filesystem::absolute(std::filesystem::path(L"bench_data")) /
+        (L"pulse-network-watch-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+         std::to_wstring(GetTickCount64()));
+    const auto first = directory / L"first", second = directory / L"second";
+    std::filesystem::create_directories(first);
+    std::filesystem::create_directories(second);
+    watches_armed = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    NetworkIndexHooks hooks;
+    hooks.before_watch_wait = [](const std::vector<HANDLE>& events) {
+        if (events.size() != 3 || !first_watch_wait.exchange(false)) return;
+        SetEvent(watches_armed);
+        simultaneous_watch_result = WaitForMultipleObjects(3, events.data(), TRUE, 3000);
+        // Wait-all consumes the auto-reset topology event. Restore it for production's wait.
+        if (simultaneous_watch_result == WAIT_OBJECT_0) SetEvent(events.front());
+    };
+    SetNetworkIndexHooks(&hooks);
+    {
+        NetworkIndex index;
+        const bool started = watches_armed && NetworkIndexAccess::StartWatching(index, first.wstring(), second.wstring());
+        Check(started && WaitForSingleObject(watches_armed, 3000) == WAIT_OBJECT_0,
+            L"arm both isolated directory watches before mutating the roots");
+        if (started) {
+            Check(NetworkIndexAccess::WakeWatch(index) &&
+                std::filesystem::create_directory(first / L"new-one") &&
+                std::filesystem::create_directory(second / L"new-two"),
+                L"signal the configuration wake and mutate both watched directories");
+            const ULONGLONG deadline = GetTickCount64() + 4000;
+            while (NetworkIndexAccess::DirtyRoots(index) < 2 && GetTickCount64() < deadline) Sleep(5);
+            Check(simultaneous_watch_result == WAIT_OBJECT_0,
+                L"both real directory completions are ready alongside the configuration wake");
+            Check(NetworkIndexAccess::DirtyRoots(index) == 2,
+                L"simultaneous directory completions queue both roots for reconciliation");
+            const auto roots = index.Roots();
+            Check(roots[0].watching && roots[1].watching,
+                L"both roots remain watched after their changes are drained");
+        }
+        index.Stop();
+    }
+    SetNetworkIndexHooks(nullptr);
+    if (watches_armed) CloseHandle(watches_armed);
+    std::filesystem::remove_all(directory);
+    return failures ? 1 : 0;
 }
 
 int RunNetworkIndexRegressionTests() {

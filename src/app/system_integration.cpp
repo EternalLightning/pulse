@@ -116,12 +116,13 @@ DefaultManagerOptions Options(const AppPrefs& prefs) {
 }
 bool ConfigureFileDialogs(SystemIntegration::Shared& shared, AppState& state) {
     if (!shared.services_enabled || !state.appPrefs.foreground_file_dialog_takeover)
-        return shared.file_dialog_takeover.Configure(false, false, {}, false);
+        return shared.file_dialog_takeover.Configure(false, false, {}, {});
     auto* active = state.core.windows.MostRecent();
     const auto* tab = active ? ActiveTab(*active) : nullptr;
     const auto folder = tab && !fs::IsVirtualPath(tab->current_path) ? ShellPathText(tab->current_path) : L"";
     return shared.file_dialog_takeover.Configure(true, state.darkMode, state.accentColor,
-        state.appPrefs.show_hidden_files, folder, state.appPrefs.verify_copies);
+        {state.appPrefs.show_hidden_files, state.appPrefs.show_protected_os_files}, folder,
+        state.appPrefs.verify_copies, state.appPrefs.list_zebra_rows);
 }
 void Submit(const std::shared_ptr<SystemIntegration::Shared>& shared,
             SystemIntegration::Shared::Task task) {
@@ -232,6 +233,9 @@ bool QueueSelection(AppState& owner, SystemIntegration::UiState& ui, uint64_t ke
     located = FindTab(owner, ui, key, true);
     tab = located.tab;
     if (!tab || !SameShellPath(tab->current_path, folder)) return false;
+    // Apply visibility preferences before the first paint can invalidate the queued view.
+    tab->SetShowHiddenFiles(located.window->appPrefs.show_hidden_files);
+    tab->SetShowProtectedOsFiles(located.window->appPrefs.show_protected_os_files);
     ui.selections.push_back({key, token, tab->pending_generation ? tab->pending_generation : tab->applied_generation,
         tab->view_generation, folder, std::move(paths), flags,
         GetTickCount64() + 14000});

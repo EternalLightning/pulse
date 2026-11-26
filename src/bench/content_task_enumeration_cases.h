@@ -12,6 +12,14 @@
 int RunTaskEnumerationCases() {
     namespace fs = std::filesystem;
     using namespace pulse::index;
+    ContentSearchRequest drive_request;
+    drive_request.root = L"X:\\";
+    drive_request.recursive = false;
+    Check(JoinContentPath(drive_request.root, L"direct.txt") == L"X:\\direct.txt" &&
+        ContentRequestIncludesPath(drive_request, JoinContentPath(drive_request.root, L"direct.txt")) &&
+        !ContentRequestIncludesPath(drive_request, JoinContentPath(drive_request.root, L"nested\\child.txt")) &&
+        JoinContentPath(L"\\\\?\\X:\\", L"*") == L"\\\\?\\X:\\*",
+        L"drive-root joins preserve nonrecursive child scope and native enumerator wildcard");
     const auto base = fs::path(FixtureRoot()).parent_path() /
         (L"content-task-enumeration-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     const auto root = base / L"root", wanted = root / L"wanted", nested = wanted / L"nested";
@@ -44,7 +52,7 @@ int RunTaskEnumerationCases() {
     ContentTaskEnumerationHooks hooks;
     auto normal_first = [&](const std::wstring& path, WIN32_FIND_DATAW& data) {
         opened.insert(ContentScopeKey(path));
-        return FindFirstFileExW((path + L"\\*").c_str(), FindExInfoBasic, &data,
+        return FindFirstFileExW(JoinContentPath(path, L"*").c_str(), FindExInfoBasic, &data,
             FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
     };
     hooks.first = normal_first;

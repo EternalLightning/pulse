@@ -8,7 +8,9 @@
 #include "command_catalog.h"
 #include "system_ctx_preview_drag.h"
 #include "app_exit.h"
+#include "app_terminal.h"
 #include "file_dialog_bridge_host.h"
+#include "file_picker_tabs.h"
 #include "../common/file_dialog_registration.h"
 #include "../ops/operation_journal_paths.h"
 #include "drive_label_rename.h"
@@ -27,6 +29,7 @@
 #include "../common/frame_profile.h"
 #include "app_hover.h"
 #include "app_column_view.h"
+#include "app_pane_tools.h"
 #include "../ui/animation_clock.h"
 #include "sidebar_resize.h"
 #include "../ui/device_crumbs.h"
@@ -73,6 +76,7 @@
 #include "settings_transfer_ui.h"
 #include "single_instance_coordinator.h"
 #include "startup_launch.h"
+#include "default_file_manager.h"
 #include "window_placement.h"
 #include "tray_controller.h"
 #include "global_search_controller.h"
@@ -218,6 +222,8 @@ bool Render(AppState& s, bool schedule_frame) {
     const bool tray_animating = TickTrayDeck(s);
     bool pane_animating = false;
     const uint64_t animation_now = app::PaneAnimationTimeMs();
+    const bool terminal_animating = TickEmbeddedTerminal(s, animation_now,
+        s.renderer.MotionEnabled() && !hc);
     s.renderer.TickDetailsPanelAnimation(animation_now, static_cast<float>(s.compositor.Width()),
         s.renderer.MotionEnabled() && !hc);
     for (auto& pane : Panes(s)) {
@@ -308,7 +314,7 @@ bool Render(AppState& s, bool schedule_frame) {
         s.fpsWindow.clear();
         s.lastFps = 0;
     }
-    s.ui_schedule.animation_active = tray_animating || pane_animating || visual_animating ||
+    s.ui_schedule.animation_active = tray_animating || pane_animating || visual_animating || terminal_animating ||
         s.sidebarProjectAnimation.Pending() ||
         s.stagingTrayAnimation.Pending() ||
         address_animating || s.scrollAnimating || surface_scroll_animating || column_scroll_animating ||
@@ -332,6 +338,7 @@ static void RestoreWindowPreferences(AppState& state, const app::WindowSessionSn
     state.detailsPreviewExpansion = session.details_preview_only ? 1.0f : 0.0f;
     state.detailsPanelWidth = static_cast<float>(session.details_panel_width);
     state.renderer.SetDetailsPanelWidth(state.detailsPanelWidth);
+    state.core.terminal_panel_width = static_cast<float>(session.terminal_panel_width);
     if (state.darkMode) state.themeOverride = ui::ThemeMode::Dark;
 }
 
@@ -352,6 +359,7 @@ static app::WindowSessionSnapshot CaptureWindowPreferences(AppState& s, HWND hwn
     snap.details_preview_only = s.detailsPreviewOnly;
     snap.details_preview = s.detailsPreviewEnabled;
     snap.details_panel_width = static_cast<int>(std::lround(s.detailsPanelWidth));
+    snap.terminal_panel_width = static_cast<int>(std::lround(s.core.terminal_panel_width));
     return snap;
 }
 
@@ -391,6 +399,9 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         default: break;
         }
     }
+    LRESULT terminal_result = 0;
+    if (s && HandleEmbeddedTerminalMessage(*s, msg, wParam, lParam, terminal_result))
+        return terminal_result;
 
     switch (msg) {
     case WM_NCPAINT:
@@ -466,7 +477,11 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->ui_schedule.NoteActivity(GetTickCount64());
 
         s->window_tabs.EnsureDefault();
+        s->window_tabs.confirm_close = [s](const app::LayoutTab& layout) {
+            return ConfirmEndEmbeddedTerminal(*s, layout);
+        };
         s->window_tabs.before_close = [s](app::LayoutTab& layout) {
+            StopEmbeddedTerminal(layout);
             for (const auto& pane : layout.panes) {
                 if (pane) TeardownTabSearch(*s, pane->view);
             }
@@ -726,6 +741,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
         std::wstring startPath = s->shot.active ? s->shot.path : app::MakeHomePath();
         ResolvedOpenTarget openTarget;
+        bool resolve_startup_path = false;
         const bool has_initial_external_target = s->initial_external_open_target.has_value();
         if (has_initial_external_target) {
             openTarget = std::move(*s->initial_external_open_target);
@@ -733,25 +749,26 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             startPath = openTarget.folder;
         } else if (!s->shot.active && !s->open_path.empty()) {
             if (ops::IsArchivePath(s->open_path)) startPath = ArchiveViewPath(fs::NormalizePath(s->open_path));
-            else {
-                openTarget = ResolveOpenTarget(s->open_path);
-                startPath = openTarget.folder;
-            }
+            else if (app::IsThisPcArgument(s->open_path)) startPath.clear();
+            else if (fs::IsVirtualPath(s->open_path)) startPath = s->open_path;
+            else resolve_startup_path = true;
         }
         s->pane->NewTab(startPath);
+        auto& initial_tab = *s->pane->ActiveTab();
         if (s->shot.active) {
-            s->pane->ActiveTab()->view_mode = s->shot.view_mode;
+            initial_tab.view_mode = s->shot.view_mode;
             if (s->shot.sort_date) {
-                s->pane->ActiveTab()->sort_column = ui::SortColumn::Mtime;
-                s->pane->ActiveTab()->sort_direction = ui::SortDirection::Desc;
+                initial_tab.sort_column = ui::SortColumn::Mtime;
+                initial_tab.sort_direction = ui::SortDirection::Desc;
             }
         }
-        StartLoadingPath(*s, *s->pane->ActiveTab(), startPath, PathLoadReason::Navigate);
-        if (!s->shot.active && (has_initial_external_target || !s->open_path.empty()))
-            SelectLaunchedFile(*s, openTarget);
+        if (!resolve_startup_path || !RouteStartupOpen(*s, initial_tab))
+            StartLoadingPath(*s, initial_tab, startPath, PathLoadReason::Navigate);
+        if (!s->shot.active && has_initial_external_target) SelectLaunchedFile(*s, openTarget);
 
         s->renderer.SetDetailsPanelVisible(s->showDetailsPanel);
         s->renderer.SetDetailsPanelWidth(s->detailsPanelWidth);
+        s->renderer.SetTerminalPanelWidth(s->core.terminal_panel_width);
         SyncUiScheduling(*s);
         // WM_TIMER runs behind paint and input. Hidden tray starts still finish
         // their services without requiring a first paint.
@@ -1010,6 +1027,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_COPYDATA: {
         auto* cds = reinterpret_cast<COPYDATASTRUCT*>(lParam);
+        if (cds && cds->dwData == app::kPickerTabsRequest)
+            return s && !s->core.exiting && !s->isolatedTest && !cds->cbData && app::PublishPickerTabs(*s);
         std::wstring path;
         if (!s || !app::SingleInstanceCoordinator::DecodeOpenPath(cds, path)) return FALSE;
         if (s->core.exiting) return FALSE;
@@ -1119,6 +1138,12 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_PATH_ALIASES_CHANGED:
         if (s) HandlePathAliasesChanged(*s);
+        return 0;
+    case WM_DISPLAY_ALIAS_SEARCH:
+        if (s && s->display_alias_search_mailbox) {
+            for (auto& result : s->display_alias_search_mailbox->Take(wParam))
+                AcceptDisplayAliasSearchResult(*s, std::move(result));
+        }
         return 0;
 
     case WM_KILLFOCUS:
@@ -1740,6 +1765,10 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         if (s) ReceiveDetailsAttributeResult(*s, wParam);
         return 0;
 
+    case WM_PANE_TOOLS_RESULT:
+        if (s) ApplyPaneToolsResults(*s, wParam);
+        return 0;
+
     case WM_CLIPBOARD_PASTE_RESULT:
         if (s && s->clipboard_paste_mailbox) {
             for (const bool success : s->clipboard_paste_mailbox->Take(wParam)) {
@@ -1976,6 +2005,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (s->shortcut_drop_mailbox) s->shortcut_drop_mailbox->Close();
             if (s->external_open_mailbox) s->external_open_mailbox->Close();
             if (s->dup_volumes_mailbox) s->dup_volumes_mailbox->Close();
+            if (s->display_alias_search_mailbox) s->display_alias_search_mailbox->Close();
             s->core.windows.Remove(hwnd);
         }
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -1992,6 +2022,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_DESTROY: {
         if (s) {
+            ClosePaneTools(*s);
             CancelWindowCaptionTransfer(hwnd);
             CancelNetworkAccess(*s);
             if (s->device_operation_mailbox) s->device_operation_mailbox->Close();
@@ -2012,6 +2043,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (s->shortcut_drop_mailbox) s->shortcut_drop_mailbox->Close();
             if (s->external_open_mailbox) s->external_open_mailbox->Close();
             if (s->dup_volumes_mailbox) s->dup_volumes_mailbox->Close();
+            if (s->display_alias_search_mailbox) s->display_alias_search_mailbox->Close();
             StopUiScheduling(*s);
             // Destruction paths used by tests also save only after operations settle.
             if (s->exit_thread.joinable()) s->exit_thread.join();
@@ -2332,8 +2364,9 @@ bool SkipSingletonFromArgv() {
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     if (__argc >= 2 && wcscmp(__wargv[1], L"--picker-host") == 0) {
         pulse::compat::EnableDpiAwareness();
-        return __argc == 4 || __argc == 5
-            ? app::RunFileDialogBridgeHost(__wargv[2], __wargv[3], __argc == 5 ? __wargv[4] : nullptr)
+        return __argc >= 4 && __argc <= 6
+            ? app::RunFileDialogBridgeHost(__wargv[2], __wargv[3], __argc >= 5 ? __wargv[4] : nullptr,
+                                           __argc == 6 ? __wargv[5] : nullptr)
             : 2;
     }
     if (__argc == 2 && wcscmp(__wargv[1], L"--unregister-file-dialog-bridge") == 0)
@@ -2563,7 +2596,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     if (session.maximized) nCmdShow = SW_SHOWMAXIMIZED;
     const bool show_before_activate = (nCmdShow != SW_SHOWMAXIMIZED || x != CW_USEDEFAULT) &&
         !state.shot.active && !state.menushot && !state.colorpickshot && !state.colorpickdialog &&
-        !(startup_launch && state.appPrefs.start_to_tray && state.open_path.empty()) &&
+        !(startup_launch && state.open_path.empty()) &&
         (nCmdShow == SW_SHOWNORMAL || nCmdShow == SW_SHOW || nCmdShow == SW_SHOWDEFAULT ||
          nCmdShow == SW_SHOWMAXIMIZED);
     const bool create_maximized = show_before_activate && nCmdShow == SW_SHOWMAXIMIZED;
@@ -2586,8 +2619,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     const bool test_hidden = (state.shot.active || state.menushot || state.colorpickshot) &&
         GetEnvironmentVariableW(L"PULSE_TEST_HIDDEN_SHOT", hidden_shot, ARRAYSIZE(hidden_shot)) == 1 &&
         hidden_shot[0] == L'1';
-    const bool startup_hidden = startup_launch && state.appPrefs.start_to_tray &&
-        state.open_path.empty() && state.tray_controller.StartHidden(session.maximized);
+    const bool startup_hidden = startup_launch && state.open_path.empty() && state.tray_controller.StartHidden(session.maximized);
     if (!test_hidden && !startup_hidden && !state.shot.active)
         state.compositor.QueueShowTransition();
     ShowWindow(hwnd, test_hidden || startup_hidden ? SW_HIDE : state.shot.active ? SW_SHOWNORMAL

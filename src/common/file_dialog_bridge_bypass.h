@@ -36,16 +36,18 @@ inline bool HasNativeFallback(DWORD process) noexcept {
     return true;
 }
 
-inline void NativeModeName(wchar_t (&name)[96], DWORD process, DWORD thread, HWND owner, bool open) noexcept {
+enum class NativeMode { Unknown, Open, Save };
+
+inline void NativeModeName(wchar_t (&name)[96], DWORD process, DWORD thread, HWND owner, NativeMode mode) noexcept {
     swprintf_s(name, L"Local\\Pulse.DialogBridge.NativeMode.%lu.%lu.%llx.%d", process, thread,
-        static_cast<unsigned long long>(reinterpret_cast<ULONG_PTR>(owner)), open ? 1 : 0);
+        static_cast<unsigned long long>(reinterpret_cast<ULONG_PTR>(owner)), static_cast<int>(mode));
 }
 
 class NativeModeScope {
 public:
-    NativeModeScope(HWND owner, bool open) noexcept {
+    NativeModeScope(HWND owner, NativeMode mode) noexcept {
         wchar_t name[96]{};
-        NativeModeName(name, GetCurrentProcessId(), GetCurrentThreadId(), owner, open);
+        NativeModeName(name, GetCurrentProcessId(), GetCurrentThreadId(), owner, mode);
         marker_ = CreateEventW(nullptr, TRUE, TRUE, name);
     }
     ~NativeModeScope() { if (marker_) CloseHandle(marker_); }
@@ -55,17 +57,19 @@ private:
     HANDLE marker_ = nullptr;
 };
 
-inline bool HasNativeOpenMode(DWORD process, DWORD thread, HWND owner) noexcept {
-    const auto has_mode = [&](bool open) {
+inline NativeMode QueryNativeMode(DWORD process, DWORD thread, HWND owner) noexcept {
+    const auto has_mode = [&](NativeMode mode) {
         wchar_t name[96]{};
-        NativeModeName(name, process, thread, owner, open);
+        NativeModeName(name, process, thread, owner, mode);
         const HANDLE marker = OpenEventW(SYNCHRONIZE, FALSE, name);
         if (!marker) return false;
         CloseHandle(marker);
         return true;
     };
     // An overlapping native show with the same owner makes the mode ambiguous.
-    return has_mode(true) && !has_mode(false);
+    const bool open = has_mode(NativeMode::Open), save = has_mode(NativeMode::Save);
+    if (open == save || has_mode(NativeMode::Unknown)) return NativeMode::Unknown;
+    return open ? NativeMode::Open : NativeMode::Save;
 }
 
 } // namespace pulse::dialog_bridge

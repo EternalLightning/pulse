@@ -57,9 +57,9 @@ ops::OpStatus ArchiveFailureStatus(const ops::ArchiveOperationResult& result,
 
 bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
     std::atomic_bool& done, std::atomic_bool& cancel,
-    const std::function<ops::OpStatus()>& read_status) {
+    const std::function<ops::OpStatus()>& read_status, bool modal) {
     ui::FileOperationWindow window;
-    const bool owner_enabled = IsWindow(owner) && IsWindowEnabled(owner);
+    const bool owner_enabled = modal && IsWindow(owner) && IsWindowEnabled(owner);
     std::unique_ptr<ui::OwnerDimScope> owner_dim;
     bool owner_released = false;
     auto release_owner = [&] {
@@ -71,6 +71,14 @@ bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
     ui::FileOperationCallbacks callbacks;
     callbacks.cancel = [&] { cancel.store(true, std::memory_order_release); };
     callbacks.dismiss = release_owner;
+    uint64_t next_refresh = 0;
+    const auto refresh = [&] {
+        const auto now = GetTickCount64();
+        if (now < next_refresh || !window.IsVisible()) return;
+        next_refresh = now + 100;
+        window.Update(read_status());
+    };
+    callbacks.refresh_progress = refresh;
     const bool created = window.Create(owner, std::move(callbacks),
         {.use_summary_title = true, .estimated_bytes = true, .item_progress_known = false,
             .modal_owner = owner_enabled});
@@ -78,9 +86,9 @@ bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
     window.SetTheme(dark, D2D1::ColorF(GetRValue(accent) / 255.0f,
         GetGValue(accent) / 255.0f, GetBValue(accent) / 255.0f));
     window.Update(read_status());
-    if (created) owner_dim = std::make_unique<ui::OwnerDimScope>(owner);
+    if (created && modal) owner_dim = std::make_unique<ui::OwnerDimScope>(owner);
     if (created && owner_enabled) EnableWindow(owner, FALSE);
-    if (created) window.Show();
+    if (created) window.Show(modal);
     bool quitting = false;
     int quit_code = 0;
     auto pump_messages = [&] {
@@ -107,7 +115,7 @@ bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
         }
     };
     while (!done.load(std::memory_order_acquire)) {
-        if (created) window.Update(read_status());
+        if (created) refresh();
         if (!IsWindow(owner)) cancel.store(true, std::memory_order_release);
         pump_messages();
     }

@@ -2,6 +2,8 @@
 #include "../common/localization.h"
 #include "../common/windows_compat.h"
 #include "../ui/file_picker_dialog.h"
+#include "../ui/ui_renderer.h"
+#include "animation_snapshot.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -53,9 +55,80 @@ SIZE WindowSize(HWND window) {
     GetWindowRect(window, &bounds);
     return {bounds.right - bounds.left, bounds.bottom - bounds.top};
 }
+
+bool RunFileViewFeedback(const std::filesystem::path& output) {
+    using namespace pulse::ui;
+    std::filesystem::create_directories(output);
+    SetEnvironmentVariableW(L"PULSE_TEST_HIDDEN_SHOT", L"1");
+    const HWND window = CreateWindowExW(WS_EX_NOACTIVATE, L"STATIC", L"Picker feedback fixture", WS_POPUP,
+        0, 0, 780, 540, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!window) return false;
+    Compositor compositor;
+    MainRenderer renderer;
+    bool passed = compositor.Init(window, true);
+    if (passed) {
+        compositor.RecreateTextFormats(1.0f);
+        for (const auto mode : {ViewMode::Details, ViewMode::MediumIcons}) {
+            renderer.SetCompositor(&compositor);
+            renderer.SetScale(1.0f);
+            PaneViewModel vm;
+            vm.view_mode = mode;
+            vm.path = L"C:\\Picker fixture";
+            vm.is_file_system = false;
+            ListEntryView entry;
+            entry.name = L"file.txt";
+            entry.path = vm.path + L"\\" + entry.name;
+            vm.entries.push_back(entry);
+            const bool motion = renderer.MotionEnabled() && !IsHighContrast();
+            const auto theme = MakeTheme(true, HexColor(0x0078D4));
+            const auto bounds = D2D1::RectF(20, 20, 760, 410);
+            const auto prefix = mode == ViewMode::Details ? L"details-" : L"icons-";
+            fluent::Painter painter(&compositor);
+            painter.SetScale(1.0f);
+            const auto paint = [&](int row, float focus, const wchar_t* frame = nullptr) {
+                vm.hover_index = row;
+                auto* dc = compositor.Dc();
+                dc->BeginDraw();
+                dc->Clear(theme.surface_card);
+                renderer.DrawEmbeddedFileView(vm, bounds, theme, true, 0);
+                painter.BeginFrame(theme);
+                fluent::ControlState field;
+                field.focused = focus > 0.0f;
+                field.focus_progress = focus;
+                painter.DrawTextFieldFrame(D2D1::RectF(20, 445, 760, 477), field, true);
+                const bool ok = SUCCEEDED(dc->EndDraw()) && (!frame || WriteAnimationSnapshot(compositor,
+                    output / (std::wstring(prefix) + frame + L".png")));
+                passed &= ok;
+            };
+            paint(-1, 0.0f, L"rest");
+            paint(0, 0.0f);
+            const bool entered = renderer.SurfaceAnimating() == motion;
+            Sleep(45);
+            paint(0, 0.5f, L"middle");
+            const bool middle = renderer.SurfaceAnimating() == motion;
+            Sleep(190);
+            paint(0, 1.0f, L"end");
+            const bool settled = !renderer.SurfaceAnimating();
+            paint(-1, 1.0f);
+            Sleep(40);
+            paint(0, 0.5f);
+            const bool reversed = renderer.SurfaceAnimating() == motion;
+            Sleep(190);
+            paint(0, 1.0f);
+            const bool ok = entered && middle && settled && reversed && !renderer.SurfaceAnimating();
+            std::printf("[%s] picker %s hover enters, interpolates, reverses and stops (motion %s)\n",
+                ok ? "PASS" : "FAIL", mode == ViewMode::Details ? "details" : "icons", motion ? "enabled" : "disabled");
+            passed &= ok;
+        }
+    }
+    renderer.SetCompositor(nullptr);
+    compositor.Shutdown();
+    DestroyWindow(window);
+    return passed;
+}
 }
 
-int main() {
+int main(int argc, char** argv) {
     using namespace pulse;
     compat::EnableDpiAwareness();
     IsolatedRegistry registry;
@@ -65,6 +138,11 @@ int main() {
     }
     if (FAILED(OleInitialize(nullptr))) return 2;
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc == 3 && std::string_view(argv[1]) == "--feedback-only") {
+        const bool passed = RunFileViewFeedback(argv[2]);
+        OleUninitialize();
+        return passed ? 0 : 1;
+    }
     MONITORINFO monitor{sizeof(monitor)};
     const HMONITOR target_monitor = MonitorFromWindow(nullptr, MONITOR_DEFAULTTONEAREST);
     UINT monitor_dpi = 0, vertical_dpi = 0;

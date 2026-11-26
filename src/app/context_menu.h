@@ -129,7 +129,15 @@ enum MenuCmd : int {
     CmdControlPanel,
     CmdApplications,
     CmdSplitMenu,
+    CmdLinkedBrowsing = 5700,
+    CmdSyncLeftToRight = 5701,
+    CmdSyncRightToLeft = 5702,
+    CmdSyncNewerBothWays = 5703,
+    CmdDirectorySync = 5704,
     CmdIndexBase = 1000,
+    CmdDisplayAlias = 5750,
+    CmdTerminalPanel = 5800,
+    CmdOpenShortcutLocation = 5801,
     // Explorer integration (优化.md §7): registry static verbs bound to the
     // current selection (+index into the StaticVerb list) and pulse_shell
     // IContextMenu session items (+host menu id, up to 0x7FFF).
@@ -215,7 +223,8 @@ std::vector<ui::FluentMenuItem> BuildNewMenu();
 std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem, bool drive = false);
 
 // Split-button layout presets.
-std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset);
+std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset, const CommandContext& context = {});
+std::vector<ui::FluentMenuItem> BuildDirectorySyncMenu(const CommandContext& context);
 std::vector<ui::FluentMenuItem> BuildViewMenu(ui::ViewMode current_mode,
                                               bool details_panel = false);
 std::vector<ui::FluentMenuItem> BuildGroupingMenu(ui::GroupMode mode,
@@ -239,7 +248,8 @@ std::vector<ui::FluentMenuItem> BuildCommandPalette(const std::wstring& query,
                                                     bool project_only,
                                                     size_t total = 0,
                                                     const std::wstring& current_path = {},
-                                                    const CommandContext& context = {});
+                                                    const CommandContext& context = {},
+                                                    const model::DisplayAliasSnapshot& aliases = {});
 
 // "base.ext", "base (2).ext", ... — first name not colliding under dir.
 std::wstring UniqueChildName(const std::wstring& dir, const std::wstring& base,

@@ -6,6 +6,7 @@
 namespace pulse::ui::toolbar_icons {
 namespace {
 int IconResource(command_icons::Icon icon) {
+    if (const int resource = command_icons::WorkspaceSvg(icon)) return resource;
     using I = command_icons::Icon;
     switch (icon) {
     case I::Details: return IDR_FILES_LAYOUT_DETAILS_SVG;
@@ -101,7 +102,6 @@ command_icons::Icon Resolve(std::wstring_view glyph, fluent::MenuPictogram picto
     case L'\xE7A7': return I::Undo;
     case L'\xE8B3': return I::SelectAll;
     case L'\xE7A1': return I::InvertSelection;
-    case L'\xE756': return I::Terminal;
     case L'\xE8F4': return I::NewFolder;
     case L'\xE8A9': return I::Split;
     case L'\xECA5': return I::Grid;

@@ -6,6 +6,7 @@
 // session.h — Window preference persistence and legacy migration.
 #pragma once
 #include "app_model.h"
+#include "../ui/panel_metrics.h"
 #include <array>
 #include <string>
 #include <windows.h>
@@ -30,6 +31,7 @@ struct WindowSessionSnapshot {
     bool starred_expanded = true;
     bool details_panel = false;  // right details panel visible
     int details_panel_width = 340;
+    int terminal_panel_width = static_cast<int>(ui::kTerminalWidthDip);
     bool details_preview_only = false;
     bool details_preview = true; // preview pane enabled (session remembers it)
     std::array<float, 3> details_column_dividers{}; // version 3 migration only

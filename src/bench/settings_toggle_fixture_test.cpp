@@ -64,7 +64,7 @@ int main() {
     s.settings.BindUi(s.appPrefs,s.ctxMenuPrefs,s.index,s.networkIndex,std::move(callbacks));
     const auto get_row=[](const ui::SettingsLayout& l,int control) {
         switch(control) {
-        case 1:return l.startup_row[0]; case 2:return l.startup_row[1]; case 31:return l.startup_tray_row;
+        case 1:return l.startup_row[0]; case 2:return l.startup_row[1];
         case 32:return l.last_tab_row; case 21:return l.startup_row[2];
         case 20:return l.new_tab_row; case 5:return l.hidden_files_row; default:return l.performance_row;
         }
@@ -83,9 +83,9 @@ int main() {
             s.settings.SetScroll(0,100000);
             auto vm=BuildVm(s,false);
             auto l=ui::MakeSettingsLayout(vm,rect,scale,s.renderer.TitleBarHeight(),28.0f*s.scale,&measuring);
-            const I descriptions[]={I::SettingsLaunchDesc,I::SettingsKeepRunningDesc,I::StartToTrayDesc,I::CloseLastTabWindowDesc,
+            const I descriptions[]={I::SettingsLaunchDesc,I::SettingsKeepRunningDesc,I::CloseLastTabWindowDesc,
                 I::SettingsDefaultManagerDesc,I::SettingsNewTabHomeDesc};
-            const int controls[]={1,2,31,32,21,20};
+            const int controls[]={1,2,32,21,20};
             for(size_t i=0;i<std::size(controls);++i) {
                 const auto row=get_row(l,controls[i]);
                 const auto bounds=ui::SettingsToggleBounds(row,l10n::Get(descriptions[i]),scale,&measuring);
@@ -145,13 +145,13 @@ int main() {
     const auto state=[&](int control) {
         switch(control) {
         case 1:return s.appPrefs.launch_on_startup; case 2:return s.appPrefs.keep_running_on_close;
-        case 31:return s.appPrefs.start_to_tray; case 32:return s.appPrefs.close_last_tab_window;
+        case 32:return s.appPrefs.close_last_tab_window;
         case 20:return s.appPrefs.new_tab_home; case 5:return s.appPrefs.show_hidden_files;
         case 21:return s.appPrefs.open_folders_in_pulse && s.appPrefs.take_over_win_e && s.appPrefs.take_over_this_pc;
         default:return false;
         }
     };
-    for(int control:{2,1,31,32,20,5,21}) {
+    for(int control:{2,1,32,20,5,21}) {
         s.settings.SetScroll(0,100000);
         auto initial=BuildVm(s,false);
         auto layout=ui::MakeSettingsLayout(initial,rect,s.scale,s.renderer.TitleBarHeight(),28.0f*s.scale,&measuring);

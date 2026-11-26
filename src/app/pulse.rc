@@ -89,3 +89,6 @@ IDR_FILES_PROPERTIES_COLOR_DARK_SVG RCDATA "../../assets/files_toolbar/propertie
 IDR_FLUENT_HOME_SVG RCDATA "../../assets/fluent/home_24_color.svg"
 IDR_ONEDRIVE_SVG RCDATA "../../assets/microsoft_brand/onedrive.svg"
 IDR_FILES_STATUS_CENTER_SVG RCDATA "../../assets/files_toolbar/status_center.svg"
+IDR_WORKSPACE_DISPLAY_ALIAS_SVG RCDATA "../../assets/workspace_toolbar/display_alias.svg"
+IDR_WORKSPACE_LINKED_BROWSING_SVG RCDATA "../../assets/workspace_toolbar/linked_browsing.svg"
+IDR_WORKSPACE_DIRECTORY_SYNC_SVG RCDATA "../../assets/workspace_toolbar/directory_sync.svg"

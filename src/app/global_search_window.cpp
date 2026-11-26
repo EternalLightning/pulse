@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "global_search_window.h"
+#include "display_alias_search.h"
 #include "../index/live_filename_search.h"
 #include "resource.h"
 #include "../ui/empty_state_layout.h"
@@ -40,6 +41,7 @@ using l10n::StringId;
 using ui::typography::FontRole;
 constexpr UINT kIndexStatus = WM_APP + 181, kIndexResult = WM_APP + 182, kContentResult = WM_APP + 183;
 constexpr UINT kNetworkResult = WM_APP + 184;
+constexpr UINT kDisplayAliasResult = WM_APP + 185;
 constexpr UINT_PTR kDebounce = 1;
 constexpr UINT_PTR kConnectTimeout = 2;
 constexpr UINT_PTR kScopeTooltipTimer = 3;
@@ -81,6 +83,11 @@ struct GlobalSearchWindow::Impl {
     index::NetworkAgentClient* network = nullptr;
     uint32_t* next_request = nullptr;
     index::SearchResult local_result, network_result;
+    app::WorkerPool* display_alias_worker = nullptr;
+    model::DisplayAliasSnapshot display_aliases;
+    std::shared_ptr<app::DisplayAliasSearchMailbox> display_alias_mailbox;
+    std::shared_ptr<const app::DisplayAliasSearchRequest> display_alias_request;
+    std::vector<index::SupplementalFilenameHit> display_alias_hits;
     bool local_ready = false, network_ready = false;
     index::ContentSearchClient contents;
     ComPtr<ID2D1RenderTarget> target;
@@ -172,6 +179,7 @@ struct GlobalSearchWindow::Impl {
         generation = next_request ? ++*next_request : generation + 1;
         if (filenames) filenames->CancelSession(kSession);
         if (network) network->CancelSession(kSession);
+        display_alias_request.reset();
         // Content has its own Instant agent: suspension must never stop main-window queries.
         contents.Suspend();
         busy = false;
@@ -190,6 +198,7 @@ struct GlobalSearchWindow::Impl {
         query.resize(static_cast<size_t>(count));
         rows.clear(); selected = 0; scroll_y = 0; total = 0; error.clear(); truncated = false;
         local_result = {}; network_result = {}; local_ready = network_ready = false;
+        display_alias_hits.clear();
         if (!query.empty() && !composing) { busy = true; SetTimer(hwnd, kDebounce, 180, nullptr); }
         Invalidate();
     }
@@ -215,22 +224,44 @@ struct GlobalSearchWindow::Impl {
             local_ready = !index::FilenameSearchRoot(request.path_prefix).empty();
             if (!local_ready) filenames->SearchAsync(request, generation, hwnd, kIndexResult);
             network->SearchAsync(request, generation, hwnd, kNetworkResult);
+            if (display_alias_worker && display_aliases) {
+                if (!display_alias_mailbox) display_alias_mailbox =
+                    std::make_shared<app::DisplayAliasSearchMailbox>(hwnd, kDisplayAliasResult);
+                display_alias_request = app::QueueDisplayAliasSearch(*display_alias_worker, display_aliases,
+                    request, generation, display_alias_mailbox);
+            }
             SetTimer(hwnd, kConnectTimeout, 10000, nullptr);
         }
     }
     void MergeFilenames() {
         rows.clear();
         size_t duplicates = 0;
+        index::SearchResult candidates;
+        candidates.hits.reserve(local_result.hits.size() + network_result.hits.size());
         for (const auto* source : {&local_result, &network_result}) for (const auto& hit : source->hits) {
-            const bool duplicate = std::any_of(rows.begin(), rows.end(), [&](const auto& row) {
-                return CompareStringOrdinal(row.path.c_str(), -1, hit.path.c_str(), -1, TRUE) == CSTR_EQUAL;
+            const bool duplicate = std::any_of(candidates.hits.begin(), candidates.hits.end(), [&](const auto& other) {
+                return path::EqualInsensitive(other.path, hit.path);
             });
             if (duplicate) { ++duplicates; continue; }
-            if (rows.size() < kMaximumResults) rows.push_back({hit.name, hit.path, {}, hit.is_dir});
+            if (display_alias_hits.empty() && candidates.hits.size() >= kMaximumResults) continue;
+            candidates.hits.push_back(hit);
         }
         total = local_result.total + network_result.total;
         total -= std::min(total, duplicates);
-        truncated = total > rows.size(); busy = !(local_ready && network_ready) || network_result.scanning;
+        if (!display_alias_hits.empty()) {
+            candidates.total = total;
+            index::Query request;
+            request.needle = search_pinyin ? query : L"nopinyin: " + query;
+            request.limit = kMaximumResults;
+            candidates = index::MergeSearchResults(request, candidates, {}, display_alias_hits);
+            total = candidates.total;
+        }
+        for (auto& hit : candidates.hits) {
+            if (rows.size() >= kMaximumResults) break;
+            rows.push_back({std::move(hit.name), std::move(hit.path), {}, hit.is_dir});
+        }
+        truncated = total > rows.size();
+        busy = !(local_ready && network_ready) || network_result.scanning || display_alias_request;
         if (!busy) KillTimer(hwnd, kConnectTimeout);
         ClampSelection(false); Invalidate();
     }
@@ -586,7 +617,9 @@ struct GlobalSearchWindow::Impl {
                 const UINT32 icon_fg = hc ? row_fg : 0xffffff;
                 if (excel || word || pdf || powerpoint) Label(excel ? L"X" : word ? L"W" : pdf ? L"PDF" : L"P", {33, y + 27, 58, y + 54}, pdf ? 11.0f : 19.0f, icon_fg, true);
                 else Label(row.directory ? L"\xE8B7" : L"\xE8A5", {34, y + 27, 58, y + 54}, 19, icon_fg, false, FontRole::Icon);
-                Label(row.name, {78, y + 8, width - 30, y + 35}, 17, row_fg, true, FontRole::Text, !hc);
+                const auto alias = model::FindDisplayAlias(display_aliases, row.path);
+                Label(alias.empty() ? row.name : std::wstring(alias),
+                    {78, y + 8, width - 30, y + 35}, 17, row_fg, true, FontRole::Text, !hc);
                 Label(ParentPath(row.path), {78, y + 34, width - 30, y + 57}, 14, row_muted);
                 if (content_mode) Label(row.snippet, {78, y + 56, width - 30, y + 80}, 14, row_muted, false, FontRole::Text, !hc);
             }
@@ -711,6 +744,14 @@ struct GlobalSearchWindow::Impl {
             }
             return 0;
         }
+        case kDisplayAliasResult:
+            if (display_alias_mailbox) for (auto& result : display_alias_mailbox->Take(wp)) {
+                if (result.generation != generation || content_mode || !IsWindowVisible(hwnd)) continue;
+                display_alias_request.reset();
+                display_alias_hits = std::move(result.hits);
+                MergeFilenames();
+            }
+            return 0;
         case kContentResult: {
             index::ContentSearchUpdate update;
             while (contents.TakeUpdate(update)) {
@@ -798,6 +839,7 @@ struct GlobalSearchWindow::Impl {
     }
     ~Impl() {
         Cancel();
+        if (display_alias_mailbox) display_alias_mailbox->Close();
         // Borrowed filename clients remain live for the main window.
         if (owned_filenames) owned_filenames->Stop();
         if (owned_network) owned_network->Stop();
@@ -827,6 +869,11 @@ void GlobalSearchWindow::BindFilenameClients(index::IndexClient& filenames, inde
     impl_->filenames = &filenames;
     impl_->network = &network;
     impl_->next_request = &next_request;
+}
+void GlobalSearchWindow::BindDisplayAliases(app::WorkerPool& worker, model::DisplayAliasSnapshot aliases) {
+    if (!impl_) impl_ = std::make_unique<Impl>();
+    impl_->display_alias_worker = &worker;
+    impl_->display_aliases = std::move(aliases);
 }
 void GlobalSearchWindow::SetAppearance(bool dark, ui::WindowEffect effect, const std::wstring& background_image, D2D1_COLOR_F accent) {
     if (!impl_) impl_ = std::make_unique<Impl>();

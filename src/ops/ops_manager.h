@@ -400,7 +400,7 @@ private:
     };
 
     struct MenuJob {
-        enum class Kind { Query, Invoke, Close } kind = Kind::Query;
+        enum class Kind { Query, Invoke, Close, CreateFolder } kind = Kind::Query;
         uint32_t token = 0;
         uint32_t item_id = 0;
         uint32_t owner_hwnd = 0;
@@ -410,12 +410,14 @@ private:
         std::vector<std::wstring> disabled_clsids;
         std::wstring verb;
         std::wstring text;
+        std::function<void()> create_folder;
     };
 
     void WorkerThread();
     void StartShellClient();
     ipc::ShellClient::Owner ShellOwner() const;
     void MenuThread();
+    void CreateFolderDuringCopy(QueueItem item, const OpRequest& copy);
     struct OpenMailbox {
         // Launch callbacks own only this mailbox; the forwarding worker may
         // outlive OpsManager after the bounded shutdown wait.
@@ -500,7 +502,8 @@ private:
     void PushUndo(const OpRequest& req,
                   const std::vector<std::wstring>* actual_destinations = nullptr,
                   const std::vector<FileIdentity>* produced_identities = nullptr,
-                  const std::vector<FileObjectReference>* produced_references = nullptr);
+                  const std::vector<FileObjectReference>* produced_references = nullptr,
+                  uint64_t task_id = 0);
     void FinishMutationUndo(const OpRequest& req);
     void FinishRecycleUndo(const OpRequest& req);
     bool FinishMutationUndoLocked(const OpRequest& req); // caller holds mutex_
@@ -523,6 +526,7 @@ private:
     mutable std::mutex mutex_;            // guards queue_ + status_ + undo_
     std::condition_variable cv_;
     std::deque<QueueItem> queue_;
+    std::optional<OpStatus> concurrent_folder_status_;
     std::optional<QueueItem> active_item_;
     std::optional<QueueItem> lock_retry_;
     std::optional<QueueItem> elevation_retry_;

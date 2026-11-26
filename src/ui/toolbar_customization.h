@@ -53,8 +53,16 @@ struct ToolbarCustomizationInspection {
     bool add_enabled = false, remove_enabled = false, captured = false;
     float available_scroll = 0, current_scroll = 0;
     bool available_scrolling = false, current_scrolling = false, motion_enabled = false;
+    D2D1_RECT_F available_thumb{}, current_thumb{};
+    float available_focus_opacity = 0, primary_hover_opacity = 0, close_hover_opacity = 0;
+    bool interaction_pending = false;
     std::vector<int> order;
-    struct Row { int command = 0; D2D1_RECT_F bounds{}; bool category = false; };
+    struct Row {
+        int command = 0;
+        D2D1_RECT_F bounds{};
+        bool category = false;
+        float hover_opacity = 0, selection_opacity = 0;
+    };
     std::vector<Row> available_rows, current_rows;
 };
 } // namespace pulse::ui

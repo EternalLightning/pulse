@@ -8,6 +8,9 @@
 #include "folder_view_prefs.h"
 #include "command_shortcut.h"
 #include "../model/home_quick_access.h"
+#include "../ui/toolbar_layout.h"
+#include "../ops/terminal_shell.h"
+#include "../model/terminal_preferences.h"
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -20,7 +23,9 @@ enum class ExternalOpenMode { ReuseOpenedLocation = 0, Tab = 1, NewWindow = 2 };
 struct AppPrefs {
     bool persist = true;
     bool launch_on_startup = false;
-    bool start_to_tray = false;
+    ops::TerminalShell terminal_shell = ops::TerminalShell::WindowsPowerShell;
+    std::wstring terminal_pwsh_path;
+    model::TerminalPreferences terminal_display;
     bool close_last_tab_window = false;
     bool keep_running_on_close = false;
     bool open_folders_in_pulse = false;
@@ -50,7 +55,7 @@ struct AppPrefs {
     uint32_t global_search_key = 32; // VK_SPACE
     std::vector<CommandShortcutOverride> command_shortcuts;
     // Stable command IDs: New menu, Cut, Copy, Paste, Rename, Delete, Properties.
-    std::vector<int> toolbar_order{186, 2, 3, 4, 6, 5, 7, 306};
+    std::vector<int> toolbar_order{ui::kDefaultToolbarOrder.begin(), ui::kDefaultToolbarOrder.end()};
     bool show_hidden_files = false;
     // Hidden + system attributes; File Explorer keeps these behind a separate option.
     bool show_protected_os_files = false;
@@ -87,6 +92,9 @@ struct AppPrefs {
     void ResetToDefaults();
     bool Load();
     bool Save() const;
+    void ScheduleSave(uint64_t now);
+    uint64_t SaveDeadline() const { return save_due_; }
+    void SaveIfDue(uint64_t now);
     std::wstring ToJson() const;
     bool FromJson(const std::wstring& json);
 
@@ -102,6 +110,7 @@ struct AppPrefs {
 
 private:
     bool saves_enabled_ = true;
+    mutable uint64_t save_due_ = 0;
 };
 
 bool ParseAccentRgb(const std::wstring& text, uint32_t& rgb) noexcept;

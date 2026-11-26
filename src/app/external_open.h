@@ -27,6 +27,8 @@ struct ExternalOpenResult {
     ExternalOpenMode mode = ExternalOpenMode::ReuseOpenedLocation;
     bool resolution_complete = false;
     ResolvedOpenTarget target;
+    uint64_t startup_tab_identity = 0;
+    uint64_t startup_navigation_revision = 0;
     uint64_t takeover_token = 0;
     std::vector<std::wstring> selected_paths;
     unsigned selection_flags = 0;

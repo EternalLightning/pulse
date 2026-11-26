@@ -10,12 +10,17 @@
 #include "startup_launch.h"
 #include "../ui/panel_metrics.h"
 #include "../common/json_utils.h"
+#include "../common/user_storage.h"
 #include "../common/utf8_file.h"
 #include <windows.h>
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <cwctype>
 #include <algorithm>
+#include <condition_variable>
+#include <mutex>
+#include <optional>
+#include <thread>
 
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "shell32.lib")
@@ -53,6 +58,75 @@ std::wstring ReadStartupCommand() {
     return command;
 }
 
+class AppPrefsWriter {
+public:
+    bool WriteNow(const std::wstring& directory, const AppPrefs& prefs) {
+        const std::lock_guard write_lock(write_mutex_);
+        uint64_t revision;
+        {
+            const std::lock_guard queue_lock(queue_mutex_);
+            revision = submitted_;
+        }
+        if (!Write(directory, prefs)) return false;
+        // A successful synchronous save replaces a pending snapshot of this file.
+        const std::lock_guard queue_lock(queue_mutex_);
+        if (pending_ && revision == submitted_ && pending_->directory == directory)
+            pending_.reset();
+        return true;
+    }
+
+    void Submit(std::wstring directory, const AppPrefs& prefs) {
+        PendingSave snapshot{std::move(directory), prefs};
+        const std::lock_guard lock(queue_mutex_);
+        if (!thread_.joinable())
+            thread_ = std::jthread([this](std::stop_token stop) { Run(stop); });
+        pending_ = std::move(snapshot);
+        ++submitted_;
+        wake_.notify_one();
+    }
+
+private:
+    struct PendingSave {
+        std::wstring directory;
+        AppPrefs prefs;
+    };
+
+    static bool Write(const std::wstring& directory, const AppPrefs& prefs) {
+        CreateDirectoryW(directory.c_str(), nullptr);
+        return WriteUtf8FileAtomic(directory + L"\\app.json", prefs.ToJson());
+    }
+
+    void Run(std::stop_token stop) {
+        for (;;) {
+            {
+                std::unique_lock lock(queue_mutex_);
+                if (!wake_.wait(lock, stop, [&] { return pending_.has_value(); })) return;
+            }
+            const std::lock_guard write_lock(write_mutex_);
+            std::optional<PendingSave> snapshot;
+            {
+                const std::lock_guard queue_lock(queue_mutex_);
+                snapshot.swap(pending_);
+            }
+            if (snapshot) {
+                try { Write(snapshot->directory, snapshot->prefs); } catch (...) {}
+            }
+        }
+    }
+
+    std::mutex write_mutex_;
+    std::mutex queue_mutex_;
+    std::condition_variable_any wake_;
+    std::optional<PendingSave> pending_;
+    uint64_t submitted_ = 0;
+    std::jthread thread_;
+};
+
+AppPrefsWriter& PrefsWriter() {
+    static AppPrefsWriter writer;
+    return writer;
+}
+
 } // namespace
 
 namespace {
@@ -74,7 +148,9 @@ bool SamePath(const std::wstring& a, const std::wstring& b) {
 void AppPrefs::ResetToDefaults() {
     saves_enabled_ = true;
     launch_on_startup = false;
-    start_to_tray = false;
+    terminal_shell = ops::TerminalShell::WindowsPowerShell;
+    terminal_pwsh_path.clear();
+    terminal_display = {};
     close_last_tab_window = false;
     keep_running_on_close = false;
     open_folders_in_pulse = false;
@@ -101,7 +177,7 @@ void AppPrefs::ResetToDefaults() {
     global_search_modifiers = 1;
     global_search_key = 32;
     command_shortcuts.clear();
-    toolbar_order = {186, 2, 3, 4, 6, 5, 7, 306};
+    toolbar_order.assign(ui::kDefaultToolbarOrder.begin(), ui::kDefaultToolbarOrder.end());
     show_hidden_files = false;
     show_protected_os_files = false;
     blank_click_go_back = false;
@@ -135,10 +211,16 @@ std::wstring AppPrefs::ToJson() const {
     pulse::json::Escape(window_effect, escaped_effect);
     pulse::json::Escape(background_image, escaped_image);
     pulse::json::Escape(language, escaped_language);
-    std::wstring out = L"{\n  \"version\":4,\n  \"launch_on_startup\":";
+    std::wstring out = L"{\n  \"version\":6,\n  \"launch_on_startup\":";
     out += launch_on_startup ? L"true" : L"false";
-    out += L",\n  \"start_to_tray\":";
-    out += start_to_tray ? L"true" : L"false";
+    out += L",\n  \"terminal_shell\":" + std::to_wstring(static_cast<int>(terminal_shell));
+    out += L",\n  \"terminal_pwsh_path\":\"";
+    pulse::json::Escape(terminal_pwsh_path, out);
+    out += L"\",\n  \"terminal_font_family\":\"";
+    pulse::json::Escape(terminal_display.font_family, out);
+    out += L"\",\n  \"terminal_font_size\":" + std::to_wstring(terminal_display.font_size);
+    out += L",\n  \"terminal_follow_directory\":";
+    out += terminal_display.follow_directory ? L"true" : L"false";
     out += L",\n  \"close_last_tab_window\":";
     out += close_last_tab_window ? L"true" : L"false";
     out += L",\n  \"keep_running_on_close\":";
@@ -281,7 +363,17 @@ bool AppPrefs::FromJson(const std::wstring& json) {
     saves_enabled_ = true;
     folder_views.ReadJson(json);
     launch_on_startup = pulse::json::ExtractBool(doc, L"launch_on_startup", false);
-    start_to_tray = pulse::json::ExtractBool(doc, L"start_to_tray", false);
+    const int shell = pulse::json::ExtractInt(doc, L"terminal_shell", 0);
+    terminal_shell = shell >= 0 && shell <= static_cast<int>(ops::TerminalShell::PowerShell7)
+        ? static_cast<ops::TerminalShell>(shell) : ops::TerminalShell::WindowsPowerShell;
+    terminal_pwsh_path = pulse::json::ExtractString(doc, L"terminal_pwsh_path");
+    terminal_display.font_family = pulse::json::ExtractString(doc, L"terminal_font_family");
+    if (terminal_display.font_family.size() > 128 || terminal_display.font_family.find(L'\0') != std::wstring::npos)
+        terminal_display.font_family.clear();
+    using Display = model::TerminalPreferences;
+    const int size = pulse::json::ExtractInt(doc, L"terminal_font_size", Display::kDefaultSize);
+    terminal_display.font_size = size >= Display::kMinSize && size <= Display::kMaxSize ? size : Display::kDefaultSize;
+    terminal_display.follow_directory = pulse::json::ExtractBool(doc, L"terminal_follow_directory", true);
     close_last_tab_window = pulse::json::ExtractBool(doc, L"close_last_tab_window", false);
     keep_running_on_close = pulse::json::ExtractBool(doc, L"keep_running_on_close", false);
     open_folders_in_pulse = pulse::json::ExtractBool(doc, L"open_folders_in_pulse", false);
@@ -333,7 +425,7 @@ bool AppPrefs::FromJson(const std::wstring& json) {
             if (command_shortcuts.size() >= 256) break;
         }
     }
-    toolbar_order = {186, 2, 3, 4, 6, 5, 7, 306};
+    toolbar_order.assign(ui::kDefaultToolbarOrder.begin(), ui::kDefaultToolbarOrder.end());
     if (const auto* entries = doc.Find(L"toolbar_order"); entries && entries->kind == pulse::json::Kind::Array) {
         toolbar_order.clear();
         for (const auto& entry : entries->children) {
@@ -343,6 +435,14 @@ bool AppPrefs::FromJson(const std::wstring& json) {
                 toolbar_order.push_back(command);
             if (toolbar_order.size() >= 64) break;
         }
+        constexpr std::array old_default{186, 2, 3, 4, 6, 5, 7, 306};
+        constexpr std::array previous_default{186, 2, 3, 4, 6, 5750, 5, 7, 306};
+        constexpr std::array previous_terminal_default{186, 2, 3, 4, 6, 5750, 5, 7, 306, 5800};
+        const int version = pulse::json::Int(doc.Find(L"version"));
+        if ((version < 5 && std::ranges::equal(toolbar_order, old_default)) ||
+            (version < 6 && (std::ranges::equal(toolbar_order, previous_default) ||
+                std::ranges::equal(toolbar_order, previous_terminal_default))))
+            toolbar_order.assign(ui::kDefaultToolbarOrder.begin(), ui::kDefaultToolbarOrder.end());
     }
     show_hidden_files = pulse::json::ExtractBool(doc, L"show_hidden_files", false);
     show_protected_os_files = pulse::json::ExtractBool(doc, L"show_protected_os_files", false);
@@ -539,6 +639,7 @@ bool ParseWallpaperVisibility(std::wstring_view text, int& percent) noexcept {
 
 bool AppPrefs::Load() {
     saves_enabled_ = false;
+    save_due_ = 0;
     had_file = false;
     const std::wstring dir = GetPulseDataDir();
     if (dir.empty()) {
@@ -565,9 +666,25 @@ bool AppPrefs::Load() {
 bool AppPrefs::Save() const {
     if (!persist) return true;
     if (!saves_enabled_) return false;
-    const std::wstring dir = GetPulseDataDir();
-    if (dir.empty()) return false;
-    return WriteUtf8FileAtomic(dir + L"\\app.json", ToJson());
+    const auto directory = storage::ConfigurationRoot();
+    if (directory.empty() || !PrefsWriter().WriteNow(directory, *this)) return false;
+    save_due_ = 0;
+    return true;
+}
+
+void AppPrefs::ScheduleSave(uint64_t now) {
+    constexpr uint64_t kSaveDelayMs = 150;
+    if (persist && saves_enabled_ && !save_due_) save_due_ = now + kSaveDelayMs;
+}
+
+void AppPrefs::SaveIfDue(uint64_t now) {
+    if (!save_due_ || now < save_due_) return;
+    save_due_ = 0;
+    if (!persist || !saves_enabled_) return;
+    try {
+        auto directory = storage::ConfigurationRoot();
+        if (!directory.empty()) PrefsWriter().Submit(std::move(directory), *this);
+    } catch (...) {}
 }
 
 } // namespace pulse::app

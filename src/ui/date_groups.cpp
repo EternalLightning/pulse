@@ -9,7 +9,7 @@
 #include <cwctype>
 #include <map>
 
-namespace pulse::app {
+namespace pulse::ui {
 namespace {
 
 using namespace std::chrono;
@@ -56,30 +56,12 @@ unsigned char DateBucket(FILETIME utc, const Boundaries& bounds) {
 
 } // namespace
 
-std::vector<ui::DateGroup> BuildDateGroups(const fs::SnapshotPtr& snapshot,
-    const std::vector<int>* visible_indices, const SYSTEMTIME& today) {
-    std::vector<ui::DateGroup> groups;
-    if (!snapshot) return groups;
-    const Boundaries bounds = MakeBoundaries(today);
-    const size_t count = visible_indices ? visible_indices->size() : snapshot->size();
-    for (size_t row = 0; row < count; ++row) {
-        const int source = visible_indices ? (*visible_indices)[row] : static_cast<int>(row);
-        if (source < 0 || static_cast<size_t>(source) >= snapshot->size()) continue;
-        const unsigned char bucket = DateBucket((*snapshot)[source].mtime, bounds);
-        if (groups.empty() || groups.back().bucket != bucket)
-            groups.push_back({static_cast<int>(row), 1, bucket, {}});
-        else
-            ++groups.back().count;
-    }
-    return groups;
-}
-
 GroupedView BuildGroupedView(const fs::SnapshotPtr& snapshot,
     const std::vector<int>* visible_indices, ui::GroupMode mode,
     model::SortDirection direction, const SYSTEMTIME& today) {
     GroupedView out;
     if (!snapshot || mode == ui::GroupMode::None || mode == ui::GroupMode::Auto) return out;
-    const Boundaries bounds = MakeBoundaries(today);
+    const auto bounds = mode == GroupMode::DateModified ? MakeBoundaries(today) : Boundaries{};
     struct Key {
         int bucket = 0;
         std::wstring extension;
@@ -142,4 +124,4 @@ GroupedView BuildGroupedView(const fs::SnapshotPtr& snapshot,
     return out;
 }
 
-} // namespace pulse::app
+} // namespace pulse::ui

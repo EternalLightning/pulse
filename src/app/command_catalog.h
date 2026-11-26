@@ -39,12 +39,17 @@ struct CommandContext {
     bool terminal_available = false;
     bool copy_path_available = false;
     bool can_view = true;
+    bool side_by_side = false;
+    bool link_browsing_on = false;
+    bool can_link_browsing = false;
+    bool can_sync_directories = false;
+    bool terminal_panel_open = false;
 };
 
 enum class CommandAvailability {
     Always, Selection, MutableSelection, Rename, BatchRename, Properties,
     Paste, NewItem, Undo, CopyToTarget, MoveToTarget, Entries, PinWorkspace,
-    Terminal, CopyPath, View, GroupSelection, DissolveSelection,
+    Terminal, CopyPath, View, GroupSelection, DissolveSelection, DisplayAlias, LinkedBrowsing, DirectorySync,
 };
 
 struct CommandDescriptor {

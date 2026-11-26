@@ -34,10 +34,12 @@ enum class Operation : uint32_t { OpenFiles = 1, PickFolder, SaveFile };
 // DialogLabels carries the caller's title / OK / file-name labels; the label
 // section is on the wire only when it is required, so old peers fail closed.
 enum Capability : uint32_t { Open = 1, Folder = 2, Save = 4, MultiSelect = 8, Filters = 16, PreserveLinks = 32, AdvisoryFilters = 64, ExplicitAccessPolicy = 128, LocalOpenAccessV1 = 256,
-                             LocalSaveAccessV1 = 512, DialogLabels = 1024, CallerWindow = 2048 };
+                             LocalSaveAccessV1 = 512, DialogLabels = 1024, CallerWindow = 2048, DialogEvents = 4096, DialogButton = 8192 };
 constexpr uint32_t kRequestCapabilities = Open | Folder | Save | MultiSelect | Filters | PreserveLinks | AdvisoryFilters | ExplicitAccessPolicy | LocalOpenAccessV1 |
-    LocalSaveAccessV1 | DialogLabels | CallerWindow;
+    LocalSaveAccessV1 | DialogLabels | CallerWindow | DialogEvents | DialogButton;
 constexpr uint32_t kSessionVersion = 2;
+// Version 3 lets the host return the result while its dialog still owns the foreground.
+constexpr uint32_t kSessionForegroundHandoff = 3;
 constexpr uint32_t kSessionBasic = 1;
 constexpr uint32_t kSessionFeatures = kSessionBasic;
 enum Option : uint32_t { AllowMultiSelect = 1, ShowHidden = 2, OverwritePrompt = 4, NoDereferenceLinks = 8, AdvisoryFileFilters = 16, SkipAccessValidation = 32, ValidateLocalOpenAccessV1 = 64,
@@ -72,6 +74,7 @@ struct Request {
     // CallerWindow only: the caller's window (an HWND value) for a host that
     // has no command line to receive it (a standby host). Nonzero when present.
     uint64_t caller_window = 0;
+    std::u16string button_label;
     bool operator==(const Request&) const = default;
 };
 struct Response {
@@ -97,9 +100,33 @@ struct SessionWelcome {
     uint32_t capabilities = kRequestCapabilities;
     bool operator==(const SessionWelcome&) const = default;
 };
+enum class EventKind : uint32_t {
+    FolderChanging = 1, FolderChanged, SelectionChanged, TypeChanged, FileOk, Overwrite,
+    ControlActivating, ButtonClicked, Ready
+};
+// Each event is answered before the host sends the next. The snapshot belongs
+// to this callback, so caller getters never have to make a nested pipe request.
+struct DialogEvent {
+    uint32_t serial = 0;
+    EventKind kind{};
+    uint64_t window = 0;
+    uint32_t filter_index = 0;
+    std::u16string folder;
+    std::u16string filename;
+    std::u16string target;
+    std::vector<std::u16string> selections;
+    std::vector<std::u16string> candidates;
+    bool operator==(const DialogEvent&) const = default;
+};
+struct DialogEventReply {
+    uint32_t serial = 0;
+    uint32_t result = 0;
+    uint32_t overwrite = 0;
+    bool operator==(const DialogEventReply&) const = default;
+};
 struct Message {
     RequestId request_id{};
-    std::variant<Request, Response, Cancel, SessionHello, SessionWelcome> body;
+    std::variant<Request, Response, Cancel, SessionHello, SessionWelcome, DialogEvent, DialogEventReply> body;
     bool operator==(const Message&) const = default;
 };
 // Output is unchanged on failure. Decode validates wire semantics; callers must
@@ -107,6 +134,7 @@ struct Message {
 CodecError Encode(const Message& message, std::vector<uint8_t>& output);
 CodecError Decode(std::span<const uint8_t> bytes, Message& output);
 bool ValidateResponse(const Message& request, const Message& response);
+bool ValidateDialogEvent(const Request& request, const DialogEvent& event);
 Message MakeSessionWelcome(const Message& hello);
 bool ValidateSessionWelcome(const Message& hello, const Message& welcome);
 bool ValidateSessionRequest(const Message& hello, const Message& welcome, const Message& request);

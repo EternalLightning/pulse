@@ -3,7 +3,7 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
-#include "../app/date_groups.h"
+#include "../ui/date_groups.h"
 #include "../ui/view_layout.h"
 #include <d2d1helper.h>
 #include <cstdio>
@@ -88,7 +88,8 @@ int main() {
     today.wYear = 2026;
     today.wMonth = 9;
     today.wDay = 29;
-    const auto groups = app::BuildDateGroups(entries, nullptr, today);
+    const auto groups = ui::BuildGroupedView(entries, nullptr, ui::GroupMode::DateModified,
+        model::SortDirection::Desc, today).groups;
     const bool buckets = groups.size() == 5 && groups[0].bucket == 0 &&
         groups[1].bucket == 1 && groups[2].bucket == 3 &&
         groups[2].count == 2 && groups[3].bucket == 4 && groups[4].bucket == 5;
@@ -108,7 +109,8 @@ int main() {
         entries->size(), 0, 75, 1.0f, 34.0f, &groups);
     const auto [visible_first, visible_last] = scrolled.VisibleRange();
     const std::vector<int> filtered{0, 2, 5};
-    const auto filtered_groups = app::BuildDateGroups(entries, &filtered, today);
+    const auto filtered_groups = ui::BuildGroupedView(entries, &filtered, ui::GroupMode::DateModified,
+        model::SortDirection::Desc, today).groups;
     const bool scrolled_and_filtered = scrolled.HitTest(80, 10) == -1 &&
         scrolled.HitTest(80, 35) == 1 && visible_first <= 1 && visible_last >= 1 &&
         filtered_groups.size() == 3 && filtered_groups[0].first == 0 &&

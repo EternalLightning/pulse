@@ -150,7 +150,7 @@ void MainRenderer::DrawColumnStrip(const WindowViewModel& vm, const PaneViewMode
     }
 }
 
-void MainRenderer::DrawColumnStripColumn(const WindowViewModel& vm, const PaneViewModel& /*pane*/,
+void MainRenderer::DrawColumnStripColumn(const WindowViewModel& vm, const PaneViewModel& pane,
                                          const ColumnStripColumnView& column, int column_id,
                                          const D2D1_RECT_F& rc, int pane_index,
                                          const Theme& theme) {
@@ -237,7 +237,9 @@ void MainRenderer::DrawColumnStripColumn(const WindowViewModel& vm, const PaneVi
         MakeBrush(dc, dim ? WithAlpha(theme.text, theme.text.a * 0.55f) : theme.text, brText_);
         const float tx = ix + icon + 8.0f * scale_;
         const float chevron_w = entry.is_dir ? 18.0f * scale_ : 0.0f;
-        DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, compositor_->FileNameFormat(), brText_.get(), entry.name,
+        const auto alias = model::FindDisplayAlias(pane.display_aliases, full);
+        const auto name = alias.empty() ? entry.name : std::wstring(alias);
+        DrawTextEndEllipsis(compositor_, theme.bg, dc, factory, compositor_->FileNameFormat(), brText_.get(), name,
                             tx, top, std::max(0.0f, cell.right - tx - chevron_w - 4.0f * scale_),
                             row_height_);
         if (entry.is_dir) {

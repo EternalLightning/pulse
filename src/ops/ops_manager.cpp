@@ -15,6 +15,7 @@
 #include "../fs/fs_enum.h"
 #include "../ipc/shell_client.h"
 #include "../common/path_utils.h"
+#include "../common/file_create.h"
 #include "../common/file_name.h"
 #include "../common/localization.h"
 #include "../common/file_operation_error.h"
@@ -30,6 +31,8 @@
 namespace pulse::ops {
 
 namespace {
+
+constexpr size_t kFinishedTaskLimit = 64;
 
 std::wstring FileName(const std::wstring& path) {
     std::wstring_view v = path;
@@ -96,6 +99,53 @@ std::wstring JoinPath(const std::wstring& dir, const std::wstring& name) {
     if (dir.empty()) return name;
     if (dir.back() == L'\\') return dir + name;
     return dir + L"\\" + name;
+}
+
+std::wstring FixedPath(std::wstring_view path) {
+    auto plain = pulse::path::StripExtendedPathPrefix(path);
+    if (plain.size() < 3 || plain[1] != L':' || plain[2] != L'\\') return {};
+    const wchar_t root[]{plain[0], L':', L'\\', L'\0'};
+    return GetDriveTypeW(root) == DRIVE_FIXED ? plain : std::wstring{};
+}
+
+std::wstring ExistingFixedPath(const std::wstring& path) {
+    if (FixedPath(path).empty()) return {};
+    const auto handle = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return {};
+    std::wstring canonical(32768, L'\0');
+    const auto n = GetFinalPathNameByHandleW(handle, canonical.data(), static_cast<DWORD>(canonical.size()),
+        FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    CloseHandle(handle);
+    if (!n || n >= canonical.size()) return {};
+    canonical.resize(n);
+    return FixedPath(canonical);
+}
+
+bool SameOrChild(std::wstring_view path, std::wstring_view parent) {
+    if (path.size() < parent.size()) return false;
+    if (path.size() != parent.size() && !parent.ends_with(L'\\') && path[parent.size()] != L'\\') return false;
+    const auto length = static_cast<int>(parent.size());
+    return CompareStringOrdinal(path.data(), length, parent.data(), length, TRUE) == CSTR_EQUAL;
+}
+
+std::wstring IndependentFolderPath(const std::wstring& folder, const OpRequest& copy) {
+    const auto name = FileName(folder);
+    if (!pulse::path::IsValidFileName(name)) return {};
+    const auto parent = ExistingFixedPath(ParentOf(folder));
+    const auto destination = ExistingFixedPath(copy.dest_dir);
+    if (parent.empty() || destination.empty()) return {};
+    const auto path = JoinPath(parent, name);
+    const auto overlaps = [&](const auto& other) { return SameOrChild(path, other) || SameOrChild(other, path); };
+    for (const auto& source : copy.sources) {
+        const auto input = ExistingFixedPath(source);
+        if (input.empty() || overlaps(input)) return {};
+        const auto output = JoinPath(destination, FileName(source));
+        if (overlaps(output)) return {};
+        const auto existing = ExistingFixedPath(output);
+        if (!existing.empty() && overlaps(existing)) return {};
+    }
+    return L"\\\\?\\" + path;
 }
 
 std::wstring DisplayPath(const std::wstring& path) {
@@ -262,7 +312,7 @@ void OpsManager::Start(std::function<void()> notify) {
 
 bool OpsManager::HasPendingFileOperations() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return file_operation_in_flight_ || std::any_of(queue_.begin(), queue_.end(),
+    return file_operation_in_flight_ || concurrent_folder_status_ || std::any_of(queue_.begin(), queue_.end(),
         [](const QueueItem& item) { return item.open_path.empty(); });
 }
 
@@ -341,6 +391,7 @@ void OpsManager::Stop() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         running_ = false;
+        concurrent_folder_status_.reset();
     }
     CancelCurrent(); // unblock an in-flight RunShellOp via DONE(cancelled)
     cv_.notify_all();
@@ -360,15 +411,66 @@ uint64_t OpsManager::Submit(OpRequest req) {
     item.req = std::move(req);
     uint64_t seq = 0;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::scoped_lock lock(mutex_, menu_mutex_);
         if (!accepting_) return 0;
         seq = next_seq_++;
         item.seq = seq;
-        queue_.push_back(std::move(item));
+        if (item.req.type == OpType::CreateFolder && item.req.sources.size() == 1 &&
+            item.req.folder_action == FolderAction::None && !item.req.is_undo && !item.req.undo_group &&
+            !item.req.folder_metadata && menu_running_ && !concurrent_folder_status_ && queue_.empty() &&
+            active_item_ && active_item_->req.type == OpType::Copy && transfer_active_.load() &&
+            active_item_->req.sources.size() <= 32) {
+            MenuJob job;
+            job.kind = MenuJob::Kind::CreateFolder;
+            auto status = QueuedTaskStatus(item.req, item.seq);
+            job.create_folder = [this, item = std::move(item), copy = active_item_->req]() mutable {
+                CreateFolderDuringCopy(std::move(item), copy);
+            };
+            menu_queue_.push_front(std::move(job));
+            concurrent_folder_status_ = std::move(status);
+            menu_cv_.notify_one();
+        } else queue_.push_back(std::move(item));
     }
     if (notify_) notify_();
     cv_.notify_one();
     return seq;
+}
+
+void OpsManager::CreateFolderDuringCopy(QueueItem item, const OpRequest& copy) {
+    FileIdentity identity;
+    bool created = false;
+    if (!stopping_.load()) {
+        const auto path = IndependentFolderPath(item.req.sources.front(), copy);
+        if (!path.empty() && !stopping_.load()) {
+            if (const HANDLE handle = pulse::CreateDirectoryHandle(path)) {
+                created = true;
+                ReadFileIdentity(handle, identity);
+                CloseHandle(handle);
+            }
+        }
+    }
+    if (created) {
+        const std::vector<FileIdentity> identities{identity};
+        PushUndo(item.req, &item.req.sources, &identities, nullptr, item.seq);
+    }
+    {
+        std::lock_guard lock(mutex_);
+        concurrent_folder_status_.reset();
+        if (created) {
+            auto done = QueuedTaskStatus(item.req, item.seq);
+            done.phase = OpPhase::Completed;
+            done.summary = l10n::Get(l10n::StringId::OpCompleted);
+            done.completed_items = 1;
+            done.percent = 100.0f;
+            finished_tasks_.push_back(std::move(done));
+            if (finished_tasks_.size() > kFinishedTaskLimit) finished_tasks_.pop_front();
+            ++status_.completed_ops;
+        } else if (accepting_ && !stopping_.load()) {
+            queue_.push_front(std::move(item));
+        }
+    }
+    cv_.notify_one();
+    if (notify_) notify_();
 }
 
 void OpsManager::OpenWith(const std::wstring& path, std::function<ImageOpenContext()> image_context) {
@@ -505,18 +607,11 @@ void OpsManager::CancelCurrent() {
 }
 
 void OpsManager::PauseCurrent() {
-    if (!transfer_active_.load() || transfer_cancel_.load()) return;
-    transfer_pause_.store(true);
-    if (const auto id = current_req_id_.load()) ipc::ShellClient::Instance().SetFileOperationPaused(id, true);
-    SetStatus([](OpStatus& status) { if (status.active) status.phase = OpPhase::Paused; });
+    PauseTask(Status().task_id);
 }
 
 void OpsManager::ResumeCurrent() {
-    if (!transfer_active_.load()) return;
-    transfer_pause_.store(false);
-    if (const auto id = current_req_id_.load()) ipc::ShellClient::Instance().SetFileOperationPaused(id, false);
-    transfer_control_cv_.notify_all();
-    SetStatus([](OpStatus& status) { if (status.active) status.phase = OpPhase::Running; });
+    ResumeTask(Status().task_id);
 }
 
 bool OpsManager::MatchesActiveTransferLocked(uint64_t task_id) const {
@@ -526,40 +621,46 @@ bool OpsManager::MatchesActiveTransferLocked(uint64_t task_id) const {
 }
 
 bool OpsManager::CancelTask(uint64_t task_id) {
+    uint32_t request = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!MatchesActiveTransferLocked(task_id) || transfer_cancel_.load()) return false;
         transfer_cancel_.store(true);
         transfer_pause_.store(false);
         status_.phase = OpPhase::Cancelling;
+        request = current_req_id_.load();
     }
     transfer_control_cv_.notify_all();
-    if (const auto id = current_req_id_.load()) ipc::ShellClient::Instance().Cancel(id);
+    if (request) ipc::ShellClient::Instance().Cancel(request);
     if (notify_) notify_();
     return true;
 }
 
 bool OpsManager::PauseTask(uint64_t task_id) {
+    uint32_t request = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!MatchesActiveTransferLocked(task_id) || transfer_cancel_.load()) return false;
         transfer_pause_.store(true);
+        status_.phase = OpPhase::Paused;
+        request = current_req_id_.load();
     }
-    if (const auto id = current_req_id_.load()) ipc::ShellClient::Instance().SetFileOperationPaused(id, true);
-    SetStatus([](OpStatus& status) { if (status.active) status.phase = OpPhase::Paused; });
+    if (request) ipc::ShellClient::Instance().SetFileOperationPaused(request, true);
     if (notify_) notify_();
     return true;
 }
 
 bool OpsManager::ResumeTask(uint64_t task_id) {
+    uint32_t request = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!MatchesActiveTransferLocked(task_id) || transfer_cancel_.load()) return false;
         transfer_pause_.store(false);
+        status_.phase = OpPhase::Running;
+        request = current_req_id_.load();
     }
     transfer_control_cv_.notify_all();
-    if (const auto id = current_req_id_.load()) ipc::ShellClient::Instance().SetFileOperationPaused(id, false);
-    SetStatus([](OpStatus& status) { if (status.active) status.phase = OpPhase::Running; });
+    if (request) ipc::ShellClient::Instance().SetFileOperationPaused(request, false);
     if (notify_) notify_();
     return true;
 }
@@ -653,6 +754,7 @@ std::vector<OpStatus> OpsManager::TaskStatuses() const {
     } else if (status_.task_id && (!IsFinishedTask(status_) || continuing)) {
         tasks.push_back(present_current(status_));
     }
+    if (concurrent_folder_status_) tasks.push_back(PresentOperationStatus(*concurrent_folder_status_));
     for (const auto& item : queue_) {
         if (item.open_path.empty() && item.seq)
             tasks.push_back(PresentOperationStatus(QueuedTaskStatus(item.req, item.seq)));
@@ -943,7 +1045,6 @@ void OpsManager::RememberFinishedTaskLocked(bool allow_new) {
     }
     else if (allow_new) {
         finished_tasks_.push_back(snapshot);
-        constexpr size_t kFinishedTaskLimit = 64;
         if (finished_tasks_.size() > kFinishedTaskLimit) finished_tasks_.pop_front();
     }
 }
@@ -1039,7 +1140,8 @@ void OpsManager::InvalidateRecycleUndo(const std::vector<std::wstring>& changed,
 void OpsManager::PushUndo(const OpRequest& req,
                           const std::vector<std::wstring>* actual_destinations,
                           const std::vector<FileIdentity>* produced_identities,
-                          const std::vector<FileObjectReference>* produced_references) {
+                          const std::vector<FileObjectReference>* produced_references,
+                          uint64_t task_id) {
     CompletedOperation completed;
     completed.type = req.type;
     completed.cut_clipboard_sequence = req.cut_clipboard_sequence;
@@ -1062,7 +1164,7 @@ void OpsManager::PushUndo(const OpRequest& req,
     const auto destinations = record_undo_ ? completed.destinations : std::vector<std::wstring>{};
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        completed.task_id = status_.task_id;
+        completed.task_id = task_id ? task_id : status_.task_id;
         completions_.push_back(std::move(completed));
     }
     if (!record_undo_) return;
@@ -1518,7 +1620,8 @@ void OpsManager::StartShellClient() {
             }
             if (!deleting && shell_progress_total_.load()) {
                 st.total_items = shell_progress_total_.load();
-                st.completed_items = shell_progress_base_.load();
+                const bool batched = transfer_active_.load() && total_items > 1;
+                st.completed_items = shell_progress_base_.load() + (batched ? (std::min)(items_done, total_items) : 0);
                 st.percent = 100.0f * (static_cast<float>(st.completed_items) +
                     (std::max)(0.0f, pct) / 100.0f) / static_cast<float>(st.total_items);
                 st.current_item = std::move(item);
@@ -1576,11 +1679,13 @@ void OpsManager::WorkerThread() {
         {
             std::unique_lock<std::mutex> lock(mutex_);
             const auto ready = [this] {
-                return !queue_.empty() || !running_ || undo_validation_requested_.load();
+                return !running_ || (!concurrent_folder_status_ &&
+                    (!queue_.empty() || undo_validation_requested_.load()));
             };
             if (record_undo_) cv_.wait_for(lock, std::chrono::seconds(1), ready);
             else cv_.wait(lock, ready);
             if (!running_) break;
+            if (concurrent_folder_status_) continue;
             if (queue_.empty()) {
                 lock.unlock();
                 RefreshRecycleUndoValidity();
@@ -1759,6 +1864,9 @@ void OpsManager::MenuThread() {
         }
         auto& client = ipc::ShellClient::Instance();
         switch (job.kind) {
+        case MenuJob::Kind::CreateFolder:
+            job.create_folder();
+            break;
         case MenuJob::Kind::Query: {
             const uint32_t id = client.QueryContextMenu(
                 job.paths, job.owner_hwnd, job.background, job.extended,

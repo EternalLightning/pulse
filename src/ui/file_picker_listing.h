@@ -2,7 +2,8 @@
 #pragma once
 
 #include "file_picker_dialog.h"
-#include "../fs/fs_enum.h"
+#include "date_groups.h"
+#include "sort_types.h"
 
 #include <atomic>
 #include <memory>
@@ -17,15 +18,25 @@ struct ListingRequest {
     std::wstring directory;
     PickerPlacesLoader load_places;
     PickerPlaces places;
+    std::shared_ptr<const model::PlacesCatalog> catalog;
     PickerMode mode = PickerMode::Open;
     std::wstring filter;
-    bool show_hidden = false;
+    std::wstring query, query_error;
+    SortColumn sort_column = SortColumn::Name;
+    SortDirection sort_direction = SortDirection::Asc;
+    FileGrouping grouping;
+    model::FolderSortMode folder_sort = model::FolderSortMode::FoldersFirst;
+    std::optional<PickerFolderView> folder_view;
+    fs::SnapshotPtr base;
+    bool project_only = false;
+    bool type_filtered = false;
+    model::FileVisibility visibility;
     bool back = false;
     std::atomic<bool> cancelled{false};
     std::atomic<bool> ready{false};
     bool succeeded = false;
     bool filtered = false;
-    std::vector<fs::DirEntry> entries;
+    GroupedView projection;
 };
 
 using Listing = std::shared_ptr<ListingRequest>;

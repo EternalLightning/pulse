@@ -242,9 +242,12 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         button.bordered = false;
         button.skip_glyph = true;
         button.state.enabled = item->enabled; button.state.hovered = hovered;
+        if (item->selected) DrawButton(placed.bounds, theme, theme.fill_selected, L"", L"",
+            theme.text, true, true);
         painter_.DrawButton(button);
         draw_command_icon(placed.command,toolbar_icons::Resolve(item->glyph,item->pictogram,item->command),placed.bounds,item->enabled,
-            !item->enabled ? theme.text_disabled : IsHighContrast() && hovered ? theme.text_selected : theme.text);
+            !item->enabled ? theme.text_disabled : IsHighContrast() && (hovered || item->selected)
+                ? theme.text_selected : item->selected ? theme.accent_ink : theme.text);
     }
     const auto contextual_button = [&](const D2D1_RECT_F& bounds, HitTestResult::Region hit,
                                        const wchar_t* text, bool enabled) {

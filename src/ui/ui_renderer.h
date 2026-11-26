@@ -30,6 +30,8 @@
 #include "sysctx_view.h"
 #include "../model/builtin_menu_items.h"
 #include "../model/details_columns.h"
+#include "../model/display_aliases.h"
+#include "../model/terminal_preferences.h"
 #include "shortcut_settings_model.h"
 #include "home_quick_access_settings_model.h"
 #include "../fs/fs_enum.h"
@@ -47,6 +49,8 @@
 namespace pulse::model { class PlacesCatalog; }
 
 namespace pulse::ui {
+
+class TerminalSurface;
 enum class PaneHeaderIcon;
 
 inline constexpr unsigned kSettingsContextExpandedMask = 0x3f00u;
@@ -215,6 +219,7 @@ struct PaneViewModel {
     std::shared_ptr<index::ContentResultStore> content_results;
     mutable std::shared_ptr<RowPresentationCache> row_cache;
     const model::PlacesCatalog* tag_catalog = nullptr;
+    model::DisplayAliasSnapshot display_aliases;
     std::unordered_set<std::wstring> cut_names;
     std::shared_ptr<const TagDots> tag_dots;
     bool loading = false;
@@ -225,6 +230,7 @@ struct PaneViewModel {
     bool can_go_up = false;
     bool can_create = false;
     bool is_file_system = false;
+    bool show_item_actions = true;
     bool cloud_status_column = false;
     bool curated_order = false;
     bool is_starred = false;
@@ -549,6 +555,7 @@ struct ToolbarCommandView {
     std::wstring text, glyph;
     bool enabled = false;
     fluent::MenuPictogram pictogram = fluent::MenuPictogram::None;
+    bool selected = false;
 };
 struct WindowViewModel {
     std::vector<int> toolbar_order{186, 2, 3, 4, 6, 5, 7};
@@ -578,6 +585,9 @@ struct WindowViewModel {
     bool staging_tray_enabled = true;
     float staging_tray_presence = -1.0f; // Negative uses the unsampled enabled state.
     bool details_visible = false;   // right details panel toggle (view menu)
+    TerminalSurface* terminal = nullptr;
+    bool terminal_focused = false;
+    bool terminal_close_pressed = false;
     bool details_motion_sampled = false;
     DetailsPanelView details;
     StatusBarView status;
@@ -672,8 +682,9 @@ struct WindowViewModel {
     std::wstring settings_focus_key;
     int settings_pressed_region = 0, settings_pressed_index = -1, settings_pressed_sub_index = -1;
     D2D1_RECT_F settings_pressed_bounds{};
+    int settings_terminal_shell = 0;
+    model::TerminalPreferences settings_terminal_display;
     bool settings_launch_on_startup = false;
-    bool settings_start_to_tray = false;
     bool settings_text_compare = false;
     bool settings_close_last_tab_window = false;
     bool settings_keep_running = false;
@@ -858,6 +869,8 @@ struct HitTestResult {
         DetailsPreviewEnable,   // preview pane on/off chip inside the well
         DetailsCloudDownload,
         DetailsResize,
+        TerminalBody,
+        TerminalClose,
         StatusBar,
         StatusBarTask,
         StatusBarCancelSearch,
@@ -986,6 +999,7 @@ public:
 
     // Right details panel: toggled from the view menu; ContentRect shrinks.
     void SetDetailsPanelVisible(bool visible) {
+        if (details_visible_ && !visible) preview_handler_.Hide();
         details_visible_ = visible;
         if (!visible) {
             EndDetailsPreviewPan();
@@ -1000,6 +1014,18 @@ public:
     void SetDetailsPanelWidth(float width_dip) {
         details_width_ = std::clamp(width_dip, kDetailsMinWidthDip, kPanelWidthMaxDip);
     }
+    void SetTerminalPanelVisible(bool visible) { terminal_visible_ = visible; }
+    void ClearSidePanelSnapshot() { details_exit_commands_.reset(); }
+    void SetTerminalPanelWidth(float width_dip) {
+        terminal_width_ = std::clamp(width_dip, kDetailsMinWidthDip, kPanelWidthMaxDip);
+    }
+    void SnapTerminalPanel() {
+        details_open_motion_.Tick(true, 0, false, 220);
+        terminal_mode_motion_.Tick(true, 0, false, 220);
+    }
+    bool TerminalFits(float window_w) const { return window_w >= kTerminalVisibleWindowDip * scale_; }
+    D2D1_RECT_F TerminalBodyRect(float w, float h) const;
+    D2D1_RECT_F TerminalCloseRect(float w, float h) const;
     // Splitter drag limits in DIPs for the current window size.
     float SidebarMaxWidthDip(float window_w) const;
     float DetailsMaxWidthDip(float window_w) const;
@@ -1186,6 +1212,15 @@ public:
                           std::vector<BreadcrumbPlaced>& out) const;
 
     void Render(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    D2D1_RECT_F FileRowsRect(D2D1_RECT_F bounds, ViewMode mode) const;
+    ViewLayout MakeFileLayout(const PaneViewModel& vm, const D2D1_RECT_F& rows,
+                              float scroll_x, float scroll_y) const;
+    int FileItemFromPoint(const PaneViewModel& vm, const ViewLayout& layout, const D2D1_RECT_F& rows,
+                          float x, float y) const;
+    bool FileScrollbarGeometry(const ViewLayout& layout, const D2D1_RECT_F& rows,
+                                float offset, D2D1_RECT_F& track, D2D1_RECT_F& thumb) const;
+    void DrawEmbeddedFileView(const PaneViewModel& vm, const D2D1_RECT_F& bounds,
+                              const Theme& theme, bool focused, float scrollbar_hover);
     void InvalidateWallpaper() { material_.Invalidate(); }
 
     HitTestResult HitTest(const WindowViewModel& vm, const D2D1_RECT_F& rect,
@@ -1292,6 +1327,7 @@ private:
     void DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawPane(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawPaneSlots(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     void DrawHome(const WindowViewModel& vm, const PaneViewModel& pane,
                   const D2D1_RECT_F& bounds, int pane_index, const Theme& theme);
     void DrawSettingsSwitch(const WindowViewModel& vm, const std::wstring& key, const D2D1_RECT_F& bounds,
@@ -1300,6 +1336,9 @@ private:
     void DrawSinglePane(const WindowViewModel& vm, const PaneViewModel& pane,
                         const D2D1_RECT_F& bounds, int pane_index, bool focused, bool target,
                         const Theme& theme);
+    void DrawFileColumnHeader(const PaneViewModel& pane, const D2D1_RECT_F& bounds,
+                              const Theme& theme, std::wstring_view header_key,
+                              int pane_index, bool divider_active, bool resizing, int hover_divider);
     void DrawPaneEmptyState(const WindowViewModel& vm, const PaneViewModel& pane,
                             const D2D1_RECT_F& bounds, int pane_index, const Theme& theme);
     void DrawColumnStrip(const WindowViewModel& vm, const PaneViewModel& pane,
@@ -1329,7 +1368,8 @@ private:
                   int hover_region = 0, int hover_control_index = -1, bool pane_focused = true);
     void DrawListItems(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme,
                        int hover_region, int hover_control_index, bool pane_focused);
-    void DrawScrollbar(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme);
+    void DrawScrollbar(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme,
+                       float hover = 0.0f);
     // Scatter deck of staged files inside the tray panel (draw + hit-test
     // share the geometry helpers in ui_renderer.cpp).
     void DrawTrayDeck(const WindowViewModel& vm, const D2D1_RECT_F& panel_rc,
@@ -1412,6 +1452,8 @@ private:
     float card_alpha_ = 1.0f;
     bool details_visible_ = false;
     float details_width_ = 340.0f;
+    bool terminal_visible_ = false;
+    float terminal_width_ = kTerminalWidthDip;
     PreviewViewport details_viewport_;
     SmoothScroll details_scroll_x_;
     SmoothScroll details_scroll_y_;
@@ -1480,9 +1522,16 @@ private:
     bool settings_switch_animating_ = false;
     SurfaceTransition page_surface_;
     SurfaceTransition address_path_surface_;
+    SurfaceTransition pane_layout_surface_;
+    const void* pane_layout_owner_ = nullptr;
     std::array<SurfaceTransition, 8> pane_surfaces_;
     std::array<SurfaceTransition, 8> pane_title_surfaces_;
     std::array<ItemReflowSurface, 8> item_reflow_surfaces_;
+    struct ListHoverLayout {
+        std::wstring context;
+        D2D1_RECT_F viewport{};
+    };
+    std::array<ListHoverLayout, 8> list_hover_layouts_;
     std::array<ViewModeTransition, 8> view_mode_transitions_;
     std::wstring ViewModeTransitionIdentity(const PaneViewModel& vm) const;
     uint64_t ViewModeFrameSignature(const PaneViewModel& vm, const Theme& theme, bool focused,
@@ -1495,11 +1544,14 @@ private:
     const ItemReflowSurface* ItemReflowFor(const PaneViewModel& vm, D2D1_RECT_F viewport) const;
     SurfaceTransition settings_content_surface_;
     BinaryTransition details_open_motion_;
+    BinaryTransition terminal_mode_motion_;
+    float RightPanelPreferredWidth() const;
     float details_motion_window_width_ = 0;
     ComPtr<ID2D1CommandList> details_exit_commands_;
     float details_exit_left_ = 0;
     float DetailsPanelTargetWidth(float window_width) const;
     void DrawAnimatedDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
+    void DrawTerminalPanel(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     bool surface_animating_ = false;
     BinaryTransition tooltip_transition_;
     std::wstring tooltip_text_;
@@ -1514,8 +1566,9 @@ private:
     struct HoverTrack { BinaryTransition animation; uint64_t frame = 0; };
     std::unordered_map<std::wstring, HoverTrack> hover_tracks_;
     std::array<BinaryTransition, 12> settings_nav_tracks_{};
-    float HoverOpacity(const std::wstring& key, bool hovered, float enter_ms = 110.0f,
-                       float exit_ms = 150.0f);
+    float HoverOpacity(const std::wstring& key, bool hovered,
+                       float enter_ms = BinaryTransition::kHoverEnterMs,
+                       float exit_ms = BinaryTransition::kHoverExitMs);
     float ControlHoverOpacity(const D2D1_RECT_F& bounds, bool hovered);
     float SelectionOpacity(const std::wstring& key, bool selected);
     float DisclosureProgress(const std::wstring& key, bool expanded);

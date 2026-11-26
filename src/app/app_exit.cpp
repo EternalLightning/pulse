@@ -83,7 +83,10 @@ void RequestAppWindowClose(AppState& s) {
     if (s.appPrefs.keep_running_on_close || s.appPrefs.global_search_enabled) {
         if (!s.appPrefs.keep_running_on_close &&
             !ConfirmWindowShutdown(s, HasPendingWindowOperations(s), true)) return;
-        if (HideAppWindow(s, true)) ResetLastTabToHome(s);
+        if (HideAppWindow(s, true)) {
+            const auto* active = s.window_tabs.Active();
+            if (!active || !active->terminal) ResetLastTabToHome(s);
+        }
         return;
     }
     bool another_visible_window = false;

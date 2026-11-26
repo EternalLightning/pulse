@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "../model/file_visibility.h"
 #include <windows.h>
 #include <d2d1.h>
 
@@ -19,8 +20,8 @@ public:
     ~NativeDialogTakeover();
     NativeDialogTakeover(const NativeDialogTakeover&) = delete;
     NativeDialogTakeover& operator=(const NativeDialogTakeover&) = delete;
-    bool Configure(bool enabled, bool dark, D2D1_COLOR_F accent, bool show_hidden,
-                   std::wstring pulse_folder = {}, bool verify_copies = false);
+    bool Configure(bool enabled, bool dark, D2D1_COLOR_F accent, model::FileVisibility visibility,
+                   std::wstring pulse_folder = {}, bool verify_copies = false, bool zebra_rows = true);
     void Stop();
     // The integration fixture watches only its own child process.
     bool StartForTesting(DWORD source_process);
@@ -30,8 +31,8 @@ public:
     struct Shared;
 
 private:
-    bool ConfigureImpl(bool enabled, bool dark, D2D1_COLOR_F accent, bool show_hidden,
-                       std::wstring pulse_folder, DWORD source_process, bool verify_copies);
+    bool ConfigureImpl(bool enabled, bool dark, D2D1_COLOR_F accent, model::FileVisibility visibility,
+                       std::wstring pulse_folder, DWORD source_process, bool verify_copies, bool zebra_rows);
     mutable std::mutex mutex_;
     std::shared_ptr<Shared> shared_;
     std::thread watcher_;

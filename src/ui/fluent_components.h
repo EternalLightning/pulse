@@ -32,6 +32,9 @@ struct ControlState {
     bool keyboard_focus = false;
     // Negative means snap to checked; otherwise this is the eased 0..1 check transition.
     float check_progress = -1.0f;
+    // Negative uses the painter's default feedback for this state.
+    float hover_progress = -1.0f;
+    float focus_progress = -1.0f;
 };
 
 enum class HorizontalAlignment { Left, Center, Right };
@@ -129,6 +132,7 @@ struct MenuItemSpec {
     float glyph_scale = 1.0f;
     bool shortcut_inline = false;
     float inline_label_width = 0.0f;
+    float selection_progress = -1.0f;
 };
 
 struct ScrollbarSpec {
@@ -405,7 +409,7 @@ public:
                          D2D1_SIZE_F viewport = {24.0f, 24.0f}, float opacity = 1.0f);
     void DrawPaneLayoutIcon(const D2D1_RECT_F& bounds, MenuPictogram kind,
                             const D2D1_COLOR_F& color);
-    void DrawFocusRing(const D2D1_RECT_F& bounds, float radius);
+    void DrawFocusRing(const D2D1_RECT_F& bounds, float radius, float opacity = 1.0f);
 
     void DrawButton(const ButtonSpec& spec);
     void DrawTextFieldFrame(const D2D1_RECT_F& bounds, const ControlState& state,

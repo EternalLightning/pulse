@@ -207,6 +207,7 @@ struct Tab {
     mutable fs::SnapshotPtr view_cache_snapshot;
     mutable const PlacesCatalog* view_cache_places = nullptr;
     mutable uint64_t view_cache_places_revision = 0;
+    mutable model::DisplayAliasSnapshot view_cache_display_aliases;
     mutable std::wstring view_cache_filter_text;
     mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_filter_map;
     mutable std::shared_ptr<const std::vector<ui::DateGroup>> view_date_groups;
@@ -392,6 +393,8 @@ struct LayoutTab {
     std::unique_ptr<SplitContainer> root;
     int focused_index = 0;
     int target_index = -1;
+    std::shared_ptr<ui::TerminalSurface> terminal;
+    bool terminal_open = false;
 
     Pane* FocusedPane();
     const Pane* FocusedPane() const;
@@ -405,6 +408,7 @@ struct WindowTabs {
     std::vector<TabGroup> tab_groups;
     int next_tab_group_id = 1;
     std::function<void(LayoutTab&)> before_close;
+    std::function<bool(const LayoutTab&)> confirm_close;
 
     LayoutTab* Active() { return active < items.size() ? items[active].get() : nullptr; }
     const LayoutTab* Active() const { return active < items.size() ? items[active].get() : nullptr; }
@@ -413,7 +417,7 @@ struct WindowTabs {
     // An empty path opens This PC; callers choose any default folder explicitly.
     LayoutTab& NewTab(const std::wstring& path);
     LayoutTab& NewTabAt(size_t index, const std::wstring& path);
-    void CloseTab(size_t idx);
+    bool CloseTab(size_t idx, bool confirm = true);
     void SwitchTab(size_t idx);
     void MoveTab(size_t from, size_t to);
 };

@@ -168,13 +168,6 @@ std::vector<std::wstring> EffectiveRoots(const ContentSearchRequest& request) {
     return {};
 }
 
-std::wstring JoinPath(const std::wstring& dir, const wchar_t* name) {
-    std::wstring value = dir;
-    if (!value.empty() && value.back() != L'\\' && value.back() != L'/') value.push_back(L'\\');
-    value.append(name);
-    return value;
-}
-
 std::wstring NormalizeWalkRoot(std::wstring path) {
     if (path.size() == 2 && path[1] == L':') path.push_back(L'\\');
     while (path.size() > 3 && (path.back() == L'\\' || path.back() == L'/')) path.pop_back();
@@ -248,7 +241,7 @@ void EnsureFileId(Candidate& file) {
 }
 
 HANDLE OpenDirectoryListing(const std::wstring& dir, WIN32_FIND_DATAW& data) {
-    const std::wstring query = JoinPath(Win32Path(dir), L"*");
+    const std::wstring query = JoinContentPath(Win32Path(dir), L"*");
     HANDLE find = FindFirstFileExW(query.c_str(), FindExInfoBasic, &data,
         FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
     if (find != INVALID_HANDLE_VALUE) return find;
@@ -304,7 +297,7 @@ bool EnumerateCandidates(const ContentSearchRequest& request,
                 if (IsDotOrDotDot(data.cFileName)) continue;
                 const DWORD attributes = data.dwFileAttributes;
                 const bool is_dir = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                const auto path = JoinPath(dir, data.cFileName);
+                const auto path = JoinContentPath(dir, data.cFileName);
                 if (request.skip_system_locations && ContentSystemPath(path)) continue;
                 if (is_dir) {
                     if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;

@@ -29,13 +29,6 @@ std::wstring NativePath(const std::wstring &path) {
 uint64_t Time(FILETIME value) {
     return (uint64_t(value.dwHighDateTime) << 32) | value.dwLowDateTime;
 }
-bool InScope(const std::wstring &path, const std::wstring &root, bool recursive) {
-    const auto key = ContentScopeKey(path), base = ContentScopeKey(root);
-    if (!ContentPathUnder(key, base))
-        return false;
-    return recursive || key.substr(base.size() + (base.ends_with(L'\\') ? 0 : 1)).find(L'\\') == std::wstring::npos;
-}
-
 struct Job {
     std::wstring path, version;
     uint64_t size = 0, modified = 0, maximum = 0;
@@ -446,8 +439,10 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                     if (!IsIndexedContentExtension(ext) || cache.excluded(path) ||
                         (request.skip_system_locations && ContentSystemPath(path)))
                         return true;
-                    const auto root = std::find_if(config.roots.begin(), config.roots.end(),
-                                                   [&](const auto &scope) { return InScope(path, scope.path, true); });
+                    const auto key = ContentScopeKey(path);
+                    const auto root = std::find_if(config.roots.begin(), config.roots.end(), [&](const auto &scope) {
+                        return ContentPathUnder(key, ContentScopeKey(scope.path));
+                    });
                     if (root == config.roots.end() || !ContentRequestIncludesPath(request, path))
                         return true;
                     const bool document = IsExtractedDocumentExtension(ext);
@@ -513,9 +508,9 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                     for (const auto &root : config.roots) {
                         const auto key = ContentScopeKey(root.path);
                         if (std::any_of(roots.begin(), roots.end(),
-                                        [&](const auto &old) { return InScope(key, old, true); }))
+                                        [&](const auto &old) { return ContentPathUnder(key, old); }))
                             continue;
-                        std::erase_if(roots, [&](const auto &old) { return InScope(old, key, true); });
+                        std::erase_if(roots, [&](const auto &old) { return ContentPathUnder(old, key); });
                         roots.push_back(key);
                     }
                     struct Frame {
@@ -541,7 +536,7 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                         frame.path = path;
                         frame.find = enumeration_hooks && enumeration_hooks->first
                             ? enumeration_hooks->first(path, frame.data)
-                            : FindFirstFileExW((NativePath(path) + L"\\*").c_str(), FindExInfoBasic, &frame.data,
+                            : FindFirstFileExW(JoinContentPath(NativePath(path), L"*").c_str(), FindExInfoBasic, &frame.data,
                                               FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
                         if (frame.find != INVALID_HANDLE_VALUE)
                             stack.push_back(std::move(frame));
@@ -559,7 +554,7 @@ bool RunContentTaskSupplement(const ContentIndexConfig &config, const ContentSea
                         while (!stack.empty() && !interrupted()) {
                             auto &frame = stack.back();
                             const auto data = frame.data;
-                            const auto child = frame.path + L"\\" + data.cFileName;
+                            const auto child = JoinContentPath(frame.path, data.cFileName);
                             const bool next = enumeration_hooks && enumeration_hooks->next
                                 ? enumeration_hooks->next(frame.find, frame.data)
                                 : FindNextFileW(frame.find, &frame.data) != FALSE;

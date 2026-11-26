@@ -32,6 +32,7 @@ struct ItemReflowUiTest {
     static int RunVmProfile();
     static int RunColdScroll();
     static int RunScrollGhosting();
+    static int RunPaneLayoutTransition();
     static int RunSvgState();
     static const ViewModeTransition& ViewTransition(const MainRenderer& renderer) {
         return renderer.view_mode_transitions_[0];
@@ -85,6 +86,7 @@ struct ItemReflowUiTest {
 #include "animation_frame_profile_cases.h"
 #include "cold_scroll_cases.h"
 #include "scroll_ghosting_cases.h"
+#include "pane_layout_transition_cases.h"
 
 namespace {
 int failures = 0;
@@ -214,6 +216,11 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && std::string_view(argv[1]) == "--scroll-ghosting-only") {
         const int result = ui::ItemReflowUiTest::RunScrollGhosting();
+        OleUninitialize();
+        return result;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--pane-layout-only") {
+        const int result = ui::ItemReflowUiTest::RunPaneLayoutTransition();
         OleUninitialize();
         return result;
     }

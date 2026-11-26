@@ -38,7 +38,8 @@ inline std::wstring TransientFilenameSearchRoot(const std::wstring& path) {
     return !root.empty() ? root : CachedTransientLocalSearch(path) ? LocalDevicePath(path) : std::wstring{};
 }
 
-inline bool MatchLiveFilename(const Hit& hit, const CompiledQuery& query, bool folders_only) {
+inline bool MatchLiveFilename(const Hit& hit, const CompiledQuery& query, bool folders_only,
+                              std::wstring_view alternate_name = {}) {
     if (folders_only && !hit.is_dir) return false;
     if (query.groups.empty()) return true;
     for (const auto& group : query.groups) {
@@ -50,7 +51,9 @@ inline bool MatchLiveFilename(const Hit& hit, const CompiledQuery& query, bool f
                 (term.date_how != DateHow::Any && !accepts(hit.mtime && MatchDate(hit.mtime, term), term.date_not))) { matched = false; break; }
             const bool name = term.name_how == NameHow::Any || (term.name_in_path
                 ? MatchPath(hit.path, term)
-                : MatchName(hit.name.data(), static_cast<uint32_t>(hit.name.size()), term));
+                : MatchName(hit.name.data(), static_cast<uint32_t>(hit.name.size()), term) ||
+                    (!alternate_name.empty() && MatchName(alternate_name.data(),
+                        static_cast<uint32_t>(alternate_name.size()), term)));
             if (!MatchNameAndType(name, hit.is_dir, term)) { matched = false; break; }
         }
         if (matched) return true;

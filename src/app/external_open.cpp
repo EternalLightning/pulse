@@ -10,13 +10,37 @@
 #include "app_runtime.h"
 #include "default_file_manager.h"
 #include "system_integration.h"
-#include "../common/path_utils.h"
+#include "../fs/drive_kind.h"
 #include "../fs/fs_enum.h"
 #include "../ops/archive.h"
+#include <algorithm>
 #include <windows.h>
 #include <new>
 
 namespace pulse {
+namespace {
+
+std::wstring_view StripOpenQuotes(std::wstring_view path) {
+    while (!path.empty() && path.front() == L'"') path.remove_prefix(1);
+    while (!path.empty() && path.back() == L'"') path.remove_suffix(1);
+    return path;
+}
+
+app::WorkerPool::IoLane ExternalOpenLane(const std::wstring& raw) {
+    using Lane = app::WorkerPool::IoLane;
+    if (app::IsThisPcArgument(raw)) return Lane::Local;
+    const auto path = fs::NormalizePath(std::wstring(StripOpenQuotes(raw)));
+    const wchar_t letter = fs::DriveLetterOf(path);
+    if (!letter) return Lane::Provider;
+    // Inspect the DOS mapping without opening or querying the volume itself.
+    const wchar_t device[] = {letter, L':', L'\0'};
+    wchar_t target[512]{};
+    return QueryDosDeviceW(device, target, ARRAYSIZE(target)) &&
+        std::wstring_view(target).starts_with(L"\\Device\\HarddiskVolume")
+        ? Lane::Local : Lane::Provider;
+}
+
+} // namespace
 
 ResolvedOpenTarget ResolveOpenTarget(std::wstring path) {
     ResolvedOpenTarget target;
@@ -24,10 +48,7 @@ ResolvedOpenTarget ResolveOpenTarget(std::wstring path) {
         target.this_pc = true;
         return target;
     }
-    while (!path.empty() && (path.front() == L'"' || path.back() == L'"')) {
-        if (path.front() == L'"') path.erase(path.begin());
-        if (!path.empty() && path.back() == L'"') path.pop_back();
-    }
+    path = StripOpenQuotes(path);
     if (path.empty()) return target;
 
     const DWORD attrs = GetFileAttributesW(path.c_str());
@@ -66,6 +87,39 @@ AppState* PostOpenFolderInNewWindow(AppState& s, const ResolvedOpenTarget& targe
 }
 
 namespace {
+
+bool QueueOpenResolution(AppState& s, const std::wstring& raw, app::ExternalOpenResult result) {
+    if (raw.empty() || s.exit_requested || s.core.exiting || !s.external_open_mailbox) return false;
+    const uint64_t sequence = s.external_open_issued_sequence + 1;
+    result.sequence = sequence;
+    const auto mailbox = s.external_open_mailbox;
+    if (!s.worker.EnqueueIo([raw, result = std::move(result), mailbox] () mutable {
+        try {
+            result.target = ResolveOpenTarget(raw);
+            result.resolution_complete = true;
+        } catch (...) {}
+        mailbox->Publish(std::move(result));
+    }, {}, ExternalOpenLane(raw))) return false;
+    s.external_open_issued_sequence = sequence;
+    return true;
+}
+
+void ApplyResolvedStartupOpen(AppState& s, const app::ExternalOpenResult& request) {
+    if (s.exit_requested || s.core.exiting) return;
+    app::Tab* tab = nullptr;
+    ForEachPane(s, [&](app::Pane& pane) {
+        if (pane.view.network_identity == request.startup_tab_identity &&
+            pane.view.navigation_revision == request.startup_navigation_revision)
+            tab = &pane.view;
+    });
+    if (!tab) return;
+    StartLoadingPath(s, *tab, request.resolution_complete ? request.target.folder : app::MakeHomePath(),
+        PathLoadReason::Navigate);
+    if (!request.target.file_leaf.empty())
+        SelectLaunchedFile(s, request.target, tab);
+    InvalidateRect(s.hwnd, nullptr, FALSE);
+}
+
 AppState* ApplyResolvedExternalOpen(AppState& s, const app::ExternalOpenResult& request) {
     if (!request.resolution_complete) return nullptr;
     const auto& target = request.target;
@@ -119,42 +173,35 @@ AppState* ApplyResolvedExternalOpen(AppState& s, const app::ExternalOpenResult& 
 }
 }
 
+bool RouteStartupOpen(AppState& s, const app::Tab& tab) {
+    app::ExternalOpenResult result;
+    result.startup_tab_identity = tab.network_identity;
+    result.startup_navigation_revision = tab.navigation_revision;
+    return QueueOpenResolution(s, s.open_path, std::move(result));
+}
+
 bool RouteExternalFolderOpen(AppState& s, const std::wstring& raw,
                              uint64_t takeover_token,
                              std::vector<std::wstring> selected_paths,
                              unsigned selection_flags) {
-    if (raw.empty() || s.exit_requested || s.core.exiting || !s.external_open_mailbox) return false;
-    const auto mode = s.appPrefs.external_open_mode;
-    const uint64_t sequence = s.external_open_issued_sequence + 1;
-    const auto mailbox = s.external_open_mailbox;
-    if (!s.worker.EnqueueIo([raw, mode, sequence, mailbox, takeover_token,
-                             selected_paths = std::move(selected_paths), selection_flags] () mutable {
-        app::ExternalOpenResult result;
-        result.sequence = sequence;
-        result.mode = mode;
-        result.takeover_token = takeover_token;
-        result.selected_paths = std::move(selected_paths);
-        result.selection_flags = selection_flags;
-        try {
-            result.target = ResolveOpenTarget(raw);
-            result.resolution_complete = true;
-        } catch (...) {}
-        mailbox->Publish(std::move(result));
-    })) return false;
-    s.external_open_issued_sequence = sequence;
-    return true;
+    app::ExternalOpenResult result;
+    result.mode = s.appPrefs.external_open_mode;
+    result.takeover_token = takeover_token;
+    result.selected_paths = std::move(selected_paths);
+    result.selection_flags = selection_flags;
+    return QueueOpenResolution(s, raw, std::move(result));
 }
 
 void ApplyExternalOpenResults(AppState& s, WPARAM identity) {
     if (!s.external_open_mailbox) return;
-    for (auto& result : s.external_open_mailbox->Take(identity))
-        s.external_open_pending.insert_or_assign(result.sequence, std::move(result));
-    for (;;) {
-        auto next = s.external_open_pending.find(s.external_open_next_apply_sequence);
-        if (next == s.external_open_pending.end()) break;
-        app::ExternalOpenResult result = std::move(next->second);
-        s.external_open_pending.erase(next);
-        ++s.external_open_next_apply_sequence;
+    auto ready = s.external_open_mailbox->Take(identity);
+    // Preserve order among ready requests without waiting for a blocked probe.
+    std::ranges::sort(ready, {}, &app::ExternalOpenResult::sequence);
+    for (const auto& result : ready) {
+        if (result.startup_tab_identity) {
+            ApplyResolvedStartupOpen(s, result);
+            continue;
+        }
         if (result.takeover_token && !s.systemIntegration.IsExternalOpenActive(result.takeover_token)) {
             s.systemIntegration.CompleteExternalOpen(s, nullptr, result, false);
             continue;

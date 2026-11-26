@@ -12,7 +12,7 @@
 #include <cwctype>
 #include <string_view>
 
-namespace pulse::app {
+namespace pulse::model {
 
 namespace {
 
@@ -68,48 +68,48 @@ int EntryNameCompare(const fs::DirEntry& a, const fs::DirEntry& b, std::wstring_
 } // namespace
 
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
-               ui::SortColumn col, ui::SortDirection dir, std::wstring_view parent) {
+               SortColumn col, SortDirection dir, std::wstring_view parent) {
     return EntryLess(a, b, col, dir, FolderSortMode::FoldersFirst, parent);
 }
 
 bool EntryLess(const fs::DirEntry& a, const fs::DirEntry& b,
-               ui::SortColumn col, ui::SortDirection dir, FolderSortMode folders,
+               SortColumn col, SortDirection dir, FolderSortMode folders,
                std::wstring_view parent) {
     const bool a_folder = a.is_dir || (!a.link_target.empty() && a.link_target_is_dir);
     const bool b_folder = b.is_dir || (!b.link_target.empty() && b.link_target_is_dir);
     // FoldersFirst pins folders above the direction flip below; FollowDirection
     // feeds the group through it so descending order sends folders down.
-    if (col != ui::SortColumn::Mtime && a_folder != b_folder) {
+    if (col != SortColumn::Mtime && a_folder != b_folder) {
         if (folders == FolderSortMode::FoldersFirst) return a_folder;
         if (folders == FolderSortMode::FollowDirection)
-            return (dir == ui::SortDirection::Desc) ? !a_folder : a_folder;
+            return (dir == SortDirection::Desc) ? !a_folder : a_folder;
     }
     int cmp = 0;
     switch (col) {
-    case ui::SortColumn::Name:
+    case SortColumn::Name:
         cmp = EntryNameCompare(a, b, parent);
         break;
-    case ui::SortColumn::Size:
+    case SortColumn::Size:
         if (a.size < b.size) cmp = -1;
         else if (a.size > b.size) cmp = 1;
         else cmp = EntryNameCompare(a, b, parent);
         break;
-    case ui::SortColumn::Mtime:
+    case SortColumn::Mtime:
         cmp = CompareFileTime(&a.mtime, &b.mtime);
         if (cmp == 0) cmp = EntryNameCompare(a, b, parent);
         break;
-    case ui::SortColumn::Type: {
+    case SortColumn::Type: {
         cmp = ExtensionCompare(a.name, b.name);
         if (cmp == 0) cmp = EntryNameCompare(a, b, parent);
         break;
     }
-    case ui::SortColumn::Path:
+    case SortColumn::Path:
         cmp = _wcsicmp(a.full_path.c_str(), b.full_path.c_str());
         if (cmp == 0) cmp = EntryNameCompare(a, b, parent);
         break;
     }
-    if (dir == ui::SortDirection::Desc) cmp = -cmp;
+    if (dir == SortDirection::Desc) cmp = -cmp;
     return cmp < 0;
 }
 
-} // namespace pulse::app
+} // namespace pulse::model

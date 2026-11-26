@@ -5,8 +5,13 @@
 #pragma once
 
 #include "picker_transport.h"
+#include <functional>
 
 namespace pulse::ipc::picker {
+// The host granted the caller foreground activation before closing the picker.
+inline constexpr DWORD kPickerHostReturnForeground = 8;
+using DialogEventHandler = std::function<DialogEventReply(const DialogEvent&)>;
+
 // Synchronous caller-thread bridge. Pumps messages, owns only its child host,
 // and never opens a native fallback. Same-thread owners use owned modality.
 // Cross-thread/process owners must already be disabled by their caller, be
@@ -16,5 +21,6 @@ namespace pulse::ipc::picker {
 // externally re-enabling/destroying it cancels the exchange.
 // The optional cancellation event is borrowed and must remain valid until return.
 Message RunPickerClient(std::wstring executable, Message request,
-                        HWND owner = nullptr, HANDLE cancel = nullptr);
+                        HWND owner = nullptr, HANDLE cancel = nullptr,
+                        const DialogEventHandler& on_event = {});
 } // namespace pulse::ipc::picker

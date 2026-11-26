@@ -23,6 +23,13 @@ struct TerminalMenuTestProbe {
             item.open_args == TerminalCommandLine(directory);
     }
     static bool Empty(const OpsManager& ops) { return ops.open_mailbox_->queue.empty(); }
+    static bool TakeLink(OpsManager& ops, std::wstring_view url) {
+        auto& queue = ops.open_mailbox_->queue;
+        const bool matched = queue.size() == 1 && queue.front().open_path == url &&
+            queue.front().open_file.empty() && queue.front().open_verb == L"open";
+        queue.clear();
+        return matched;
+    }
     static void Reset(OpsManager& ops) {
         ops.accepting_ = false;
         ops.open_mailbox_.reset();

@@ -14,7 +14,8 @@ std::vector<ui::FluentMenuItem> BuildToolbarOverflowMenu(std::span<const int> or
                 [=](const auto& item) { return item.command == command; })) continue;
         auto item = BuildCommandMenuItem(command, context);
         if (command == CmdNewMenu) item.children = BuildNewMenu();
-        if (command == CmdSplitMenu) item.children = BuildSplitMenu(split_layout);
+        if (command == CmdSplitMenu) item.children = BuildSplitMenu(split_layout, context);
+        if (command == CmdDirectorySync) item.children = BuildDirectorySyncMenu(context);
         items.push_back(std::move(item));
     }
     if (!items.empty()) items.back().separator_after = true;

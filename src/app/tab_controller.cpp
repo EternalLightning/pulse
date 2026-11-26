@@ -181,16 +181,22 @@ void TabController::ShowGroupMenu(WindowTabs& tabs, int group_id, POINT screen_p
     } else if (command == CmdTabGroupClose) {
         WillChangeTabStrip();
         WillChangeLayout();
+        bool canceled = false;
         for (int i = static_cast<int>(tabs.items.size()) - 1; i >= 0; --i) {
-            if (tabs.items[static_cast<size_t>(i)]->tab_group == id) {
-                if (tabs.items.size() == 1 && CanCloseTab(tabs, static_cast<size_t>(i))) {
-                    callbacks_.close_window();
-                    break;
-                }
-                tabs.CloseTab(static_cast<size_t>(i));
+            const auto index = static_cast<size_t>(i);
+            const auto& tab = *tabs.items[index];
+            if (tab.tab_group != id || tab.pinned) continue;
+            if (tabs.items.size() == 1) {
+                callbacks_.close_window();
+                canceled = tabs.items.size() == 1 && tabs.items.front()->tab_group == id;
+                break;
+            }
+            if (!tabs.CloseTab(index)) {
+                canceled = true;
+                break;
             }
         }
-        RemoveGroup(tabs, id);
+        if (!canceled) RemoveGroup(tabs, id);
         LayoutChanged();
     }
     Changed();
@@ -234,7 +240,7 @@ void TabController::CloseTabs(WindowTabs& tabs, int first, int last, int except)
             callbacks_.close_window();
             break;
         }
-        tabs.CloseTab(static_cast<size_t>(i));
+        if (!tabs.CloseTab(static_cast<size_t>(i))) break;
     }
     PruneEmptyGroups(tabs);
     LayoutChanged();

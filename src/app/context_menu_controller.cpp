@@ -38,9 +38,16 @@ void AppendShellSection(std::vector<ui::FluentMenuItem>& items,
     const bool has_quick_access = std::any_of(items.begin(), items.end(), [](const auto& item) {
         return item.command == CmdPinQuickAccess || item.command == CmdUnpinQuickAccess;
     });
-    const auto native_quick_access = [&](const ShellMenuEntry& entry) {
+    const bool has_shortcut_location = std::any_of(items.begin(), items.end(), [](const auto& item) {
+        return item.command == CmdOpenShortcutLocation;
+    });
+    const auto has_builtin = [&](const ShellMenuEntry& entry) {
         const auto verb = ipc::ToLowerVerb(entry.verb);
-        return has_quick_access && (verb == L"pintohome" || verb == L"unpinfromhome");
+        if (has_quick_access && (verb == L"pintohome" || verb == L"unpinfromhome")) return true;
+        if (!has_shortcut_location) return false;
+        const auto label = ipc::NormalizeCatalogText(entry.text);
+        return verb == L"opencontaining" || verb == L"opencontainingfolder" ||
+            label == L"openfilelocation" || label == L"打开文件所在的位置";
     };
     std::unordered_set<int> seen_commands;
     for (const auto& item : items)
@@ -51,7 +58,7 @@ void AppendShellSection(std::vector<ui::FluentMenuItem>& items,
         if (added >= kSectionCap) break;
         const bool header = !e.children.empty();
         if (e.text.empty() || (e.command == 0 && !header)) continue;
-        if (native_quick_access(e) || (e.command != 0 && !seen_commands.insert(e.command).second)) continue;
+        if (has_builtin(e) || (e.command != 0 && !seen_commands.insert(e.command).second)) continue;
         if (added == 0 && !items.empty()) items.back().separator_after = true;
         ui::FluentMenuItem row;
         row.command = e.command;
@@ -60,7 +67,7 @@ void AppendShellSection(std::vector<ui::FluentMenuItem>& items,
         row.live_update = true;
         // Keep software-owned submenus intact inside the overflow section.
         for (const auto& c : e.children) {
-            if (c.text.empty() || c.command == 0 || native_quick_access(c) ||
+            if (c.text.empty() || c.command == 0 || has_builtin(c) ||
                 !seen_commands.insert(c.command).second) continue;
             ui::FluentMenuItem child;
             child.command = c.command;

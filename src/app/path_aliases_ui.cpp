@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "path_aliases_ui.h"
 #include "app_internal.h"
+#include "search_query.h"
 #include "session.h"
+#include "../common/user_storage.h"
 #include "../model/path_alias_store.h"
 #include "../ui/input_dialog.h"
 #include <mutex>
@@ -56,20 +58,87 @@ void Edit(AppState& s, const std::wstring& name, const std::wstring& target) {
 }
 }
 void InitializePathAliases(AppState& s) {
-    if (s.isolatedTest || s.shot.active || s.menushot) return;
+    if (s.shot.active || s.menushot) return;
+    if (s.isolatedTest) {
+        wchar_t root[32768]{};
+        const DWORD length = GetEnvironmentVariableW(L"PULSE_TEST_DATA_DIR", root, ARRAYSIZE(root));
+        if (!length || length >= ARRAYSIZE(root) || !path::EqualInsensitive(storage::DefaultRoot(), root)) return;
+    }
+    const auto directory = app::GetPulseDataDir();
+    if (directory.empty()) return;
     {
         std::lock_guard lock(windows_mutex);
         std::erase_if(windows, [](HWND hwnd) { return !IsWindow(hwnd); });
         windows.push_back(s.hwnd);
     }
-    Store().Start(app::GetPulseDataDir() + L"\\aliases.json", [] {
+    Store().Start(directory + L"\\aliases.json", [] {
         std::lock_guard lock(windows_mutex);
         for (const auto hwnd : windows) PostMessageW(hwnd, WM_PATH_ALIASES_CHANGED, 0, 0);
     });
+    PostMessageW(s.hwnd, WM_PATH_ALIASES_CHANGED, 0, 0);
 }
 void HandlePathAliasesChanged(AppState& s) {
-    if (Store().Snapshot().state == model::PathAliasStoreState::SaveFailed)
-        Error(s, l10n::Pick(L"路径别名保存失败，原文件已保留。", L"Path aliases could not be saved; the original file was preserved."));
+    const auto snapshot = Store().Snapshot();
+    if (snapshot.state == model::PathAliasStoreState::SaveFailed)
+        Error(s, l10n::Get(l10n::StringId::AliasSaveFailed));
+    const auto& names = snapshot.aliases.DisplayNames();
+    if (s.applied_display_aliases == names) return;
+    s.applied_display_aliases = names;
+    s.places.display_aliases = names;
+    s.hitTestVmValid = false;
+    ForEachPane(s, [&](app::Pane& pane) {
+        auto* tab = pane.ActiveTab();
+        if (!tab) return;
+        if (tab->content_results && !tab->filter_text.empty()) tab->content_filter.clear();
+        std::wstring kind, rest;
+        if (!app::ParsePulsePath(tab->current_path, &kind, &rest)) return;
+        if (kind == L"search" && !app::SplitSearchQueryText(rest).content.present())
+            RequestSearchPage(s, *tab, rest, true);
+        else if (kind == L"saved-search") {
+            const auto index = wcstoull(rest.c_str(), nullptr, 10);
+            if (index < s.savedSearches.items().size() &&
+                s.savedSearches.items()[static_cast<size_t>(index)].mode == app::SavedSearchMode::Name)
+                RequestSavedSearch(s, *tab, static_cast<size_t>(index));
+        }
+    });
+    RefreshContentResults(s);
+    InvalidateRect(s.hwnd, nullptr, FALSE);
+}
+void EditDisplayAlias(AppState& s, const std::wstring& path) {
+    using I = l10n::StringId;
+    using S = model::PathAliasStoreState;
+    if (!model::PathAliases::ValidTarget(path) || path::IsDriveRootPath(path)) return;
+    const auto snapshot = Store().Snapshot();
+    const auto title = l10n::Get(I::DisplayAliasTitle);
+    const auto error = [&](I message) {
+        s.notification_toast.ShowError(s.hwnd, title, l10n::Get(message));
+    };
+    if (snapshot.state != S::Ready && snapshot.state != S::SaveFailed) {
+        error(snapshot.state == S::Unreadable ? I::DisplayAliasUnreadable : I::DisplayAliasBusy);
+        return;
+    }
+    const auto key = model::DisplayAliasPathKey(path);
+    ui::InputDialogSpec spec;
+    spec.title = title;
+    spec.glyph = L"\xE8AC";
+    spec.width = 420.0f;
+    spec.select_all = true;
+    spec.fields = {{100, key.substr(key.find_last_of(L'\\') + 1),
+        std::wstring(model::FindDisplayAlias(snapshot.aliases.DisplayNames(), key)),
+        l10n::Get(I::DisplayAliasCue), 90, model::kDisplayAliasLimit}};
+    spec.validate = [](const auto& values) {
+        const bool valid = model::PathAliases::ValidDisplayName(values.front());
+        return ui::InputDialogValidation{valid, valid ? std::wstring{} : l10n::Get(I::DisplayAliasInvalid)};
+    };
+    const auto result = ui::ShowInputDialog(s.hwnd, spec, s.darkMode, s.accentColor);
+    if (!result.accepted) return;
+    auto aliases = snapshot.aliases;
+    if (!aliases.SetDisplayName(path, result.values.front())) {
+        error(I::DisplayAliasInvalid);
+        return;
+    }
+    if (aliases.DisplayNames() != snapshot.aliases.DisplayNames() &&
+        !Store().Commit(std::move(aliases), snapshot.revision)) error(I::DisplayAliasChanged);
 }
 void SetPathAlias(AppState& s, const std::wstring& path) {
     if (model::PathAliases::ValidTarget(path)) Edit(s, {}, path);

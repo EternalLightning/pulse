@@ -5,6 +5,8 @@
 
 #include "app_ui_schedule.h"
 #include "app_internal.h"
+#include "app_terminal.h"
+#include "../ui/terminal_surface.h"
 
 namespace pulse {
 
@@ -102,6 +104,7 @@ void SyncUiScheduling(AppState& s) {
     app::UiDeadlinePlan plan;
     plan.Include(s.ui_schedule.options_due);
     if (!s.exit_requested) {
+        plan.Include(s.appPrefs.SaveDeadline());
         if (!s.addressSearchComposing) plan.Include(s.addressLiveDue);
         if (!s.filterComposing) plan.Include(s.filterDue);
         plan.Include(s.addressHistoryDue);
@@ -112,6 +115,7 @@ void SyncUiScheduling(AppState& s) {
                 s.ui_schedule.tooltip_checked_since != s.hoverSince)
                 plan.Include(s.hoverSince + 150);
             plan.Include(s.renderer.DetailsPreviewDeadline());
+            plan.Include(EmbeddedTerminalCaretDeadline(s));
             plan.Include(s.sidebarFadeDeadline);
         }
     }
@@ -123,6 +127,7 @@ void SyncUiScheduling(AppState& s) {
 }
 
 bool RunUiDeadlines(AppState& s, uint64_t now) {
+    s.appPrefs.SaveIfDue(now);
     bool dirty = TickAddressSearchDeadlines(s, now);
     dirty |= TickFilterEditor(s, now);
     const int refreshes = s.context_menu.ConsumeDueRefreshes(now);
@@ -151,6 +156,10 @@ bool RunUiDeadlines(AppState& s, uint64_t now) {
             dirty |= !s.tooltipText.empty();
         }
         dirty |= s.renderer.TickDetailsPreview(now);
+        if (const auto due = EmbeddedTerminalCaretDeadline(s); due && due <= now) {
+            ActiveEmbeddedTerminal(s)->ClearCaretDeadline();
+            dirty = true;
+        }
         const uint64_t visual_due = s.sidebarFadeDeadline;
         if (visual_due && visual_due <= now) {
             s.sidebarFadeDeadline = 0;

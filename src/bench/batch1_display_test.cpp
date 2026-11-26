@@ -164,8 +164,8 @@ int main(int argc, char** argv) {
     const auto saved_path = tab.current_path;
     for (const auto* language : {L"zh-CN", L"en-US"}) {
         l10n::SetLanguage(language);
-        for (int page : {0, 2}) {
-            tab.current_path = app::MakeSettingsPath(page == 0 ? L"general" : L"context");
+        for (int page : {8, 2}) {
+            tab.current_path = app::MakeSettingsPath(page == 8 ? app::SettingsController::PageName(8) : L"context");
             s.settings.SelectPage(page);
             s.settingsExpanded = ui::kSettingsDefaultExpandedMask;
             auto settings_vm = BuildVm(s, false);
@@ -176,11 +176,10 @@ int main(int argc, char** argv) {
             const auto rect = D2D1::RectF(0, 0, 1080, 1140);
             const auto layout = ui::MakeSettingsLayout(settings_vm, rect, s.scale,
                 s.renderer.TitleBarHeight(), 28 * s.scale, &layout_painter);
-            if (page == 0) {
-                check(layout.startup_tray_row.bottom <= layout.startup_row[1].top &&
-                    layout.last_tab_row.bottom <= layout.startup_row[2].top,
-                    "new startup and last-tab option rows do not overlap");
-                check(layout.startup_tray_row.right > layout.startup_tray_row.left &&
+            if (page == 8) {
+                check(layout.startup_row[0].bottom <= layout.startup_row[1].top,
+                    "sign-in startup and keep-running rows do not overlap");
+                check(layout.startup_row[0].right > layout.startup_row[0].left &&
                     layout.startup_row[2].bottom > layout.startup_row[2].top,
                     "startup and unified default manager settings remain reachable in narrow layout");
             } else {
@@ -193,13 +192,13 @@ int main(int argc, char** argv) {
                     description.right <= layout.context_cards[5].right,
                     "built-in settings description fits its localized card");
             }
-            s.settings.SetScroll(page == 0 ? layout.startup_tray_row.top - layout.content_origin :
+            s.settings.SetScroll(page == 8 ? layout.startup_row[0].top - layout.content_origin :
                 layout.context_header[5].top - layout.content_origin, 10000);
             settings_vm = BuildVm(s, false);
             s.compositor.Dc()->BeginDraw();
             s.renderer.Render(settings_vm, rect, ui::MakeTheme(true, ui::HexColor(0x0078D4)));
             check(SUCCEEDED(s.compositor.Dc()->EndDraw()), "new settings section renders without drawing errors");
-            const auto settings_image = output / (std::wstring(page == 0 ? L"system-settings-" : L"builtin-settings-") +
+            const auto settings_image = output / (std::wstring(page == 8 ? L"system-settings-" : L"builtin-settings-") +
                 language + L".png");
             check(s.compositor.SaveSnapshot(settings_image.c_str()), "new settings screenshot saved");
         }

@@ -12,6 +12,7 @@
 #include "tab_shortcuts.h"
 #include "tab_transfer.h"
 #include "app_internal.h"
+#include "app_terminal.h"
 #include "details_columns_ui.h"
 #include "../ui/toolbar_layout.h"
 #include "app_hover.h"
@@ -697,15 +698,46 @@ void ResetMarquee(AppState& s) {
     s.marqueePending = false;
     s.marqueeActive = false;
     s.marqueeAdditive = false;
+    s.marqueeButton = 0;
+    s.marqueeTabIdentity = s.marqueeViewGeneration = 0;
     s.marqueeBase.clear();
     s.blankClickPane = nullptr;
     s.blankClickTab = nullptr;
     s.blankClickGeneration = 0;
 }
 
+static void CancelMarquee(AppState& s) {
+    if (s.marqueeButton == MK_RBUTTON) {
+        s.rightMarqueeCancelled = true;
+        s.context_menu.Close();
+    }
+    ResetMarquee(s);
+}
+
+static bool MatchesMarqueeTab(const AppState& s, const app::Tab* tab) {
+    return tab && tab->network_identity == s.marqueeTabIdentity &&
+        tab->view_generation == s.marqueeViewGeneration;
+}
+
+static void BeginMarquee(AppState& s, app::Tab* tab, POINT point, WPARAM button, bool additive) {
+    s.marqueePending = true;
+    s.marqueeActive = false;
+    s.marqueeButton = button;
+    s.marqueeAdditive = additive;
+    s.marqueeStart = s.marqueeCur = point;
+    s.marqueeTabIdentity = tab ? tab->network_identity : 0;
+    s.marqueeViewGeneration = tab ? tab->view_generation : 0;
+    s.marqueeBase.clear();
+    if (tab && additive) {
+        tab->MaterializeSelection();
+        s.marqueeBase = tab->selected;
+    }
+    SetCapture(s.hwnd);
+}
+
 void ApplyMarqueeSelection(AppState& s) {
     app::Tab* tab = ActiveTab(s);
-    if (!tab || !tab->snapshot) return;
+    if (!MatchesMarqueeTab(s, tab) || !tab->snapshot) return;
     const int n = static_cast<int>(tab->EntryCount());
     const D2D1_RECT_F list = ListRect(s);
     const float left = static_cast<float>(std::min(s.marqueeStart.x, s.marqueeCur.x));
@@ -752,6 +784,18 @@ void ApplyMarqueeSelection(AppState& s) {
         tab->all_selected = true;
         tab->selected.clear();
     }
+}
+
+static void UpdateMarquee(AppState& s, POINT point) {
+    s.marqueeCur = point;
+    if (!s.marqueeActive &&
+        (std::abs(point.x - s.marqueeStart.x) >= GetSystemMetrics(SM_CXDRAG) ||
+         std::abs(point.y - s.marqueeStart.y) >= GetSystemMetrics(SM_CYDRAG))) {
+        s.marqueeActive = true;
+        s.marqueePending = false;
+        if (s.marqueeButton == MK_RBUTTON) s.context_menu.Close();
+    }
+    if (s.marqueeActive) ApplyMarqueeSelection(s);
 }
 
 void HandleListRowClick(AppState& s, int index, bool ctrl, bool shift) {
@@ -1237,7 +1281,7 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         }
 
         if (s->detailsPanelResizing) {
-            if ((GetKeyState(VK_LBUTTON) & 0x8000) == 0) {
+            if ((wParam & MK_LBUTTON) == 0) {
                 s->detailsPanelResizing = false;
                 if (GetCapture() == hwnd) ReleaseCapture();
             } else {
@@ -1246,8 +1290,17 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                 // Explorer-style limit: the window decides how far the splitter goes.
                 const float max_width = s->renderer.DetailsMaxWidthDip(
                     static_cast<float>(s->compositor.Width()));
-                s->detailsPanelWidth = std::clamp(width, ui::kDetailsMinWidthDip, max_width);
-                s->renderer.SetDetailsPanelWidth(s->detailsPanelWidth);
+                if (s->showTerminalPanel) {
+                    s->core.terminal_panel_width = std::clamp(width, ui::kDetailsMinWidthDip,
+                        (std::min)(max_width, ui::kPanelWidthMaxDip));
+                    s->core.windows.ForEach([&](HWND window, AppState& state) {
+                        state.renderer.SetTerminalPanelWidth(s->core.terminal_panel_width);
+                        if (&state != s && state.showTerminalPanel) InvalidateRect(window, nullptr, FALSE);
+                    });
+                } else {
+                    s->detailsPanelWidth = std::clamp(width, ui::kDetailsMinWidthDip, max_width);
+                    s->renderer.SetDetailsPanelWidth(s->detailsPanelWidth);
+                }
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
             return 0;
@@ -1860,25 +1913,18 @@ LRESULT HandleMouseMove(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             }
         }
 
-        if (s->marqueePending || s->marqueeActive) {
-            if ((wParam & MK_LBUTTON) == 0) {
-                if (s->marqueeActive) ApplyMarqueeSelection(*s);
-                ResetMarquee(*s);
+        if (s->marqueeButton) {
+            if ((wParam & s->marqueeButton) == 0 || !MatchesMarqueeTab(*s, ActiveTab(*s))) {
+                CancelMarquee(*s);
+                if (GetCapture() == hwnd) ReleaseCapture();
             } else {
-                s->marqueeCur = POINT{ mx, my };
                 if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 ||
                     (GetKeyState(VK_SHIFT) & 0x8000) != 0 ||
                     (GetKeyState(VK_MENU) & 0x8000) != 0)
                     s->blankClickTab = nullptr;
-                if (!s->marqueeActive &&
-                    (std::abs(mx - s->marqueeStart.x) >= GetSystemMetrics(SM_CXDRAG) ||
-                     std::abs(my - s->marqueeStart.y) >= GetSystemMetrics(SM_CYDRAG))) {
-                    s->marqueeActive = true;
-                    s->marqueePending = false;
-                }
-                if (s->marqueeActive) ApplyMarqueeSelection(*s);
-                InvalidateRect(hwnd, nullptr, FALSE);
+                UpdateMarquee(*s, POINT{mx, my});
             }
+            InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
 
@@ -2166,6 +2212,7 @@ LRESULT HandleMouseLeave(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
 LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        if (s->marqueeButton == MK_RBUTTON) return 0;
         s->nameSelectionCycle = {};
         s->blankDoubleTab = nullptr;
         s->blankDoublePending = false;
@@ -2248,6 +2295,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         if (hit.region == ui::HitTestResult::DetailsResize) {
             s->dragPending = false;
             s->detailsPanelResizing = true;
+            if (s->showTerminalPanel) s->renderer.SnapTerminalPanel();
             SetCapture(hwnd);
             return 0;
         }
@@ -2672,8 +2720,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         } else if (hit.region == ui::HitTestResult::SplitButton) {
             ShowSplitDropdown(*s, hit.pane_index);
         } else if (hit.region == ui::HitTestResult::DetailsToggle) {
-            s->showDetailsPanel = !s->showDetailsPanel;
-            s->renderer.SetDetailsPanelVisible(s->showDetailsPanel);
+            ToggleDetailsPanel(*s);
             InvalidateRect(hwnd, nullptr, FALSE);
         } else if (hit.region == ui::HitTestResult::PaneMediumIcons) {
             SetViewMode(*s, ui::ViewMode::MediumIcons);
@@ -2858,22 +2905,13 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
             const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             const bool had_selection = tab && tab->SelectedCount() > 0;
             if (tab && !ctrl) tab->ClearSelection();
-            s->marqueePending = true;
-            s->marqueeActive = false;
-            s->marqueeAdditive = ctrl;
+            BeginMarquee(*s, tab, POINT{mx, my}, MK_LBUTTON, ctrl);
             s->blankClickPane = s->pane;
             s->blankClickTab = s->appPrefs.blank_click_go_back && tab && !had_selection &&
                 !IsAddressSearchResults(tab) && !ctrl && PointInList(*s, mx, my) &&
                 (GetKeyState(VK_SHIFT) & 0x8000) == 0 &&
                 (GetKeyState(VK_MENU) & 0x8000) == 0 ? tab : nullptr;
             s->blankClickGeneration = tab ? tab->view_generation : 0;
-            s->marqueeStart = s->marqueeCur = POINT{ mx, my };
-            s->marqueeBase.clear();
-            if (tab && ctrl) {
-                tab->MaterializeSelection();
-                s->marqueeBase = tab->selected;
-            }
-            SetCapture(hwnd);
             InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
@@ -2984,6 +3022,7 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         (void)msg;
         (void)wParam;
         if (s) {
+            if (s->marqueeButton == MK_RBUTTON) return 0;
             if (EndSettingsPointer(*s, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return 0;
             if (SysCtxPreviewDragEnd(*s, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)) ||
                 PulseMenuPreviewDragEnd(*s, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam))) return 0;
@@ -3110,6 +3149,19 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                     if (GetCursorPos(&screen)) TryTransferPaneAtScreenPoint(*s,
                         static_cast<size_t>(s->paneDragLayoutIndex),
                         static_cast<size_t>(s->paneDragPaneIndex), screen);
+                } else if (GetCapture() == hwnd && s->paneDragLayoutIndex == static_cast<int>(s->window_tabs.active) &&
+                           (GetKeyState(VK_CONTROL) & 0x8000) == 0) {
+                    const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                    if (std::abs(point.x - s->paneDragStartPt.x) + std::abs(point.y - s->paneDragStartPt.y) <
+                        GetSystemMetrics(SM_CXDRAG)) {
+                        const auto vm = BuildVm(*s, false);
+                        const auto bounds = D2D1::RectF(0, 0, static_cast<float>(s->compositor.Width()),
+                            static_cast<float>(s->compositor.Height()));
+                        const auto hit = s->renderer.HitTest(vm, bounds, static_cast<float>(point.x), static_cast<float>(point.y));
+                        if (hit.region == ui::HitTestResult::PaneHeader && hit.pane_index == s->paneDragPaneIndex) {
+                            if (auto* tab = ActiveTab(*s)) tab->ClearSelection();
+                        }
+                    }
                 }
                 s->paneDragPending = false;
                 s->paneDragging = false;
@@ -3296,7 +3348,7 @@ LRESULT HandleLButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                 s->blankDoubleTime = static_cast<DWORD>(GetMessageTime());
                 s->blankDoublePoint = s->marqueeStart;
                 goBack = goBack && double_click;
-                if (s->marqueeActive) ApplyMarqueeSelection(*s);
+                if (s->marqueeActive) UpdateMarquee(*s, POINT{mx, my});
                 ResetMarquee(*s);
                 if (goBack) {
                     if (tab->CanGoBack()) {
@@ -3360,6 +3412,7 @@ LRESULT HandleCaptureChanged(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LP
         (void)wParam;
         (void)lParam;
         if (s) {
+            if (std::exchange(s->detailsPanelResizing, false)) InvalidateRect(hwnd, nullptr, FALSE);
             CancelSettingsPointer(*s);
             SysCtxPreviewDragCancel(*s);
             PulseMenuPreviewDragCancel(*s);
@@ -3423,8 +3476,8 @@ LRESULT HandleCaptureChanged(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LP
                 s->chipOffsets.clear();
                 InvalidateRect(hwnd, nullptr, FALSE);
             }
-            if (s->marqueeActive) ApplyMarqueeSelection(*s);
-            ResetMarquee(*s);
+            if (s->marqueeActive) InvalidateRect(hwnd, nullptr, FALSE);
+            CancelMarquee(*s);
             s->clickCollapseIndex = -1;
             s->dragPending = false;
             s->scrollbarDragging = false;
@@ -3441,6 +3494,8 @@ LRESULT HandleCaptureChanged(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LP
 
 LRESULT HandleRButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        if (s->marqueeButton || (wParam & MK_LBUTTON)) return 0;
+        s->rightMarqueeCancelled = false;
         s->nameSelectionCycle = {};
         if (s->filterEditing) HideFilterEditor(*s, true);
         s->blankClickTab = nullptr;
@@ -3454,6 +3509,18 @@ LRESULT HandleRButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
         ui::HitTestResult hit = s->renderer.HitTest(vm, rect, (float)mx, (float)my);
         app::Pane* pane = hit.pane_index >= 0 ? PaneAtSlot(*s, hit.pane_index) : s->pane;
         app::Tab* tab = pane ? pane->ActiveTab() : nullptr;
+        const bool pane_hit = hit.pane_index >= 0;
+        const bool home = pane_hit && !vm.pane_slots.empty()
+            ? vm.pane_slots[static_cast<size_t>(hit.pane_index)].pane.is_home : vm.pane.is_home;
+        if (tab && tab->snapshot && pane_hit && !GetCapture() && !IsSettingsTab(tab) && !home &&
+            (hit.region == ui::HitTestResult::Row || hit.region == ui::HitTestResult::Pane ||
+             hit.region == ui::HitTestResult::PaneHeader)) {
+            FocusPane(*s, pane);
+            if (hit.region == ui::HitTestResult::PaneHeader || PointInList(*s, mx, my)) {
+                CancelScrollAnimation(*s);
+                BeginMarquee(*s, tab, POINT{mx, my}, MK_RBUTTON, (wParam & MK_CONTROL) != 0);
+            }
+        }
         if (hit.region == ui::HitTestResult::Row && hit.index >= 0 && tab) {
             // Selection changes on WM_RBUTTONUP; predict what it will be.
             std::vector<std::wstring> paths;
@@ -3478,21 +3545,55 @@ LRESULT HandleRButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 StartCtxQuery(*s, { tab->current_path }, true, ipc::kBackgroundVerbKey);
             }
         }
-        return DefWindowProcW(hwnd, msg, wParam, lParam);
+        return s->marqueeButton == MK_RBUTTON ? 0 : DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static void ShowPointerItemMenu(AppState& s, int index, POINT point) {
+    const auto* tab = ActiveTab(s);
+    std::wstring kind;
+    if (index >= 0 && tab && app::ParsePulsePath(tab->current_path, &kind, nullptr) &&
+        (kind == L"starred" || kind == L"recent")) {
+        ShowCuratedItemMenu(s, EntryFullPath(*tab, index), kind == L"recent", point);
+    } else {
+        ShowItemContextMenu(s, point);
+    }
 }
 
 LRESULT HandleRButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!s) return DefWindowProcW(hwnd, msg, wParam, lParam);
+        if (s->marqueeButton == MK_LBUTTON ||
+            (s->marqueeButton == 0 && (wParam & MK_LBUTTON))) return 0;
+        if (std::exchange(s->rightMarqueeCancelled, false)) return 0;
         int mx = GET_X_LPARAM(lParam);
         int my = GET_Y_LPARAM(lParam);
+        POINT sp{mx, my};
+        ClientToScreen(hwnd, &sp);
+        if (s->marqueeButton == MK_RBUTTON) {
+            auto* tab = ActiveTab(*s);
+            if (GetCapture() != hwnd || !MatchesMarqueeTab(*s, tab)) {
+                CancelMarquee(*s);
+                s->rightMarqueeCancelled = false;
+                if (GetCapture() == hwnd) ReleaseCapture();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
+            UpdateMarquee(*s, POINT{mx, my});
+            const bool dragged = s->marqueeActive;
+            ResetMarquee(*s);
+            if (GetCapture() == hwnd) ReleaseCapture();
+            if (dragged) {
+                InvalidateRect(hwnd, nullptr, FALSE);
+                if (tab->SelectedCount() > 0)
+                    ShowPointerItemMenu(*s, tab->SelectedCount() == 1 ? tab->selected_index : -1, sp);
+                return 0;
+            }
+        }
         ui::WindowViewModel vm = BuildVm(*s);
         D2D1_RECT_F rect = D2D1::RectF(0, 0, (float)s->compositor.Width(), (float)s->compositor.Height());
         ui::HitTestResult hit = s->renderer.HitTest(vm, rect, (float)mx, (float)my);
         if (hit.pane_index >= 0) {
             if (app::Pane* p = PaneAtSlot(*s, hit.pane_index)) FocusPane(*s, p);
         }
-        POINT sp{ mx, my };
-        ClientToScreen(hwnd, &sp);
         if (hit.region == ui::HitTestResult::ColumnHeader || hit.region == ui::HitTestResult::ColumnDivider) {
             ShowDetailsColumnsMenu(*s, sp, hit.pane_index);
             s->context_menu.Close();
@@ -3546,16 +3647,7 @@ LRESULT HandleRButtonUp(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                 else tab->selected_index = hit.index;
             }
             InvalidateRect(hwnd, nullptr, FALSE);
-            std::wstring virtual_kind;
-            const bool curated = tab && app::ParsePulsePath(
-                tab->current_path, &virtual_kind, nullptr) &&
-                (virtual_kind == L"starred" || virtual_kind == L"recent");
-            if (curated) {
-                ShowCuratedItemMenu(*s, EntryFullPath(*tab, hit.index),
-                                    virtual_kind == L"recent", sp);
-            } else {
-                ShowItemContextMenu(*s, sp);
-            }
+            ShowPointerItemMenu(*s, hit.index, sp);
             shown = true;
         } else if ((hit.region == ui::HitTestResult::SidebarItem ||
                     hit.region == ui::HitTestResult::SidebarItemExpand) &&
@@ -3786,6 +3878,12 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         if (wParam == VK_ESCAPE && (SysCtxPreviewDragCancel(*s) || PulseMenuPreviewDragCancel(*s))) return 0;
         if (wParam == VK_ESCAPE && CancelWindowTransferDrag(*s)) return 0;
         if (wParam == VK_ESCAPE && CancelSidebarReorder(*s)) return 0;
+        if (wParam == VK_ESCAPE && s->marqueeButton == MK_RBUTTON) {
+            CancelMarquee(*s);
+            if (GetCapture() == hwnd) ReleaseCapture();
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+        }
         s->blankClickTab = nullptr;
         CancelRenameClick(*s);
         app::Tab* tab = ActiveTab(*s);
@@ -3805,7 +3903,8 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 };
                 const bool needs_paths = command == app::CmdCut || command == app::CmdCopy ||
                     command == app::CmdCopyPath || command == app::CmdDelete || command == app::CmdProperties ||
-                    command == app::CmdCopyToTarget || command == app::CmdMoveToTarget;
+                    command == app::CmdCopyToTarget || command == app::CmdMoveToTarget ||
+                    command == app::CmdDisplayAlias;
                 if (!needs_paths || !DeferContentSelection(*s, dispatch)) dispatch(*s);
                 return 0;
             }

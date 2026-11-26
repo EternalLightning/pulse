@@ -18,9 +18,20 @@
 #include <algorithm>
 #include <chrono>
 #include <set>
+#include <unordered_map>
 
 namespace pulse::ops {
 namespace {
+using SourcePathIndex = std::unordered_map<std::wstring_view, size_t>;
+
+SourcePathIndex IndexSourcePaths(const std::vector<std::wstring>& paths) {
+    SourcePathIndex index;
+    index.reserve(paths.size());
+    // Exact path spelling and first occurrence match identity admission.
+    for (size_t i = 0; i < paths.size(); ++i) index.try_emplace(paths[i], i);
+    return index;
+}
+
 bool SamePath(const std::wstring& left, const std::wstring& right) {
     // Case-distinct files can coexist in a case-sensitive directory.
     return fs::NormalizePath(left) == fs::NormalizePath(right);
@@ -303,6 +314,7 @@ void OpsManager::FinishDelete(const QueueItem& item, std::wstring error,
 
 OpsManager::QueueItem OpsManager::RemainingDeleteRetry(const QueueItem& admitted, const DeletePlan& accepted,
     const std::vector<std::wstring>& actual) {
+    const auto admitted_paths = IndexSourcePaths(admitted.req.sources);
     QueueItem retry = admitted;
     retry.req.sources.clear(); retry.req.delete_targets.clear();
     retry.retry_source_references.clear();
@@ -320,12 +332,14 @@ OpsManager::QueueItem OpsManager::RemainingDeleteRetry(const QueueItem& admitted
             }
             remaining.physical_paths.push_back(root);
             retry.req.sources.push_back(root);
-            const auto original = std::find(admitted.req.sources.begin(), admitted.req.sources.end(), root);
-            const auto index = static_cast<size_t>(original - admitted.req.sources.begin());
-            if (index < admitted.retry_source_references.size())
-                retry.retry_source_references.push_back(admitted.retry_source_references[index]);
-            if (index < admitted.req.undo_produced_identities.size())
-                retry.req.undo_produced_identities.push_back(admitted.req.undo_produced_identities[index]);
+            const auto source = admitted_paths.find(root);
+            if (source != admitted_paths.end()) {
+                const size_t index = source->second;
+                if (index < admitted.retry_source_references.size())
+                    retry.retry_source_references.push_back(admitted.retry_source_references[index]);
+                if (index < admitted.req.undo_produced_identities.size())
+                    retry.req.undo_produced_identities.push_back(admitted.req.undo_produced_identities[index]);
+            }
         }
         if (!remaining.physical_paths.empty()) retry.req.delete_targets.push_back(std::move(remaining));
     }
@@ -379,7 +393,8 @@ void OpsManager::RunDelete(const QueueItem& item,
     }
     std::wstring error;
     std::wstring identity_failed_path;
-    if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo &&
+    const bool produced_undo = item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo;
+    if (produced_undo &&
         !ValidateProducedUndo(item.req.sources, item.req.undo_produced_identities, error, identity_failed_path)) {
         {
             std::lock_guard lock(mutex_);
@@ -394,7 +409,7 @@ void OpsManager::RunDelete(const QueueItem& item,
     auto plan = BuildDeletePlan(item.req, item.seq, error);
     if (!error.empty()) { finish(std::move(error)); return; }
     bool network_copy_undo = false;
-    if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo &&
+    if (produced_undo &&
         item.req.type == OpType::RecycleDelete && item.req.delete_targets.empty()) {
         std::lock_guard lock(mutex_);
         network_copy_undo = item.req.undo_revision == undo_revision_ && !undo_.empty() &&
@@ -402,7 +417,7 @@ void OpsManager::RunDelete(const QueueItem& item,
             undo_.back().destinations == item.req.sources &&
             undo_.back().produced_identities == item.req.undo_produced_identities;
     }
-    if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo &&
+    if (produced_undo &&
         std::any_of(plan.targets.begin(), plan.targets.end(), [&](const auto& target) {
             return target.disposition == DeleteDisposition::Permanent &&
                 (!network_copy_undo || !std::all_of(target.physical_paths.begin(),
@@ -417,23 +432,24 @@ void OpsManager::RunDelete(const QueueItem& item,
     QueueItem admitted = item;
     admitted.req.sources.clear();
     admitted.retry_source_references.clear();
+    const bool has_retry_references = !item.retry_source_references.empty();
+    std::optional<SourcePathIndex> original_paths;
+    if (produced_undo || has_retry_references) original_paths.emplace(IndexSourcePaths(item.req.sources));
     for (const auto& target : plan.targets) {
         for (const auto& root : target.physical_paths) {
             auto reference = FileObjectReference::Open(root);
-            if (item.req.is_undo && item.req.delete_origin == DeleteOrigin::Undo) {
-                const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), root);
-                const auto index = static_cast<size_t>(source - item.req.sources.begin());
-                if (index >= item.req.undo_produced_identities.size() ||
-                    reference.identity != item.req.undo_produced_identities[index]) reference = {};
+            if (original_paths) {
+                const auto source = original_paths->find(root);
+                const size_t index = source != original_paths->end() ? source->second : item.req.sources.size();
+                if (produced_undo && (index >= item.req.undo_produced_identities.size() ||
+                    reference.identity != item.req.undo_produced_identities[index])) reference = {};
+                if (has_retry_references) {
+                    if (index >= item.retry_source_references.size() ||
+                        !item.retry_source_references[index].Matches(reference.Get())) reference = {};
+                    else reference = item.retry_source_references[index];
+                }
             }
-            if (!item.retry_source_references.empty()) {
-                const auto source = std::find(item.req.sources.begin(), item.req.sources.end(), root);
-                const auto index = static_cast<size_t>(source - item.req.sources.begin());
-                if (index >= item.retry_source_references.size() ||
-                    !item.retry_source_references[index].Matches(reference.Get())) reference = {};
-                else reference = item.retry_source_references[index];
-            }
-            if (!reference.Get() && (item.req.is_undo || !item.retry_source_references.empty())) {
+            if (!reference.Get() && (item.req.is_undo || has_retry_references)) {
                 finish(l10n::Get(l10n::StringId::OperationFailedMessage), {}, false, false,
                     {}, {}, false, {}, HRESULT_FROM_WIN32(ERROR_FILE_INVALID), root);
                 return;
@@ -511,15 +527,17 @@ void OpsManager::RunDelete(const QueueItem& item,
     uint32_t hr = 0;
     bool cancelled = false;
     uint64_t execution_token = prepared.token;
+    const auto admitted_paths = IndexSourcePaths(admitted.req.sources);
     // One confirmed snapshot, separate backend modes. Never permanently delete
     // the local members of a mixed network/local batch just to suppress Shell UI.
     for (const auto& group : {std::pair{false, permanent_roots}, std::pair{true, recycle_roots}}) {
         if (group.second.empty()) continue;
         if (!execution_token) { hr = static_cast<uint32_t>(E_UNEXPECTED); break; }
         std::vector<FileIdentity> expected_identities;
+        expected_identities.reserve(group.second.size());
         for (const auto& path : group.second) {
-            const auto source = std::find(admitted.req.sources.begin(), admitted.req.sources.end(), path);
-            const auto index = static_cast<size_t>(source - admitted.req.sources.begin());
+            const auto source = admitted_paths.find(path);
+            const size_t index = source != admitted_paths.end() ? source->second : admitted.req.sources.size();
             auto current = FileObjectReference::Open(path);
             if (index >= admitted.retry_source_references.size() ||
                 (admitted.retry_source_references[index].Get() &&

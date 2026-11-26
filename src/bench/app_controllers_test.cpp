@@ -578,6 +578,29 @@ int wmain(int argc, wchar_t** argv) {
             restarted.Begin(path) != own && probes.latest.empty());
         return ok ? 0 : 1;
     }
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--context-menu-shortcut-location") {
+        using namespace pulse::app;
+        pulse::ui::FluentMenuItem location;
+        location.command = CmdOpenShortcutLocation;
+        location.text = L"Open file location";
+        ShellMenuEntry native, localized, vendor;
+        native.command = CmdShellComBase + 1;
+        native.verb = L"opencontaining";
+        native.text = location.text;
+        localized.command = CmdShellComBase + 2;
+        localized.text = L"打开文件所在的位置(&I)";
+        vendor.command = CmdShellComBase + 3;
+        vendor.text = L"Open source location in editor";
+        std::vector<pulse::ui::FluentMenuItem> display{location};
+        AppendShellSection(display, {native, localized, vendor});
+        const bool replaced = Report("resolved shortcut location keeps one Pulse command and unrelated shell commands",
+            display.size() == 2 && display.front().command == CmdOpenShortcutLocation && display.back().command == vendor.command);
+        display.clear();
+        AppendShellSection(display, {native});
+        const bool fallback = Report("shell location remains available when Pulse has no resolved shortcut target",
+            display.size() == 1 && display.front().command == native.command);
+        return replaced && fallback ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--context-menu-quick-access") {
         using namespace pulse::app;
         setvbuf(stdout, nullptr, _IONBF, 0);

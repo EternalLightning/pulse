@@ -10,6 +10,9 @@
 namespace pulse::ui {
 
 struct BinaryTransition {
+    static constexpr float kHoverEnterMs = 110.0f;
+    static constexpr float kHoverExitMs = 150.0f;
+
     float value = 0.0f;
     float from = 0.0f;
     float target = 0.0f;
@@ -17,6 +20,13 @@ struct BinaryTransition {
     bool initialized = false;
 
     bool Pending() const noexcept { return value != target; }
+
+    void TickHover(bool hot, uint64_t now, bool animate,
+                   float enter_ms = kHoverEnterMs, float exit_ms = kHoverExitMs) noexcept {
+        if (!initialized) Tick(false, now, false, enter_ms);
+        // Sample the current leg with its own duration before redirecting it.
+        Tick(hot, now, animate, target > 0.0f ? enter_ms : exit_ms);
+    }
 
     void Tick(bool on, uint64_t now, bool animate, float duration_ms) noexcept {
         const float next = on ? 1.0f : 0.0f;

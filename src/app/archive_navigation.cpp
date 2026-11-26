@@ -5,6 +5,7 @@
 
 #include "archive_navigation.h"
 #include "archive_dialog.h"
+#include "app_file_picker.h"
 #include "archive_operation_ui.h"
 #include "app_state.h"
 #include "app_navigation.h"
@@ -145,7 +146,7 @@ void RunExtraction(AppState& s, const std::wstring& file, const std::wstring& de
             auto status = app::ArchiveOperationStatus(task->progress, file, destination, task->cancel.load());
             status.peak_bytes_per_second = task->peak_bytes_per_second;
             return status;
-        });
+        }, !member.empty());
     if (!task->done.load(std::memory_order_acquire)) {
         task->cancel.store(true, std::memory_order_release);
         return;
@@ -315,7 +316,14 @@ void ExtractArchiveSelection(AppState& s, bool all) {
     }
     app::ArchiveExtractOptions options;
     options.password = tab->archive_password;
-    if (!app::ShowArchiveExtractDialog(s.hwnd, s.darkMode, Accent(s), tab->archive_file, all, options)) return;
+    if (!app::ShowArchiveExtractDialog(s.hwnd, s.darkMode, Accent(s), tab->archive_file, all, options,
+        [&](HWND owner, std::wstring& path) {
+            ui::FilePickerSpec picker;
+            picker.mode = ui::PickerMode::Folder;
+            picker.title = l10n::Get(l10n::StringId::ArchivePickDestination);
+            picker.initial_path = path;
+            return PickPulsePath(s, owner, std::move(picker), path);
+        })) return;
     auto destination = options.destination;
     if (all && options.create_folder)
         destination = (std::filesystem::path(destination) / std::filesystem::path(tab->archive_file).stem()).wstring();

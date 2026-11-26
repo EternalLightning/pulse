@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #pragma once
+#include "../common/resource_ids.h"
 
 #include <d2d1_1.h>
 #include <algorithm>
@@ -18,6 +19,10 @@ namespace pulse::ui::command_icons {
 // their own rendering paths. Geometry also works without the D2D SVG interface.
 inline constexpr float kCanvas = 24.0f;
 inline constexpr float kStroke = 1.75f;
+inline constexpr wchar_t kDisplayAliasGlyph[] = L"\xF300";
+inline constexpr wchar_t kLinkedBrowsingGlyph[] = L"\xF301";
+inline constexpr wchar_t kDirectorySyncGlyph[] = L"\xF302";
+inline constexpr wchar_t kEmbeddedTerminalGlyph[] = L"\xF303";
 
 enum class Icon {
     None, Add, Close, Minimize, Maximize, Restore, Back, Forward, Up,
@@ -28,8 +33,18 @@ enum class Icon {
     Panel, PanelClose, Check, Eye, Info, Home, Tray, Pin, Link,
     Palette, Sliders, Warning, Lock, OpenExternal, StarFilled, More,
     Undo, SelectAll, InvertSelection, Terminal, NewFolder, Library, Applications,
-    LayoutSingle, LayoutStacked, LayoutThree, LayoutFour, Details, Content, Count
+    LayoutSingle, LayoutStacked, LayoutThree, LayoutFour, Details, Content,
+    DisplayAlias, LinkedBrowsing, Sync, EmbeddedTerminal, Count
 };
+
+inline int WorkspaceSvg(Icon icon) noexcept {
+    switch (icon) {
+    case Icon::DisplayAlias: return IDR_WORKSPACE_DISPLAY_ALIAS_SVG;
+    case Icon::LinkedBrowsing: return IDR_WORKSPACE_LINKED_BROWSING_SVG;
+    case Icon::Sync: return IDR_WORKSPACE_DIRECTORY_SYNC_SVG;
+    default: return 0;
+    }
+}
 
 inline Icon FromGlyph(std::wstring_view glyph) noexcept {
     if (glyph.size() != 1) return Icon::None;
@@ -85,6 +100,11 @@ inline Icon FromGlyph(std::wstring_view glyph) noexcept {
     case L'\xE8A1': return Icon::Tray;
     case L'\xE718': case L'\xE840': case L'\xE841': return Icon::Pin;
     case L'\xE71B': return Icon::Link;
+    case L'\xE756': return Icon::Terminal;
+    case kDisplayAliasGlyph[0]: return Icon::DisplayAlias;
+    case kLinkedBrowsingGlyph[0]: return Icon::LinkedBrowsing;
+    case kDirectorySyncGlyph[0]: return Icon::Sync;
+    case kEmbeddedTerminalGlyph[0]: return Icon::EmbeddedTerminal;
     case L'\xE790': return Icon::Palette;
     case L'\xE9E9': case L'\xE8A4': return Icon::Sliders;
     case L'\xE7BA': return Icon::Warning;
@@ -263,7 +283,7 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
         begin(5.5f,6.5f); to(6.3f,18.6f); curve(6.4f,19.7f,7.1f,20.5f,8.2f,20.5f);
         to(15.8f,20.5f); curve(16.9f,20.5f,17.6f,19.7f,17.7f,18.6f); to(18.5f,6.5f); end();
         line(10,10,10.3f,17); line(14,10,13.7f,17); break;
-    case Icon::Tag:
+    case Icon::Tag: case Icon::DisplayAlias:
         path({{3,4},{3,11},{12,21},{21,12},{11,3},{4,3},{3,4}}); circle(7.5f,7.5f,1.2f); break;
     case Icon::Settings:
         path({{9.5f,3},{8.9f,5.3f},{6.9f,6.2f},{4.8f,5.5f},{2.8f,9},{4.4f,10.6f},
@@ -345,6 +365,14 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
         circle(12,12,9); line(12,3,12,21); line(4,8,12,8); line(3,12,12,12); line(4,16,12,16); break;
     case Icon::Terminal:
         box(3,4,21,20,3); path({{6,8},{10,12},{6,16}}); line(13,16,18,16); break;
+    case Icon::EmbeddedTerminal:
+        box(2,2.5f,22,21.5f,3); line(8.5f,2.5f,8.5f,21.5f);
+        path({{12,8},{15.5f,12},{12,16}}); line(17.5f,16,19.5f,16); break;
+    case Icon::LinkedBrowsing:
+        box(3,4,9,20,2); box(15,4,21,20,2); line(7,12,17,12); break;
+    case Icon::Sync:
+        line(4,8,20,8); path({{16,4},{20,8},{16,12}});
+        line(4,16,20,16); path({{8,12},{4,16},{8,20}}); break;
     case Icon::NewFolder:
         folder(); line(12,11,12,17); line(9,14,15,14); break;
     case Icon::Library:

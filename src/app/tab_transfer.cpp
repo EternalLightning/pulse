@@ -7,6 +7,7 @@
 #include "app_runtime.h"
 #include "app_internal.h"
 #include "app_exit.h"
+#include "../ui/terminal_surface.h"
 #include "tab_group_id.h"
 #include "content_results_ui.h"
 #include <dwmapi.h>
@@ -250,6 +251,7 @@ bool TransferLayoutTab(AppState& source, size_t index, AppState& destination,
         insert_at = 0;
         while (insert_at < dst.items.size() && dst.items[insert_at]->pinned) ++insert_at;
     }
+    if (moved->terminal) moved->terminal->SetOwner(destination.hwnd);
     dst.items.insert(dst.items.begin() + static_cast<ptrdiff_t>(insert_at), std::move(moved));
     dst.active = insert_at;
     app::NormalizeGroupRuns(dst);
@@ -324,6 +326,7 @@ bool TransferLayoutTabIntoPaneArea(AppState& source, size_t index, AppState& des
     if (&source == &destination || index >= source.window_tabs.items.size()) return false;
     app::LayoutTab* incoming = source.window_tabs.items[index].get();
     if (!incoming || incoming->panes.empty()) return false;
+    if (incoming->terminal) return TransferLayoutTab(source, index, destination);
     destination.window_tabs.EnsureDefault();
     app::LayoutTab* target = destination.window_tabs.Active();
     if (!target) return false;

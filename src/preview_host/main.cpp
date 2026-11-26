@@ -363,6 +363,12 @@ struct GifDecodeState {
     uint64_t composed_frames = 0, opened_decoders = 0;
 #endif
     ~GifDecodeState() { Clear(); }
+    bool BeginRequest(const ipc::PreviewRequest& request, std::wstring_view extension) {
+        if (extension == L".gif" && request.kind != ipc::PreviewRequestKind::Properties &&
+            !(request.attrs & FILE_ATTRIBUTE_DIRECTORY) && !IsOfflinePlaceholder(request.attrs)) return true;
+        Clear();
+        return false;
+    }
     void Clear() {
         decoder.Reset(); stream.Reset(); factory.Reset();
         if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
@@ -448,12 +454,11 @@ static bool OpenGifState(GifDecodeState& state, const std::wstring& path, UINT p
     return true;
 }
 
-static bool DecodeGifFrame(GifDecodeState& state, const std::wstring& path, DWORD attrs, UINT pixels,
+static bool DecodeGifFrame(GifDecodeState& state, const std::wstring& path, UINT pixels,
                            uint32_t frame_index, std::vector<uint8_t>& out,
                            UINT& width, UINT& height, UINT& stride,
                            uint32_t& frame_count, uint32_t& delay_ms,
                            uint32_t& loop_count, UINT& source_width, UINT& source_height) {
-    if (IsOfflinePlaceholder(attrs)) return false;
     if (!OpenGifState(state, path, pixels)) { state.Clear(); return false; }
     const auto decode = [&]() -> bool {
         auto& factory = state.factory; auto& decoder = state.decoder;
@@ -651,7 +656,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         bool made = false;
         const DWORD current_attrs = GetFileAttributesW(path.c_str());
         if (current_attrs != INVALID_FILE_ATTRIBUTES) req.attrs |= current_attrs;
-        if (req.kind == ipc::PreviewRequestKind::Properties) {
+        const bool properties_only = req.kind == ipc::PreviewRequestKind::Properties;
+        const std::wstring extension = properties_only ? std::wstring{} : ExtensionOf(path);
+        const bool gif = gif_state.BeginRequest(req, extension);
+        if (properties_only) {
             if (!IsOfflinePlaceholder(req.attrs)) properties = ReadProperties(path);
             for (auto& property : properties) {
                 ipc::TruncatePreviewString(property.label, ipc::kPreviewMaxPropertyLabelChars, true);
@@ -661,7 +669,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
             response.status = 0;
             made = true;
         } else {
-            const std::wstring extension = ExtensionOf(path);
             bool truncated = false;
             uint32_t bytesRead = 0;
             const bool isDirectory = (req.attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
@@ -680,7 +687,6 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                 else errorText = L"provider-failed";
             } else if (preview::IsImageExtension(extension)) {
                 uint32_t frame_count = 1, frame_delay = 0, loop_count = 0;
-                const bool gif = extension == L".gif";
                 const UINT cap = ipc::ClampPreviewPixelSize(req.pixel_size, gif);
                 const bool thumbnail = req.kind == ipc::PreviewRequestKind::Thumbnail;
                 if (thumbnail && !gif) {
@@ -698,7 +704,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
                     }
                 }
                 if (gif) {
-                    made = DecodeGifFrame(gif_state, path, req.attrs, cap, req.frame_index,
+                    made = DecodeGifFrame(gif_state, path, cap, req.frame_index,
                         pixels, w, h, stride, frame_count, frame_delay, loop_count,
                         source_w, source_h);
                 } else if (!made) {

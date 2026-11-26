@@ -11,6 +11,7 @@
 namespace pulse::ops {
 struct OperationRecordsTestProbe {
     static void Initialize(OpsManager& manager) { manager.running_ = true; }
+    static void ParkMenuWorker(OpsManager& manager) { manager.menu_running_ = true; }
 
     static void ExecuteNext(OpsManager& manager) {
         auto item = std::move(manager.queue_.front());
@@ -143,6 +144,18 @@ int main(int argc, char** argv) {
     tasks = manager.TaskStatuses();
     Check(tasks.size() == 1 && tasks.front().task_id == still_queued && tasks.front().phase == OpPhase::Queued,
         "clearing bounded history never consumes pending work");
+
+    Check(Probe::BeginNext(manager) == still_queued, "fixture starts a copy with an empty pending queue");
+    Probe::ParkMenuWorker(manager);
+    OpRequest create_folder;
+    create_folder.type = OpType::CreateFolder;
+    create_folder.sources = {L"operation-records-folder"};
+    const auto reserved = manager.Submit(create_folder);
+    const auto later = manager.Submit(transfer);
+    tasks = manager.TaskStatuses();
+    Check(tasks.size() == 3 && tasks[0].task_id == still_queued && tasks[1].task_id == reserved &&
+        tasks[1].phase == OpPhase::Queued && tasks[1].source_label == create_folder.sources.front() &&
+        tasks[2].task_id == later, "a reserved folder stays visible before later queued transfers");
     std::printf("%d failure(s)\n", failures);
     return failures ? 1 : 0;
 }

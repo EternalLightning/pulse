@@ -9,6 +9,7 @@
 #include "empty_state_layout.h"
 #include "../common/localization.h"
 #include "../common/display_path.h"
+#include "../common/known_folder_labels.h"
 #include "../common/path_utils.h"
 #include "typography.h"
 #include "name_highlight.h"
@@ -170,6 +171,15 @@ void ClearTextWidthCache() {
         if (ext == L"exe" || ext == L"msi") return pulse::l10n::Get(StringId::TypeApplication);
         if (ext == L"dwg") return pulse::l10n::Get(StringId::TypeAutocadFile);
         return pulse::l10n::Get(StringId::TypeFile);
+    }
+
+    inline std::wstring DisplayRowName(const PaneViewModel& vm, const ListEntryView& entry) {
+        if (!vm.is_recycle && !entry.record_only) {
+            const auto alias = model::FindDisplayAlias(vm.display_aliases, entry.path);
+            if (!alias.empty()) return std::wstring(alias);
+        }
+        return entry.is_dir && !entry.record_only
+            ? pulse::path::KnownFolderDisplayName(entry.path, entry.name) : entry.name;
     }
 
     const ListEntryView& MakeVisibleEntry(const PaneViewModel& vm, size_t index) {
@@ -1601,10 +1611,11 @@ struct SettingsLayout {
     D2D1_RECT_F explorer_takeover_row{};
     D2D1_RECT_F file_dialog_takeover_row{};
     D2D1_RECT_F file_dialog_bridge_row{};
-    D2D1_RECT_F startup_tray_row{}, last_tab_row{};
+    D2D1_RECT_F last_tab_row{};
     D2D1_RECT_F system_status{};
     D2D1_RECT_F new_tab_row{};
-    D2D1_RECT_F external_open_card{}, external_open_choice{};
+    D2D1_RECT_F external_open_card{}, external_open_choice{}, terminal_shell_card{}, terminal_shell_choice{};
+    D2D1_RECT_F terminal_font_card{}, terminal_font_choice{}, terminal_size_card{}, terminal_size_choice{}, terminal_follow_row{};
     D2D1_RECT_F hidden_files_row{};
     D2D1_RECT_F protected_files_row{};
     D2D1_RECT_F pinned_names_row{};

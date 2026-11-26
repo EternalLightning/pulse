@@ -76,7 +76,6 @@ int RunSettingsCategories() {
         {8,&ui::SettingsLayout::file_dialog_bridge_row,H::SettingsToggle,38,I::SettingsFileDialogBridge},
         {8,&ui::SettingsLayout::file_dialog_takeover_row,H::SettingsToggle,37,I::SettingsFileDialogTakeover},
         {8,&ui::SettingsLayout::text_compare_row,H::None,0,I::SettingsTextCompare},
-        {8,&ui::SettingsLayout::startup_tray_row,H::SettingsToggle,31,I::StartToTray},
         {9,&ui::SettingsLayout::staging_tray_row,H::SettingsToggle,36,I::SettingsStagingTray},
         {9,&ui::SettingsLayout::text_compare_row,H::SettingsToggle,33,I::SettingsTextCompare},
         {9,&ui::SettingsLayout::change_tracking_row,H::SettingsToggle,8,I::SettingsChangeTracking},

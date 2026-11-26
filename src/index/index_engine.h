@@ -504,8 +504,8 @@ private:
     mutable std::wstring cache_raw_;
     mutable std::wstring cache_path_prefix_;
     mutable bool cache_folders_only_ = false;
-    // Raw candidates only: every response must authorize them again for its caller.
-    mutable MatchSet cache_set_;
+    // Shared with in-flight queries after query_mu_ is released. Authorization is per response.
+    mutable std::shared_ptr<const MatchSet> cache_set_;
 };
 
 } // namespace pulse::index

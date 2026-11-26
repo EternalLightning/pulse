@@ -8,7 +8,7 @@
 #include "cloud_root_catalog.h"
 #include "network_sidebar.h"
 #include "search_query.h"
-#include "date_groups.h"
+#include "../ui/date_groups.h"
 #include "shell_path.h"
 #include "../common/json_utils.h"
 #include "../common/localization.h"
@@ -16,6 +16,7 @@
 #include "../common/display_path.h"
 #include "../common/known_folder_labels.h"
 #include "../common/text_format.h"
+#include "../model/file_visibility.h"
 #include "../model/item_filter.h"
 #include <commctrl.h>
 #include <prsht.h>
@@ -201,10 +202,7 @@ bool Tab::EntryVisible(int index) const {
 bool Tab::AllowsAttributes(DWORD attrs) const {
     // Recycle Bin lists payloads whose hidden attributes belong to Windows.
     if (current_path.starts_with(L"pulse:recycle")) return true;
-    if ((attrs & FILE_ATTRIBUTE_HIDDEN) == 0) return true; // system-only entries stay visible
-    if (!show_hidden_files) return false;
-    if ((attrs & FILE_ATTRIBUTE_SYSTEM) != 0) return show_protected_os_files;
-    return true;
+    return model::FileVisibility{show_hidden_files, show_protected_os_files}.Includes(attrs);
 }
 
 void Tab::SetShowHiddenFiles(bool show) {
@@ -289,11 +287,9 @@ void Tab::SelectRange(int from, int to) {
     to = std::clamp(to, 0, n - 1);
     all_selected = false;
     selected.clear();
-    const auto effective_group = group_mode == ui::GroupMode::Auto
-        ? (sort_column == ui::SortColumn::Mtime ? ui::GroupMode::DateModified : ui::GroupMode::None)
-        : group_mode;
-    const auto effective_direction = group_mode == ui::GroupMode::Auto ? sort_direction : group_direction;
-    if (view_mode == ui::ViewMode::Details && !content_results &&
+    const auto [effective_group, effective_direction] =
+        ui::ResolveFileGrouping(view_mode, group_mode, sort_column, sort_direction, group_direction);
+    if (!content_results &&
         !current_path.empty() && !fs::IsVirtualPath(current_path) &&
         snapshot && effective_group != ui::GroupMode::None && view_group_mode == effective_group &&
         view_group_direction == effective_direction && view_cache_snapshot == snapshot &&
@@ -672,13 +668,21 @@ LayoutTab& WindowTabs::NewTabAt(size_t index, const std::wstring& path) {
     return **it;
 }
 
-void WindowTabs::CloseTab(size_t idx) {
-    if (idx >= items.size() || items.size() <= 1) return;
-    if (items[idx]->pinned) return;
+bool WindowTabs::CloseTab(size_t idx, bool confirm) {
+    if (idx >= items.size() || items.size() <= 1 || items[idx]->pinned) return false;
+    auto* closing = items[idx].get();
+    if (confirm && confirm_close) {
+        if (!confirm_close(*closing)) return false;
+        const auto current = std::find_if(items.begin(), items.end(),
+            [closing](const auto& item) { return item.get() == closing; });
+        if (current == items.end() || items.size() <= 1 || (*current)->pinned) return false;
+        idx = static_cast<size_t>(current - items.begin());
+    }
     if (before_close) before_close(*items[idx]);
     items.erase(items.begin() + static_cast<ptrdiff_t>(idx));
     if (active >= items.size()) active = items.size() - 1;
     else if (idx < active) --active;
+    return true;
 }
 
 void WindowTabs::SwitchTab(size_t idx) {
@@ -1488,20 +1492,9 @@ bool NameMatchesPattern(std::wstring_view name, std::wstring_view needle) {
         folded_pat.find_first_of(L"*?") != std::wstring::npos);
 }
 
-static model::CompiledItemFilter CompileViewFilter(const std::wstring& text, const PlacesCatalog* places) {
-    return model::CompileItemFilter(text, [places](std::wstring_view needle, bool fuzzy) {
-        std::vector<int> matches;
-        if (places) for (size_t id = 0; id < places->tags.size(); ++id) {
-            if (model::ItemFilterTagNameMatches(places->tags[id].name, static_cast<int>(id), needle, fuzzy))
-                matches.push_back(static_cast<int>(id));
-        }
-        return matches;
-    });
-}
-
 index::ContentResultStore::Filter ContentFilter(const std::wstring& text, const PlacesCatalog& places) {
     if (text.empty()) return {};
-    auto filter = CompileViewFilter(text, &places);
+    auto filter = model::CompileCatalogItemFilter(text, &places);
     if (!filter.Valid()) return [](const fs::DirEntry&) { return false; };
     model::ItemFilterTagLookup lookup;
     if (filter.HasTagConditions()) {
@@ -1525,8 +1518,10 @@ index::ContentResultStore::Filter ContentFilter(const std::wstring& text, const 
             return it == snapshot->end() ? nullptr : &it->second;
         };
     }
-    return [filter = std::move(filter), lookup = std::move(lookup)](const fs::DirEntry& entry) {
-        return filter.Matches(entry, entry.full_path, lookup);
+    return [filter = std::move(filter), lookup = std::move(lookup),
+            aliases = places.display_aliases](const fs::DirEntry& entry) {
+        return filter.Matches(entry, entry.full_path, lookup,
+            model::FindDisplayAlias(aliases, entry.full_path));
     };
 }
 
@@ -1541,12 +1536,13 @@ void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vect
         for (int i = 0; i < n; ++i) if (tab.EntryVisible(i)) out.push_back(i);
         return;
     }
-    const auto filter = CompileViewFilter(tab.filter_text, places);
+    const auto filter = model::CompileCatalogItemFilter(tab.filter_text, places);
     if (!filter.Valid()) return;
     const model::ItemFilterTagLookup lookup = [places](const std::wstring& full) {
         return places ? places->TagIndicesForPath(full) : nullptr;
     };
-    const bool needs_path = filter.HasTagConditions() ||
+    const auto aliases = places ? places->display_aliases : model::DisplayAliasSnapshot{};
+    const bool needs_path = aliases || filter.HasTagConditions() ||
         std::any_of(filter.metadata.begin(), filter.metadata.end(), [](const auto& term) { return term.name_in_path; });
     out.reserve(static_cast<size_t>(n));
     const fs::DirEntry empty_entry;
@@ -1555,7 +1551,10 @@ void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vect
         // Content-backed rows returned above; borrow immutable snapshot rows here.
         const auto& e = static_cast<size_t>(i) < tab.snapshot->size()
             ? (*tab.snapshot)[static_cast<size_t>(i)] : empty_entry;
-        if (filter.Matches(e, needs_path ? EntryPathOf(tab, e) : std::wstring{}, lookup)) out.push_back(i);
+        const auto path = needs_path ? EntryPathOf(tab, e) : std::wstring{};
+        const auto alias = e.change_record_only || !e.recycle_path.empty()
+            ? std::wstring_view{} : model::FindDisplayAlias(aliases, path);
+        if (filter.Matches(e, path, lookup, alias)) out.push_back(i);
     }
 }
 
@@ -1665,15 +1664,18 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.focused = pane.focused;
     out.snapshot = tab->snapshot;
     out.tag_catalog = places;
+    out.display_aliases = places ? places->display_aliases : model::DisplayAliasSnapshot{};
     const uint64_t places_revision = places ? places->TagRevision() : 0;
     const bool source_changed = tab->view_cache_snapshot != tab->snapshot ||
         tab->view_cache_places != places ||
-        tab->view_cache_places_revision != places_revision;
+        tab->view_cache_places_revision != places_revision ||
+        tab->view_cache_display_aliases != out.display_aliases;
     if (source_changed || !tab->view_tag_dots) {
         auto dots_by_row = std::make_shared<ui::PaneViewModel::TagDots>();
         tab->view_cache_snapshot = tab->snapshot;
         tab->view_cache_places = places;
         tab->view_cache_places_revision = places_revision;
+        tab->view_cache_display_aliases = out.display_aliases;
         tab->view_tag_dots = std::move(dots_by_row);
         tab->view_filter_map.reset();
         tab->view_row_cache = std::make_shared<ui::RowPresentationCache>();
@@ -1695,21 +1697,18 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
         }
         out.filter_map = tab->view_filter_map;
     }
-    const auto group_mode = tab->group_mode == ui::GroupMode::Auto
-        ? (tab->sort_column == ui::SortColumn::Mtime ? ui::GroupMode::DateModified : ui::GroupMode::None)
-        : tab->group_mode;
-    const auto group_direction = tab->group_mode == ui::GroupMode::Auto
-        ? tab->sort_direction : tab->group_direction;
-    if (out.view_mode == ui::ViewMode::Details && out.is_file_system &&
+    const auto [group_mode, group_direction] = ui::ResolveFileGrouping(out.view_mode, tab->group_mode,
+        tab->sort_column, tab->sort_direction, tab->group_direction);
+    if (out.is_file_system &&
         group_mode != ui::GroupMode::None && !tab->content_results && out.snapshot && out.EntryCount()) {
         SYSTEMTIME today{};
-        GetLocalTime(&today);
+        if (group_mode == ui::GroupMode::DateModified) GetLocalTime(&today);
         const unsigned day_key = today.wYear * 10000u + today.wMonth * 100u + today.wDay;
         if (!tab->view_date_groups || !tab->view_group_order || source_changed ||
             tab->view_date_filter.get() != out.filter_map.get() ||
             tab->view_group_mode != group_mode || tab->view_group_direction != group_direction ||
             tab->view_date_day != day_key) {
-            auto grouped = BuildGroupedView(out.snapshot, out.filter_map.get(), group_mode, group_direction, today);
+            auto grouped = ui::BuildGroupedView(out.snapshot, out.filter_map.get(), group_mode, group_direction, today);
             tab->view_date_groups = std::make_shared<const std::vector<ui::DateGroup>>(
                 std::move(grouped.groups));
             tab->view_group_order = std::make_shared<const ui::PaneViewModel::FilterMap>(std::move(grouped.indices));

@@ -57,7 +57,8 @@ void SeedSource(const fs::path& dir) {
     Write(dir, L"tags.json",
           L"{\n  \"version\":3,\n  \"tags_generation\":\"7\",\n"
           L"  \"tags\":[{\"id\":\"t1\",\"name\":\"工作\",\"rgb\":0xFF0000}]\n}\n");
-    Write(dir, L"aliases.json", L"{\"aliases\":{\"D:\\\\Projects\":\"项目\"}}");
+    Write(dir, L"aliases.json", L"{\"aliases\":{\"D:\\\\Projects\":\"项目\"},"
+          L"\"display_aliases\":{\"D:\\\\Projects\\\\report.txt\":\"财务报告\"}}");
     Write(dir, L"saved_searches.json", L"{\"version\":1,\"items\":[]}");
 }
 
@@ -183,7 +184,9 @@ int wmain() {
           L"both tag copies move one generation above everything seen");
     Check(!Has(target, L"tags.pending.json"), L"a stale tag recovery file is dropped");
     Check(!Has(target, L"tag_rules.json"), L"tag rules the source lacks are removed");
-    Check(Contains(Read(target, L"aliases.json"), L"项目"), L"aliases arrive");
+    const auto imported_aliases = Read(target, L"aliases.json");
+    Check(Contains(imported_aliases, L"项目") && Contains(imported_aliases, L"财务报告"),
+          L"path and display aliases arrive");
     Check(Contains(Read(target, L"saved_searches.json"), L"mine"), L"saved searches stay when not chosen");
 
     Check(!Has(target, L"backups") && !Has(target, L"settings_import"),

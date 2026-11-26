@@ -3,6 +3,8 @@
 #include "../common/user_storage.h"
 #include <filesystem>
 #include <cstdio>
+#include <chrono>
+#include <thread>
 
 namespace {
 int passed = 0, failed = 0;
@@ -16,7 +18,7 @@ POINT Center(D2D1_RECT_F rc) {
 }
 RECT captured_menu{};
 bool captured = false;
-void CALLBACK SelectHorizontal(HWND, UINT, UINT_PTR timer, DWORD) {
+HWND VisibleFluentPopup() {
     HWND menu = nullptr;
     EnumThreadWindows(GetCurrentThreadId(), [](HWND hwnd, LPARAM out) -> BOOL {
         wchar_t name[64]{}; GetClassNameW(hwnd, name, ARRAYSIZE(name));
@@ -25,6 +27,10 @@ void CALLBACK SelectHorizontal(HWND, UINT, UINT_PTR timer, DWORD) {
         }
         return TRUE;
     }, reinterpret_cast<LPARAM>(&menu));
+    return menu;
+}
+void CALLBACK SelectHorizontal(HWND, UINT, UINT_PTR timer, DWORD) {
+    const HWND menu = VisibleFluentPopup();
     KillTimer(nullptr, timer);
     if (menu) {
         captured = GetWindowRect(menu, &captured_menu) != FALSE;
@@ -33,6 +39,26 @@ void CALLBACK SelectHorizontal(HWND, UINT, UINT_PTR timer, DWORD) {
         PostMessageW(menu, WM_KEYDOWN, VK_RETURN, 0);
     } else {
         PostThreadMessageW(GetCurrentThreadId(), WM_KEYDOWN, VK_ESCAPE, 0);
+    }
+}
+struct SelectionMenuProbe {
+    pulse::AppState& app;
+    bool item_menu = false;
+    std::vector<int> selection;
+};
+SelectionMenuProbe* selection_probe = nullptr;
+void CALLBACK InspectSelectionMenu(HWND, UINT, UINT_PTR timer, DWORD) {
+    KillTimer(nullptr, timer);
+    if (const HWND menu = VisibleFluentPopup(); menu && selection_probe) {
+        auto& state = selection_probe->app;
+        selection_probe->selection = pulse::ActiveTab(state)->SelectedIndices();
+        const auto& items = state.context_menu.base_items();
+        selection_probe->item_menu = std::any_of(items.begin(), items.end(),
+            [](const auto& item) {
+                return std::any_of(item.quick_swatches.begin(), item.quick_swatches.end(),
+                    [](const auto& swatch) { return swatch.command == pulse::app::CmdCopy; });
+            });
+        PostMessageW(menu, WM_KEYDOWN, VK_ESCAPE, 0);
     }
 }
 }
@@ -120,6 +146,106 @@ int main() {
             "narrow panes fold direct view shortcuts while retaining split and More");
     }
     s.scale = 1; s.renderer.SetScale(1); s.compositor.RecreateTextFormats(1); s.compositor.Resize(1000, 620);
+    {
+        auto vm = BuildVm(s, false);
+        auto& slot = vm.pane_slots[1];
+        slot.pane.view_mode = ui::ViewMode::Details;
+        slot.pane.header_controls_opacity = 1;
+        const auto theme = ui::IsHighContrast() ? ui::MakeHighContrastTheme() : ui::MakeTheme(true, s.accentColor);
+        const auto bounds = D2D1::RectF(0, 0, 1000, 620);
+        const auto more = Center(s.renderer.PaneViewButtonRect(slot.rect, slot.pane.filter_expand));
+        const float divider_x = s.renderer.DetailsColumns(slot.rect, slot.pane).DividerX(0);
+        const float divider_y = slot.rect.top + s.renderer.PaneHeaderHeight() + s.renderer.ColumnHeaderHeight() / 2;
+        const auto more_hit = s.renderer.HitTest(vm, bounds, static_cast<float>(more.x), static_cast<float>(more.y));
+        const auto divider_hit = s.renderer.HitTest(vm, bounds, divider_x, divider_y);
+        Check(more_hit.region == ui::HitTestResult::PaneViewButton &&
+            divider_hit.region == ui::HitTestResult::ColumnDivider,
+            "production hit testing identifies the pane button and details divider");
+        const auto draw = [&](const ui::HitTestResult& hit, const wchar_t* snapshot = nullptr) {
+            vm.hover_region = hit.region; vm.hover_pane_index = hit.pane_index; vm.hover_control_index = hit.index;
+            auto* dc = s.compositor.Dc();
+            dc->BeginDraw(); dc->Clear(theme.bg);
+            s.renderer.Render(vm, bounds, theme);
+            const bool rendered = SUCCEEDED(dc->EndDraw());
+            if (snapshot)
+                Check(rendered && s.compositor.SaveSnapshot((root / snapshot).c_str()), "capture pane hover feedback");
+            return rendered && s.renderer.SurfaceAnimating();
+        };
+        draw({}, L"hover-rest.png");
+        const bool animate = s.renderer.MotionEnabled() && !ui::IsHighContrast();
+        Check(draw(more_hit) == animate, "pane button hover follows the shared frame policy");
+        std::this_thread::sleep_for(std::chrono::milliseconds(32));
+        Check(draw(more_hit, L"hover-button-middle.png") == animate, "pane button draws during the hover entrance");
+        Check(draw(divider_hit) == animate, "moving from a pane button to a divider retargets hover feedback");
+        std::this_thread::sleep_for(std::chrono::milliseconds(32));
+        Check(draw(divider_hit, L"hover-divider-middle.png") == animate, "column divider draws during the hover entrance");
+        draw({});
+        std::this_thread::sleep_for(std::chrono::milliseconds(160));
+        Check(!draw({}, L"hover-settled.png"), "pane and divider hover fade out and stop requesting frames");
+    }
+    {
+        auto& tab = *ActiveTab(s);
+        tab.view_mode = ui::ViewMode::Details;
+        auto data = std::make_shared<std::vector<fs::DirEntry>>(4);
+        for (size_t i = 0; i < data->size(); ++i) {
+            (*data)[i].name = L"selection-" + std::to_wstring(i) + L".txt";
+            (*data)[i].attrs = FILE_ATTRIBUTE_NORMAL;
+        }
+        tab.SetSnapshot(std::move(data));
+        const auto view = BuildVm(s, false);
+        const auto& slot = view.pane_slots[1];
+        const auto row2 = s.renderer.ItemRectInPane(slot.pane, slot.rect, 1);
+        const auto row3 = s.renderer.ItemRectInPane(slot.pane, slot.rect, 2);
+        const auto row4 = s.renderer.ItemRectInPane(slot.pane, slot.rect, 3);
+        const auto header = Center(s.renderer.PaneHeaderTextRect(slot.rect));
+        const auto point = [](POINT p) { return MAKELPARAM(p.x, p.y); };
+        const auto target = POINT{header.x + 50, static_cast<LONG>((row2.top + row2.bottom) / 2)};
+        tab.SelectOnly(3);
+        HandleLButtonDown(&s, s.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, point(header));
+        Check(tab.IsSelected(3), "pane header press keeps selection until released");
+        HandleLButtonUp(&s, s.hwnd, WM_LBUTTONUP, 0, point(header));
+        Check(tab.SelectedCount() == 0 && GetCapture() != s.hwnd,
+            "clicking the pane title clears that pane's selection and releases capture");
+
+        tab.SelectOnly(3);
+        HandleRButtonDown(&s, s.hwnd, WM_RBUTTONDOWN, MK_RBUTTON, point(header));
+        Check(s.marqueePending && tab.IsSelected(3), "right press preserves ordinary click selection until the drag begins");
+        HandleMouseMove(&s, s.hwnd, WM_MOUSEMOVE, MK_RBUTTON, point(target));
+        Check(s.marqueeActive && tab.SelectedIndices() == std::vector<int>{0, 1},
+            "right drag from the pane title selects the intersected rows");
+        SelectionMenuProbe probe{s};
+        selection_probe = &probe;
+        const auto release_with_menu = [&](POINT release) {
+            probe.item_menu = false; probe.selection.clear();
+            const auto timer = SetTimer(nullptr, 0, 260, InspectSelectionMenu);
+            if (!timer) return false;
+            HandleRButtonUp(&s, s.hwnd, WM_RBUTTONUP, 0, point(release));
+            KillTimer(nullptr, timer);
+            return probe.item_menu;
+        };
+        Check(release_with_menu(target) && probe.selection == std::vector<int>{0, 1} &&
+            tab.SelectedIndices() == probe.selection && !s.marqueeActive && GetCapture() != s.hwnd,
+            "right release opens the existing item menu for the complete selection");
+        const auto third = Center(row3);
+        HandleRButtonDown(&s, s.hwnd, WM_RBUTTONDOWN, MK_RBUTTON, point(third));
+        Check(release_with_menu(third) && probe.selection == std::vector<int>{2},
+            "an ordinary right click on an unselected row still opens its single-item menu");
+        selection_probe = nullptr;
+
+        HandleRButtonDown(&s, s.hwnd, WM_RBUTTONDOWN, MK_RBUTTON, point(header));
+        HandleMouseMove(&s, s.hwnd, WM_MOUSEMOVE, MK_RBUTTON, point(target));
+        HandleKeyDown(&s, s.hwnd, WM_KEYDOWN, VK_ESCAPE, 0);
+        HandleRButtonUp(&s, s.hwnd, WM_RBUTTONUP, 0, point(Center(row4)));
+        Check(!s.marqueeActive && GetCapture() != s.hwnd && tab.SelectedIndices() == std::vector<int>{0, 1},
+            "Escape cancels the right drag and consumes its later release");
+
+        const POINT blank{target.x, static_cast<LONG>(row4.bottom + 15)};
+        HandleLButtonDown(&s, s.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, point(blank));
+        HandleMouseMove(&s, s.hwnd, WM_MOUSEMOVE, MK_LBUTTON, point(POINT{header.x, target.y}));
+        HandleLButtonUp(&s, s.hwnd, WM_LBUTTONUP, 0, point(POINT{header.x, target.y}));
+        Check(tab.SelectedIndices() == std::vector<int>{1, 2, 3} && !s.marqueeActive && GetCapture() != s.hwnd,
+            "left drag continues to select rows and ends without an item menu");
+    }
     const auto vm = BuildVm(s, false);
     const auto split = s.renderer.PaneSplitButtonRect(vm.pane_slots[1].rect);
     const auto point = Center(split);

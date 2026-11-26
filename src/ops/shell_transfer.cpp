@@ -20,23 +20,24 @@ bool SamePath(std::wstring a, std::wstring b) {
     std::replace(a.begin(), a.end(), L'/', L'\\'); std::replace(b.begin(), b.end(), L'/', L'\\');
     return !_wcsicmp(a.c_str(), b.c_str());
 }
-bool SameObjectPath(std::wstring a, std::wstring b) {
-    a = fs::NormalizePath(std::move(a)); b = fs::NormalizePath(std::move(b));
+bool SameNormalizedObjectPath(const std::wstring& a, const std::wstring& b) {
     if (a == b) return true;
     if (_wcsicmp(a.c_str(), b.c_str())) return false;
     // Folded names may denote different objects in a case-sensitive directory.
     FileIdentity left, right;
     return ReadPathFileIdentity(a, left) && left.Valid() && ReadPathFileIdentity(b, right) && left == right;
 }
-bool Within(const std::wstring& child, const std::wstring& parent) {
-    auto ancestor = std::filesystem::path(child).lexically_normal().parent_path();
+std::vector<std::wstring> DestinationAndAncestors(const std::wstring& destination) {
+    std::vector<std::wstring> paths;
+    paths.push_back(fs::NormalizePath(destination));
+    auto ancestor = std::filesystem::path(destination).lexically_normal().parent_path();
     while (!ancestor.empty()) {
-        if (SameObjectPath(ancestor.wstring(), parent)) return true;
+        paths.push_back(fs::NormalizePath(ancestor.wstring()));
         const auto next = ancestor.parent_path();
         if (next == ancestor) break;
         ancestor = next;
     }
-    return false;
+    return paths;
 }
 bool Metadata(const std::wstring& path, WIN32_FILE_ATTRIBUTE_DATA& value) {
     return GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &value) != FALSE;
@@ -252,7 +253,8 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
         entry.bytes = entry.directory ? 0 : Bytes(from); entry.modified = from.ftLastWriteTime;
         // Optional during ordinary work; required only when continuing an old request.
         entry.source_identity = FileObjectReference::Open(source);
-        const bool same_object = exists && SameObjectPath(source, target);
+        const bool same_object = exists &&
+            SameNormalizedObjectPath(fs::NormalizePath(source), fs::NormalizePath(target));
         if (PlainDirectory(from) && exists && PlainDirectory(to) && !same_object) {
             merged_directories.push_back(entry);
             try {
@@ -283,33 +285,39 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
                 }
                 plan(entry.source, entry.destination);
             }
-        } else for (size_t i = 0; i < req.sources.size(); ++i) {
-            const auto& source = req.sources[i];
-            if (source.empty()) { fail(ERROR_INVALID_PARAMETER, source); break; }
-            const auto target = req.type == OpType::Move && req.is_undo && i < req.new_names.size()
-                ? req.new_names[i] : Join(req.dest_dir, Leaf(source));
-            if (req.is_undo) {
-                FileIdentity current;
-                if (i >= req.undo_produced_identities.size() || !ReadPathFileIdentity(source, current) ||
-                    current != req.undo_produced_identities[i]) { fail(ERROR_FILE_INVALID, source); break; }
-                if (std::find(req.undo_cleanup_directories.begin(), req.undo_cleanup_directories.end(), source) !=
-                    req.undo_cleanup_directories.end()) {
-                    WIN32_FILE_ATTRIBUTE_DATA destination{};
-                    if (!Metadata(target, destination) || !(destination.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                        fail(ERROR_PATH_NOT_FOUND, target); break;
+        } else {
+            const auto destination_paths = DestinationAndAncestors(req.dest_dir);
+            for (size_t i = 0; i < req.sources.size(); ++i) {
+                const auto& source = req.sources[i];
+                if (source.empty()) { fail(ERROR_INVALID_PARAMETER, source); break; }
+                const auto target = req.type == OpType::Move && req.is_undo && i < req.new_names.size()
+                    ? req.new_names[i] : Join(req.dest_dir, Leaf(source));
+                if (req.is_undo) {
+                    FileIdentity current;
+                    if (i >= req.undo_produced_identities.size() || !ReadPathFileIdentity(source, current) ||
+                        current != req.undo_produced_identities[i]) { fail(ERROR_FILE_INVALID, source); break; }
+                    if (std::find(req.undo_cleanup_directories.begin(), req.undo_cleanup_directories.end(), source) !=
+                        req.undo_cleanup_directories.end()) {
+                        WIN32_FILE_ATTRIBUTE_DATA destination{};
+                        if (!Metadata(target, destination) || !(destination.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                            fail(ERROR_PATH_NOT_FOUND, target); break;
+                        }
+                        TransferPlanEntry cleanup;
+                        cleanup.source = source; cleanup.destination = target; cleanup.directory = true;
+                        cleanup.source_identity = FileObjectReference::Open(source);
+                        merged_directories.push_back(std::move(cleanup));
+                        continue;
                     }
-                    TransferPlanEntry cleanup;
-                    cleanup.source = source; cleanup.destination = target; cleanup.directory = true;
-                    cleanup.source_identity = FileObjectReference::Open(source);
-                    merged_directories.push_back(std::move(cleanup));
-                    continue;
+                    if (!prepare_undo_parent(Parent(target))) break;
                 }
-                if (!prepare_undo_parent(Parent(target))) break;
+                const auto normalized_source = fs::NormalizePath(source);
+                if (std::any_of(destination_paths.begin(), destination_paths.end(), [&](const auto& destination) {
+                        return SameNormalizedObjectPath(normalized_source, destination);
+                    })) {
+                    fail(ERROR_INVALID_PARAMETER, target); break;
+                }
+                plan(source, target);
             }
-            if (SameObjectPath(source, req.dest_dir) || Within(req.dest_dir, source)) {
-                fail(ERROR_INVALID_PARAMETER, target); break;
-            }
-            plan(source, target);
         }
     }
     const bool plan_complete = SUCCEEDED(failure) && !cancelled();
@@ -394,6 +402,42 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
     });
     size_t processed = 0;
     std::vector<TransferPlanEntry> unstarted;
+    const auto record_completion = [&](const Work& item, const ipc::ShellOperationItemResult& output,
+        const FileIdentity& source_identity, TransferItemResult& state) {
+        state.destination = output.destination; state.destination_committed = true;
+        state.source_removed = req.type == OpType::Move; state.state = TransferItemState::Completed;
+        completed.sources.push_back(item.entry.source); destinations.push_back(output.destination);
+        if (req.is_undo) completed.undo_produced_identities.push_back(source_identity);
+        auto reference = FileObjectReference::Open(output.destination);
+        identities.push_back(item.preexisting && item.choice == ConflictChoice::Replace ? FileIdentity{} : reference.identity);
+        references.push_back(std::move(reference));
+        ++processed;
+    };
+    const auto record_bytes = [&](const std::vector<ipc::ShellOperationItemResult>& outputs) {
+        for (const auto& output : outputs) {
+            WIN32_FILE_ATTRIBUTE_DATA metadata{};
+            if (SUCCEEDED(output.hr) && !output.skipped && Metadata(output.destination, metadata) &&
+                !(metadata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) completed_bytes += Bytes(metadata);
+        }
+        SetStatus([&](OpStatus& status) {
+            status.transferred_bytes = (std::max)(status.transferred_bytes, completed_bytes);
+            status.total_bytes = (std::max)(status.total_bytes, status.transferred_bytes);
+        });
+    };
+    const auto retryable_failure = [](const Work& item, HRESULT error, bool interrupted) {
+        if (!item.entry.source_identity.Get()) return false;
+        const bool untouched_cancel = interrupted && !item.entry.directory && !item.preexisting &&
+            GetFileAttributesW(item.entry.destination.c_str()) == INVALID_FILE_ATTRIBUTES &&
+            (GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND);
+        const auto code = format::FileOperationMessageCode(error);
+        return IsLockFailure(error) || code == ERROR_ACCESS_DENIED || code == ERROR_PRIVILEGE_NOT_HELD ||
+            code == ERROR_ELEVATION_REQUIRED || untouched_cancel;
+    };
+    const auto can_batch = [](const Work& item) {
+        const auto& entry = item.entry;
+        return !item.preexisting && !entry.directory && !entry.reparse && entry.source_identity.identity.Valid() &&
+            entry.source.size() <= ipc::kShellCopyBatchPathLength && entry.destination.size() <= ipc::kShellCopyBatchPathLength;
+    };
     for (size_t i = 0; i < work.size(); ++i) {
         auto& item = work[i];
         const auto& entry = item.entry;
@@ -420,6 +464,48 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
         operation.kind = req.type == OpType::Move ? ipc::ShellOperationKind::Move : ipc::ShellOperationKind::Copy;
         operation.collision = req.is_undo ? ipc::ShellCollisionPolicy::Fail
             : item.choice == ConflictChoice::Replace ? ipc::ShellCollisionPolicy::Replace : ipc::ShellCollisionPolicy::KeepBoth;
+        if (req.type == OpType::Copy && !req.is_undo && !shell_elevation_authorized_ && !verify_copies_.load() && can_batch(item)) {
+            const auto parent = Parent(entry.destination);
+            size_t end = i;
+            for (; end < work.size() && end - i < ipc::kShellCopyBatchItems; ++end) {
+                const auto& next = work[end];
+                if (!can_batch(next) || Parent(next.entry.destination) != parent ||
+                    std::any_of(operation.items.begin(), operation.items.end(), [&](const auto& previous) {
+                        return path::EqualInsensitive(previous.destination, next.entry.destination);
+                    })) break;
+                operation.items.push_back({next.entry.source, next.entry.destination, next.entry.source_identity.identity, {}});
+            }
+            if (end > i + 1) {
+                operation.kind = ipc::ShellOperationKind::CopyBatch;
+                ShellCompletion result;
+                if (!DispatchShellOperation(std::move(operation), result)) return;
+                if (result.cancelled) transfer_cancel_.store(true);
+                record_bytes(result.shell_items);
+                failure = static_cast<HRESULT>(result.hr);
+                failed_path = FAILED(failure) && result.failed_path.empty() ? entry.source : result.failed_path;
+                const bool known = result.shell_items.size() == end - i;
+                const bool cancelled_before_dispatch = result.cancelled && SUCCEEDED(failure) && result.shell_items.empty();
+                for (size_t j = i; j < end; ++j) {
+                    const auto& current = work[j];
+                    const auto& planned = current.entry;
+                    TransferItemResult row{planned.source, planned.destination};
+                    const auto* output = known ? &result.shell_items[j - i] : nullptr;
+                    const bool confirmed = output && output->source == planned.source;
+                    if (confirmed && SUCCEEDED(output->hr) && !output->skipped) {
+                        record_completion(current, *output, {}, row);
+                    } else if (cancelled_before_dispatch || (confirmed && (output->hr == E_PENDING ||
+                        retryable_failure(current, output->hr, result.cancelled)))) {
+                        unstarted.push_back(planned);
+                    }
+                    if (row.state == TransferItemState::Incomplete && SUCCEEDED(failure) && !cancelled())
+                        fail(ERROR_GEN_FAILURE, planned.source);
+                    outcome.items.push_back(std::move(row));
+                }
+                i = end - 1;
+                continue;
+            }
+            operation.items.clear();
+        }
         ipc::ShellOperationItem source{entry.source, entry.destination, {}, {}};
         if (item.choice == ConflictChoice::Replace) {
             source.expected_destination_identity = item.target_identity.identity;
@@ -435,43 +521,20 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
         ShellCompletion result;
         if (!DispatchShellOperation(std::move(operation), result)) return;
         if (result.cancelled) transfer_cancel_.store(true);
-        uint64_t produced_bytes = 0;
-        for (const auto& output : result.shell_items) {
-            WIN32_FILE_ATTRIBUTE_DATA metadata{};
-            if (SUCCEEDED(output.hr) && !output.skipped && Metadata(output.destination, metadata) &&
-                !(metadata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) produced_bytes += Bytes(metadata);
-        }
-        completed_bytes += produced_bytes;
-        SetStatus([&](OpStatus& status) {
-            status.transferred_bytes = (std::max)(status.transferred_bytes, completed_bytes);
-            status.total_bytes = (std::max)(status.total_bytes, status.transferred_bytes);
-        });
+        record_bytes(result.shell_items);
         const auto root = std::find_if(result.shell_items.begin(), result.shell_items.end(), [&](const auto& value) {
             return SamePath(value.source, entry.source);
         });
         if (root != result.shell_items.end() && SUCCEEDED(root->hr) && !root->skipped &&
             (!entry.directory || (SUCCEEDED(static_cast<HRESULT>(result.hr)) && !result.cancelled))) {
-            state.destination = root->destination; state.destination_committed = true;
-            state.source_removed = req.type == OpType::Move; state.state = TransferItemState::Completed;
-            completed.sources.push_back(entry.source); destinations.push_back(root->destination);
-            if (req.is_undo) completed.undo_produced_identities.push_back(source.expected_identity);
-            auto reference = FileObjectReference::Open(root->destination);
-            identities.push_back(item.preexisting && item.choice == ConflictChoice::Replace ? FileIdentity{} : reference.identity);
-            references.push_back(std::move(reference));
-            ++processed;
+            record_completion(item, *root, source.expected_identity, state);
         } else if (root != result.shell_items.end() && root->skipped && SUCCEEDED(root->hr)) {
             state.state = TransferItemState::Skipped; ++processed;
         }
         if (FAILED(static_cast<HRESULT>(result.hr))) {
             failure = static_cast<HRESULT>(result.hr);
             failed_path = result.failed_path.empty() ? entry.source : result.failed_path;
-            const bool untouched_cancel = result.cancelled && !entry.directory && !item.preexisting &&
-                GetFileAttributesW(entry.destination.c_str()) == INVALID_FILE_ATTRIBUTES &&
-                (GetLastError() == ERROR_FILE_NOT_FOUND || GetLastError() == ERROR_PATH_NOT_FOUND);
-            const auto code = format::FileOperationMessageCode(failure);
-            const bool permission_failure = code == ERROR_ACCESS_DENIED || code == ERROR_PRIVILEGE_NOT_HELD ||
-                code == ERROR_ELEVATION_REQUIRED;
-            if ((IsLockFailure(failure) || permission_failure || untouched_cancel) && entry.source_identity.Get() &&
+            if (retryable_failure(item, failure, result.cancelled) &&
                 std::none_of(result.shell_items.begin(), result.shell_items.end(), [](const auto& value) {
                     return SUCCEEDED(value.hr) && !value.skipped;
                 })) unstarted.push_back(entry);

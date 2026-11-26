@@ -48,11 +48,37 @@ int main(int argc, char** argv) {
     l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
     app::CommandContext context;
     context.filesystem_folder = true;
+    app::AppPrefs preferences;
+    constexpr auto old_order = LR"("toolbar_order":[186,2,3,4,6,5,7,306]})";
+    Check(preferences.FromJson(std::wstring(LR"({"version":4,)") + old_order) &&
+        std::ranges::equal(preferences.toolbar_order, ui::kDefaultToolbarOrder),
+        "legacy default gains the display alias and embedded terminal buttons");
+    Check(preferences.FromJson(std::wstring(LR"({"version":5,)") + old_order) &&
+        !std::ranges::equal(preferences.toolbar_order, ui::kDefaultToolbarOrder),
+        "explicitly removing the new default buttons survives reload");
+    Check(preferences.FromJson(LR"({"version":4,"toolbar_order":[3,7,306]})") &&
+        preferences.toolbar_order == std::vector<int>{3, 7, 306},
+        "legacy custom order is preserved exactly");
+    const std::array<int, 3> pane_tools{app::CmdLinkedBrowsing, app::CmdDirectorySync, app::CmdTerminalPanel};
+    app::CommandContext split_context;
+    split_context.side_by_side = split_context.can_link_browsing = split_context.link_browsing_on = true;
+    split_context.can_sync_directories = split_context.terminal_panel_open = true;
+    const auto split_tools = app::BuildToolbarOverflowMenu(pane_tools, {}, split_context, 1);
+    Check(split_tools.size() == 4 && split_tools[0].enabled && split_tools[0].checked &&
+        split_tools[1].enabled && split_tools[1].children.size() == 3 && split_tools[2].checked,
+        "overflow keeps the two toggles checked and opens a single menu of sync directions");
+    Check(!app::IsCommandEnabled(app::CmdDirectorySync, context) &&
+        !app::IsCommandEnabled(app::CmdLinkedBrowsing, context),
+        "directory synchronization and linked browsing are disabled in a single pane");
     for (const auto language : {L"zh-CN", L"en-US"}) {
         l10n::SetLanguage(language);
         const bool english = std::wstring_view(language) == L"en-US";
         const auto wide = ui::MakeToolbarLayout(1500, 1, 44, 4, 80, 224);
         const auto compact = ui::MakeToolbarLayout(420, 1, 44, 4, 80, 64);
+        const auto standard = ui::MakeToolbarLayout(1000, 1, 44, 4, 80, 224);
+        Check(std::any_of(standard.placed_commands.begin(), standard.placed_commands.end(),
+            [](const auto& item) { return item.command == app::CmdTerminalPanel; }),
+            "embedded terminal stays directly visible at a standard window width");
         const auto menu = app::BuildToolbarOverflowMenu(ui::kDefaultToolbarOrder, wide, context, 0);
         Check(!wide.has_overflow && menu.size() == 1 && menu.front().command == app::CmdCustomizeCommands,
             "wide toolbar offers customization without an all-command menu");

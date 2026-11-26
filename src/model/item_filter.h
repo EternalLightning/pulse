@@ -13,6 +13,8 @@
 
 namespace pulse::model {
 
+class PlacesCatalog;
+
 enum class ItemFilterError { None, UnterminatedQuote, UnknownCondition, InvalidCondition };
 
 // Resolve names once while compiling. Explicit tag: names are exact; legacy #
@@ -40,7 +42,7 @@ struct CompiledItemFilter {
     // full_path is supplied by the owning view; no filesystem or ADS reads occur.
     // lookup may be empty. Missing assignments satisfy only negative tag clauses.
     bool Matches(const fs::DirEntry& entry, const std::wstring& full_path,
-                 const ItemFilterTagLookup& lookup = {}) const;
+                 const ItemFilterTagLookup& lookup = {}, std::wstring_view display_alias = {}) const;
 };
 
 // Supports tag:, #, ext:, type:/kind:, size:, dm:/datemodified:,
@@ -48,5 +50,6 @@ struct CompiledItemFilter {
 // are ANDed. tag:A,B is OR; multiple legacy # terms share one OR clause.
 CompiledItemFilter CompileItemFilter(std::wstring_view text,
                                      const ItemFilterTagResolver& resolve_tag = {});
+CompiledItemFilter CompileCatalogItemFilter(std::wstring_view text, const PlacesCatalog* places);
 
 } // namespace pulse::model

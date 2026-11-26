@@ -50,13 +50,21 @@ bool ValidText(const std::u16string& s) {
     return true;
 }
 bool ValidOperation(Operation op) { return op >= Operation::OpenFiles && op <= Operation::SaveFile; }
+bool ValidPaths(const std::vector<std::u16string>& paths) {
+    return paths.size() <= kMaxPaths && std::ranges::all_of(paths, [](const auto& path) {
+        return !path.empty() && ValidText(path);
+    });
+}
 CodecError Validate(const Message& m) {
     if (std::all_of(m.request_id.begin(), m.request_id.end(), [](uint8_t b) { return b == 0; }))
         return CodecError::InvalidSemantics;
     if (const auto* r = std::get_if<Request>(&m.body)) {
         if (r->required_capabilities & ~kRequestCapabilities) return CodecError::UnsupportedCapability;
         if (!ValidOperation(r->operation) || (r->options & ~kOptions) || !ValidLocalSave(*r) || !ValidLabels(*r) ||
-            bool(r->required_capabilities & CallerWindow) != (r->caller_window != 0))
+            bool(r->required_capabilities & CallerWindow) != (r->caller_window != 0) ||
+            bool(r->required_capabilities & DialogButton) != !r->button_label.empty() ||
+            !ValidLabel(r->button_label) || !ValidText(r->button_label) ||
+            ((r->required_capabilities & DialogButton) && !(r->required_capabilities & DialogEvents)))
             return CodecError::InvalidSemantics;
         const uint32_t base = r->operation == Operation::OpenFiles ? Open : r->operation == Operation::PickFolder ? Folder : Save;
         if (!(r->required_capabilities & base) ||
@@ -98,6 +106,16 @@ CodecError Validate(const Message& m) {
         if (!hello->min_version || hello->min_version > hello->max_version) return CodecError::InvalidSemantics;
     } else if (const auto* welcome = std::get_if<SessionWelcome>(&m.body)) {
         if (!welcome->version && (welcome->features || welcome->capabilities)) return CodecError::InvalidSemantics;
+    } else if (const auto* event = std::get_if<DialogEvent>(&m.body)) {
+        if (!event->serial || !event->window || event->kind < EventKind::FolderChanging || event->kind > EventKind::Ready ||
+            event->filter_index >= kMaxFilters || !ValidText(event->folder) || !ValidText(event->filename) ||
+            !ValidText(event->target) || !ValidPaths(event->selections) || !ValidPaths(event->candidates) ||
+            ((event->kind == EventKind::FileOk) != !event->candidates.empty()) ||
+            (event->kind == EventKind::Overwrite && event->target.empty()) ||
+            (event->kind != EventKind::FolderChanging && event->kind != EventKind::Overwrite && !event->target.empty()))
+            return CodecError::InvalidSemantics;
+    } else if (const auto* reply = std::get_if<DialogEventReply>(&m.body)) {
+        if (!reply->serial || reply->overwrite > 2) return CodecError::InvalidSemantics;
     }
     return CodecError::None;
 }
@@ -111,6 +129,14 @@ struct Writer {
     void Text(const std::u16string& s) {
         Number(static_cast<uint32_t>(s.size()));
         for (const auto c : s) Number(c, 2);
+    }
+    void Number64(uint64_t value) {
+        Number(static_cast<uint32_t>(value));
+        Number(static_cast<uint32_t>(value >> 32));
+    }
+    void Paths(const std::vector<std::u16string>& paths) {
+        Number(static_cast<uint32_t>(paths.size()));
+        for (const auto& path : paths) Text(path);
     }
 
 };
@@ -133,6 +159,17 @@ struct Reader {
         if (!ValidText(s)) ok = false;
         return s;
     }
+    uint64_t Number64() {
+        const uint64_t low = Number();
+        return low | (static_cast<uint64_t>(Number()) << 32);
+    }
+    std::vector<std::u16string> Paths() {
+        const auto count = Number();
+        if (!ok || count > kMaxPaths) { ok = false; return {}; }
+        std::vector<std::u16string> paths;
+        for (uint32_t i = 0; i < count && ok; ++i) paths.push_back(Text());
+        return paths;
+    }
 
 };
 }
@@ -153,19 +190,24 @@ CodecError Encode(const Message& m, std::vector<uint8_t>& output) {
         if (r->required_capabilities & DialogLabels) {
             w.Number(r->label_flags); w.Text(r->title); w.Text(r->ok_button_label); w.Text(r->file_name_label);
         }
-        if (r->required_capabilities & CallerWindow) {
-            w.Number(static_cast<uint32_t>(r->caller_window)); w.Number(static_cast<uint32_t>(r->caller_window >> 32));
-        }
+        if (r->required_capabilities & CallerWindow) w.Number64(r->caller_window);
+        if (r->required_capabilities & DialogButton) w.Text(r->button_label);
     } else if (const auto* response = std::get_if<Response>(&m.body)) {
         w.Number(static_cast<uint32_t>(response->operation)); w.Number(static_cast<uint32_t>(response->status));
         w.Number(static_cast<uint32_t>(response->error_source)); w.Number(response->error_code); w.Number(response->filter_index);
-        w.Number(static_cast<uint32_t>(response->paths.size()));
-        for (const auto& p : response->paths) w.Text(p);
+        w.Paths(response->paths);
     } else if (const auto* hello = std::get_if<SessionHello>(&m.body)) {
         w.Number(hello->min_version); w.Number(hello->max_version);
         w.Number(hello->required_features); w.Number(hello->required_capabilities);
     } else if (const auto* welcome = std::get_if<SessionWelcome>(&m.body)) {
         w.Number(welcome->version); w.Number(welcome->features); w.Number(welcome->capabilities);
+    } else if (const auto* event = std::get_if<DialogEvent>(&m.body)) {
+        w.Number(event->serial); w.Number(static_cast<uint32_t>(event->kind));
+        w.Number64(event->window); w.Number(event->filter_index);
+        w.Text(event->folder); w.Text(event->filename); w.Text(event->target);
+        w.Paths(event->selections); w.Paths(event->candidates);
+    } else if (const auto* reply = std::get_if<DialogEventReply>(&m.body)) {
+        w.Number(reply->serial); w.Number(reply->result); w.Number(reply->overwrite);
     }
     if (!w.ok) return CodecError::Malformed;
     const auto length = static_cast<uint32_t>(w.data.size() - 28);
@@ -180,7 +222,7 @@ CodecError Decode(std::span<const uint8_t> bytes, Message& output) {
     if (r.Number() != kMagic) return CodecError::Malformed;
     if (r.Number(2) != kVersion) return CodecError::UnsupportedVersion;
     const auto kind = r.Number(2);
-    if (kind < 1 || kind > 5 || r.Number() != bytes.size() - 28) return CodecError::Malformed;
+    if (kind < 1 || kind > 7 || r.Number() != bytes.size() - 28) return CodecError::Malformed;
     Message m;
     for (auto& b : m.request_id) b = static_cast<uint8_t>(r.Number(1));
     if (kind == 1) {
@@ -194,22 +236,26 @@ CodecError Decode(std::span<const uint8_t> bytes, Message& output) {
         if (q.required_capabilities & DialogLabels) {
             q.label_flags = r.Number(); q.title = r.Text(); q.ok_button_label = r.Text(); q.file_name_label = r.Text();
         }
-        if (q.required_capabilities & CallerWindow) {
-            const uint64_t low = r.Number();
-            q.caller_window = low | (static_cast<uint64_t>(r.Number()) << 32);
-        }
+        if (q.required_capabilities & CallerWindow) q.caller_window = r.Number64();
+        if (q.required_capabilities & DialogButton) q.button_label = r.Text();
         m.body = std::move(q);
     } else if (kind == 2) {
         Response p;
         p.operation = static_cast<Operation>(r.Number()); p.status = static_cast<Status>(r.Number());
         p.error_source = static_cast<ErrorSource>(r.Number()); p.error_code = r.Number(); p.filter_index = r.Number();
-        const auto count = r.Number();
-        if (!r.ok || count > kMaxPaths) return CodecError::Malformed;
-        for (uint32_t i = 0; i < count && r.ok; ++i) p.paths.push_back(r.Text());
+        p.paths = r.Paths();
         m.body = std::move(p);
     } else if (kind == 3) m.body = Cancel{};
     else if (kind == 4) m.body = SessionHello{r.Number(), r.Number(), r.Number(), r.Number()};
     else if (kind == 5) m.body = SessionWelcome{r.Number(), r.Number(), r.Number()};
+    else if (kind == 6) {
+        DialogEvent event;
+        event.serial = r.Number(); event.kind = static_cast<EventKind>(r.Number());
+        event.window = r.Number64(); event.filter_index = r.Number();
+        event.folder = r.Text(); event.filename = r.Text(); event.target = r.Text();
+        event.selections = r.Paths(); event.candidates = r.Paths();
+        m.body = std::move(event);
+    } else if (kind == 7) m.body = DialogEventReply{r.Number(), r.Number(), r.Number()};
     if (!r.ok || r.pos != bytes.size()) return CodecError::Malformed;
     const auto error = Validate(m);
     if (error == CodecError::None) output = std::move(m);
@@ -221,9 +267,15 @@ Message MakeSessionWelcome(const Message& hello) {
     welcome.request_id = hello.request_id;
     welcome.body = SessionWelcome{0, 0, 0};
     const auto* h = std::get_if<SessionHello>(&hello.body);
-    if (h && Validate(hello) == CodecError::None && h->min_version <= kSessionVersion && h->max_version >= kSessionVersion &&
-        !(h->required_features & ~kSessionFeatures) && !(h->required_capabilities & ~kRequestCapabilities))
-        welcome.body = SessionWelcome{};
+    if (h && Validate(hello) == CodecError::None &&
+        !(h->required_features & ~kSessionFeatures) && !(h->required_capabilities & ~kRequestCapabilities)) {
+        for (const auto version : {kSessionForegroundHandoff, kSessionVersion}) {
+            if (h->min_version <= version && h->max_version >= version) {
+                welcome.body = SessionWelcome{version, kSessionFeatures, kRequestCapabilities};
+                break;
+            }
+        }
+    }
     return welcome;
 }
 
@@ -231,7 +283,8 @@ bool ValidateSessionWelcome(const Message& hello, const Message& welcome) {
     const auto* h = std::get_if<SessionHello>(&hello.body);
     const auto* w = std::get_if<SessionWelcome>(&welcome.body);
     return h && w && hello.request_id == welcome.request_id && Validate(hello) == CodecError::None &&
-        Validate(welcome) == CodecError::None && w->version == kSessionVersion &&
+        Validate(welcome) == CodecError::None &&
+        (w->version == kSessionVersion || w->version == kSessionForegroundHandoff) &&
         h->min_version <= w->version && h->max_version >= w->version && (w->features & kSessionBasic) &&
         !(h->required_features & ~kSessionFeatures) && !(h->required_capabilities & ~kRequestCapabilities) &&
         !(h->required_features & ~w->features) && !(h->required_capabilities & ~w->capabilities);
@@ -252,5 +305,14 @@ bool ValidateResponse(const Message& request, const Message& response) {
     return p->status != Status::Accepted ||
         ((p->paths.size() == 1 || (q->options & AllowMultiSelect)) &&
          (q->filters.empty() ? p->filter_index == 0 : p->filter_index < q->filters.size()));
+}
+
+bool ValidateDialogEvent(const Request& request, const DialogEvent& event) {
+    return (request.required_capabilities & DialogEvents) &&
+        (request.filters.empty() ? event.filter_index == 0 : event.filter_index < request.filters.size()) &&
+        ((request.options & AllowMultiSelect) || (event.selections.size() <= 1 && event.candidates.size() <= 1)) &&
+        (event.kind != EventKind::Overwrite || request.operation == Operation::SaveFile) &&
+        ((event.kind != EventKind::ControlActivating && event.kind != EventKind::ButtonClicked) ||
+            (request.required_capabilities & DialogButton));
 }
 } // namespace pulse::ipc::picker

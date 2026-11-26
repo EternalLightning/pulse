@@ -254,7 +254,7 @@ void HomeCatalog::Fill(ui::PaneViewModel& pane, const model::PlacesCatalog* plac
     std::lock_guard lock(state_->mutex);
     pane.home_cards = state_->visible_quick_access_cards;
     pane.home_cards.insert(pane.home_cards.end(), state_->cards.begin(), state_->cards.end());
-    pane.home_loading = state_->loading;
+    pane.home_loading = state_->loading || pane.loading;
     if (places) {
         for (const auto& place : places->networks) {
             if (place.unc.empty()) continue;

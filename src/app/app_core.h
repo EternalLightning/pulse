@@ -14,6 +14,7 @@
 #include "search_history.h"
 #include "saved_search.h"
 #include "network_recent_store.h"
+#include "../ui/panel_metrics.h"
 #include "../ui/render_caches.h"
 #include <memory>
 #include <vector>
@@ -42,6 +43,7 @@ struct AppCore {
     app::SearchHistoryWriter search_history_writer;
     app::SavedSearchStore saved_searches;
     std::shared_ptr<app::NetworkRecentStore> network_recent;
+    float terminal_panel_width = ui::kTerminalWidthDip;
     bool shared_preferences_loaded = false;
     bool session_preferences_saves_enabled = false;
     bool exiting = false;

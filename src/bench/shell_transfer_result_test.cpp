@@ -129,6 +129,12 @@ int main() {
     cancelled.FinishOperations(S_OK);
     check(cancelled.failure == HRESULT_FROM_WIN32(ERROR_CANCELLED),
         "later notifications never clear caller cancellation");
+    callbacks.cancelled = {};
+    request.kind = ShellOperationKind::CopyBatch;
+    size_t completed = 0;
+    ProgressSink batch_skipped(request, item, callbacks, 0, &completed);
+    check(batch_skipped.PostCopyItem(0, source.get(), nullptr, nullptr, COPYENGINE_S_USER_IGNORED, nullptr) == E_ABORT &&
+        batch_skipped.result.skipped && completed == 0, "skipping one native copy stops later copies without adding a completed item");
     sibling.reset(); source.reset();
     CoUninitialize();
     return failures ? 1 : 0;

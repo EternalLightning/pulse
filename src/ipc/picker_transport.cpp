@@ -34,15 +34,29 @@ PipeHandle Duplicate(HANDLE source) {
     if (!DuplicateHandle(GetCurrentProcess(), source, GetCurrentProcess(), &copy, 0, FALSE, DUPLICATE_SAME_ACCESS)) return {};
     return PipeHandle(copy);
 }
-bool PeerIdentity(HANDLE pipe, HANDLE expected, bool server) {
-    ULONG pid = 0;
-    if (!(server ? GetNamedPipeClientProcessId(pipe, &pid) : GetNamedPipeServerProcessId(pipe, &pid)) ||
-        !pid || pid != GetProcessId(expected) || WaitForSingleObject(expected, 0) != WAIT_TIMEOUT) return false;
+bool SameUserSession(HANDLE expected, DWORD pid, HANDLE query_token = nullptr) {
+    if (!pid || WaitForSingleObject(expected, 0) != WAIT_TIMEOUT) return false;
     DWORD peer_session = 0, own_session = 0;
     if (!ProcessIdToSessionId(pid, &peer_session) || !ProcessIdToSessionId(GetCurrentProcessId(), &own_session) ||
         peer_session != own_session) return false;
     const auto own_sid = CurrentUserSidString();
-    return !own_sid.empty() && own_sid == ProcessUserSidString(expected);
+    if (own_sid.empty()) return false;
+    const auto expected_sid = ProcessUserSidString(expected);
+    if (!expected_sid.empty()) return own_sid == expected_sid;
+    // The kernel-verified server PID and session still have to match. A host
+    // spawned by a caller that protects its process token can use the handle
+    // that this same caller inherited into it with TOKEN_QUERY only.
+    TOKEN_TYPE type{};
+    DWORD token_session = 0, bytes = 0;
+    return query_token && GetTokenInformation(query_token, TokenType, &type, sizeof(type), &bytes) &&
+        type == TokenPrimary &&
+        GetTokenInformation(query_token, TokenSessionId, &token_session, sizeof(token_session), &bytes) &&
+        token_session == peer_session && own_sid == TokenUserSidString(query_token);
+}
+bool PeerIdentity(HANDLE pipe, HANDLE expected, bool server, HANDLE query_token = nullptr) {
+    ULONG pid = 0;
+    return (server ? GetNamedPipeClientProcessId(pipe, &pid) : GetNamedPipeServerProcessId(pipe, &pid)) &&
+        pid == GetProcessId(expected) && SameUserSession(expected, pid, query_token);
 }
 DWORD Await(HANDLE pipe, OVERLAPPED& overlap, HANDLE peer, const Deadline& deadline, DWORD& bytes) {
     HANDLE handles[3]{overlap.hEvent, peer, deadline.options.cancel};
@@ -142,7 +156,31 @@ TransportResult Server::Accept(HANDLE child, Channel& output, WaitOptions wait) 
     return {};
 }
 
-TransportResult Connect(const std::wstring& name, HANDLE parent, Channel& output, WaitOptions wait) {
+TransportResult Server::OpenChildEndpoint(PipeHandle& output) {
+    if (!pipe_) return {ERROR_INVALID_HANDLE};
+    // The caller connects both ends before starting the child. The endpoint
+    // can be inherited even when the child cannot reopen the name.
+    SECURITY_ATTRIBUTES inheritance{sizeof(inheritance), nullptr, TRUE};
+    PipeHandle endpoint(CreateFileW(name_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, &inheritance, OPEN_EXISTING,
+        FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, nullptr));
+    if (!endpoint) return {GetLastError()};
+    if (!PeerIdentity(endpoint.Get(), GetCurrentProcess(), false) ||
+        !PeerIdentity(pipe_.Get(), GetCurrentProcess(), true)) return {ERROR_ACCESS_DENIED};
+    output = std::move(endpoint);
+    return {};
+}
+
+TransportResult Server::BindChild(HANDLE child, Channel& output) {
+    PipeHandle pipe(std::move(pipe_));
+    if (!pipe || !child) return {ERROR_INVALID_HANDLE};
+    auto peer = Duplicate(child);
+    if (!peer) return {GetLastError()};
+    if (!SameUserSession(peer.Get(), GetProcessId(peer.Get()))) return {ERROR_ACCESS_DENIED};
+    output = Channel(std::move(pipe), std::move(peer));
+    return {};
+}
+
+TransportResult Connect(const std::wstring& name, HANDLE parent, Channel& output, WaitOptions wait, HANDLE query_token) {
     if (!IsValidPipeName(name)) return {ERROR_INVALID_NAME};
     if (!parent || !GetProcessId(parent)) return {ERROR_INVALID_HANDLE};
     auto peer = Duplicate(parent);
@@ -165,8 +203,20 @@ TransportResult Connect(const std::wstring& name, HANDLE parent, Channel& output
         if (result == WAIT_OBJECT_0 + 1) return {ERROR_CANCELLED};
         if (result == WAIT_FAILED) return {GetLastError()};
     }
-    if (!PeerIdentity(pipe.Get(), parent, false)) return {ERROR_ACCESS_DENIED};
+    if (!PeerIdentity(pipe.Get(), parent, false, query_token)) return {ERROR_ACCESS_DENIED};
     output = Channel(std::move(pipe), std::move(peer));
+    return {};
+}
+
+TransportResult ConnectInherited(PipeHandle endpoint, HANDLE parent, Channel& output, HANDLE query_token) {
+    DWORD flags = 0;
+    if (!endpoint || !parent || !GetHandleInformation(endpoint.Get(), &flags) || !(flags & HANDLE_FLAG_INHERIT) ||
+        GetFileType(endpoint.Get()) != FILE_TYPE_PIPE) return {ERROR_INVALID_HANDLE};
+    if (!PeerIdentity(endpoint.Get(), parent, false, query_token)) return {ERROR_ACCESS_DENIED};
+    if (!SetHandleInformation(endpoint.Get(), HANDLE_FLAG_INHERIT, 0)) return {GetLastError()};
+    auto peer = Duplicate(parent);
+    if (!peer) return {GetLastError()};
+    output = Channel(std::move(endpoint), std::move(peer));
     return {};
 }
 

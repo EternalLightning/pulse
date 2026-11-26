@@ -13,7 +13,7 @@
 #include "../common/localization.h"
 #include "../common/json_utils.h"
 #include "../common/utf8_file.h"
-#include "../ipc/shell_interaction_client.h"
+#include "app_file_picker.h"
 #include "../ui/file_operation_dialog.h"
 #include <atomic>
 #include <cmath>
@@ -135,8 +135,10 @@ void SettingsTransferAction(AppState& state, int action) {
         CaptureExport(state, task);
     } else if (action == 1) {
         task.kind = app::SettingsTaskKind::SettingsImport;
-        if (!ipc::PickShellPath(state.hwnd, false, l10n::Get(I::ImportSettingsTitle), task.path,
-            {L"JSON", L"*.json"})) return;
+        ui::FilePickerSpec picker;
+        picker.title = l10n::Get(I::ImportSettingsTitle);
+        picker.filters = {{L"JSON", L"*.json"}};
+        if (!PickPulsePath(state, state.hwnd, std::move(picker), task.path)) return;
         if (!Confirm(state, I::ImportSettingsTitle, l10n::Get(I::SettingsTransferDesc), I::ImportSettingsConfirm)) return;
     }
     if (!(release.started = state.settings.StartSettingsTransfer(std::move(task))))

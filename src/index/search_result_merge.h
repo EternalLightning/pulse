@@ -5,10 +5,17 @@
 
 #pragma once
 #include "index_types.h"
+#include <span>
 
 namespace pulse::index {
 
+struct SupplementalFilenameHit {
+    Hit hit;
+    int rank = 0;
+};
+
 SearchResult MergeSearchResults(const Query& query, const SearchResult& local,
-                                const SearchResult& network);
+                                const SearchResult& network,
+                                std::span<const SupplementalFilenameHit> supplemental = {});
 
 } // namespace pulse::index

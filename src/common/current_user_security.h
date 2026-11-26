@@ -11,21 +11,26 @@
 
 namespace pulse {
 
-inline std::wstring ProcessUserSidString(HANDLE process) {
-    HANDLE token = nullptr;
-    if (!OpenProcessToken(process, TOKEN_QUERY, &token)) return {};
+inline std::wstring TokenUserSidString(HANDLE token) {
     DWORD bytes = 0;
     GetTokenInformation(token, TokenUser, nullptr, 0, &bytes);
     std::vector<BYTE> token_user(bytes);
     const bool have_user = bytes != 0 &&
         GetTokenInformation(token, TokenUser, token_user.data(), bytes, &bytes) != FALSE;
-    CloseHandle(token);
     if (!have_user) return {};
     const auto* user = reinterpret_cast<const TOKEN_USER*>(token_user.data());
     wchar_t* sid = nullptr;
     if (!ConvertSidToStringSidW(user->User.Sid, &sid)) return {};
     const std::wstring result(sid);
     LocalFree(sid);
+    return result;
+}
+
+inline std::wstring ProcessUserSidString(HANDLE process) {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(process, TOKEN_QUERY, &token)) return {};
+    const auto result = TokenUserSidString(token);
+    CloseHandle(token);
     return result;
 }
 

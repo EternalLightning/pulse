@@ -690,8 +690,14 @@ void RunProgressCases(HWND owner, DWORD thread, bool = false) {
         const bool completed = app::ShowArchiveProgressWindow(owner, false, kAccent, done, cancel,
             [&] { return app::ArchiveOperationStatus(progress, L"archive.zip", L"output", cancel.load()); });
         helper.join();
-        MSG quit{};
-        Check(!completed && PeekMessageW(&quit, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE) && quit.wParam == 17 &&
+        MSG message{};
+        bool got_quit = false;
+        const auto deadline = GetTickCount64() + 1000;
+        while (GetTickCount64() < deadline && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            if (message.message == WM_QUIT) { got_quit = true; break; }
+            DispatchMessageW(&message);
+        }
+        Check(!completed && got_quit && message.wParam == 17 &&
             IsWindowEnabled(owner), "shared progress preserves WM_QUIT and restores the owner after worker termination");
     }
 }
@@ -766,6 +772,37 @@ int main(int argc, char** argv) {
     ShowWindow(owner, SW_SHOWNOACTIVATE);
     Check(SetWindowSubclass(owner, UiTestProc, 9, 0) != FALSE, "install UI-thread readback dispatch");
     const DWORD thread = GetCurrentThreadId();
+    if (argc == 2 && std::string_view(argv[1]) == "--background-only") {
+        std::atomic_bool done = false, cancel = false;
+        ULONGLONG advance_at = 0;
+        constexpr wchar_t updated_title[] = L"Extraction progress advanced";
+        auto helper = Automate(thread, owner, [&](HWND dialog) {
+            Check(IsWindowVisible(dialog) && IsWindowEnabled(owner),
+                "standalone extraction leaves the owner available while progress is visible");
+            OnUi(dialog, [&] {
+                const auto now = GetTickCount64();
+                advance_at = now + 150;
+                while (Text(dialog) != updated_title && GetTickCount64() < now + 1500) {
+                    MsgWaitForMultipleObjectsEx(0, nullptr, 20, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                    MSG message{};
+                    if (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&message);
+                }
+                Check(Text(dialog) == updated_title,
+                    "background extraction refreshes during another UI message loop");
+            });
+            done.store(true, std::memory_order_release);
+        }, [&] { done.store(true); });
+        const bool completed = pulse::app::ShowArchiveProgressWindow(owner, false, kAccent, done, cancel, [&] {
+            auto status = pulse::app::ArchiveOperationStatus({}, L"archive.zip", L"output", false);
+            if (advance_at && GetTickCount64() >= advance_at) status.summary = updated_title;
+            return status;
+        }, false);
+        helper.join();
+        Check(completed && !cancel.load() && IsWindowEnabled(owner), "background extraction completes with its owner enabled");
+        DestroyWindow(owner);
+        if (SUCCEEDED(com)) CoUninitialize();
+        return failures.load() == 0 ? 0 : 1;
+    }
     const bool failure_only = argc == 2 && std::string_view(argv[1]) == "--failure-only";
     if (argc == 2 && std::string_view(argv[1]) == "--focus-only") {
         RunFocusCases(owner, thread);

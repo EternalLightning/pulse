@@ -248,6 +248,7 @@ void RunNetworkIntegration(const std::wstring& root) {
 }
 
 int RunNetworkIndexRegressionTests();
+int RunNetworkWatchRegressionTests();
 int RunNetworkConfigRegressionTests();
 
 int wmain(int argc, wchar_t** argv) {
@@ -273,6 +274,8 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (argc == 2 && wcscmp(argv[1], L"--network-scan-failures") == 0)
         return RunNetworkIndexRegressionTests();
+    if (argc == 2 && wcscmp(argv[1], L"--network-watches") == 0)
+        return RunNetworkWatchRegressionTests();
     if (argc == 2 && wcscmp(argv[1], L"--folder-kind-negation") == 0) {
         RunFolderKindNegationTests();
         return failures ? 1 : 0;

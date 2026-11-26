@@ -20,7 +20,9 @@ add_library(pulse_dialog_bridge SHARED
     src/shell_bridge/file_dialog_auto_server.cpp
     src/shell_bridge/file_dialog_auto_server.def
     src/shell_bridge/file_dialog_class_factory.cpp
+    src/shell_bridge/file_dialog_client_state.cpp
     src/shell_bridge/file_dialog_contract.cpp
+    src/shell_bridge/file_dialog_events.cpp
     src/shell_bridge/file_dialog_wrapper.cpp
     src/shell_bridge/picker_shell_results.cpp)
 set_target_properties(pulse_dialog_bridge PROPERTIES OUTPUT_NAME Pulse.DialogBridge)

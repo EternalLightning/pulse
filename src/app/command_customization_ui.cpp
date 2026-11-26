@@ -18,7 +18,7 @@ std::wstring ToolbarCategory(const app::CommandDescriptor& descriptor) {
         (descriptor.command >= app::CmdLayoutSingle && descriptor.command <= app::CmdLayoutFourGrid))
         return l10n::Pick(L"视图", L"View");
     switch (descriptor.availability) {
-    case A::Selection: case A::MutableSelection: case A::Rename: case A::BatchRename:
+    case A::Selection: case A::MutableSelection: case A::Rename: case A::BatchRename: case A::DisplayAlias:
     case A::Properties: case A::Paste: case A::Undo: case A::CopyToTarget:
     case A::MoveToTarget: case A::CopyPath: case A::GroupSelection: case A::DissolveSelection:
         return l10n::Pick(L"编辑", L"Edit");

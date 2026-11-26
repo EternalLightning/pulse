@@ -13,7 +13,6 @@
 #include "address_search_layout.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
-#include "../common/known_folder_labels.h"
 #include "tab_shape.h"
 #include "typography.h"
 #include "../common/resource_ids.h"
@@ -221,6 +220,16 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             }
             if(ContainsPt(lay.new_tab_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=20;return r;}
             if(ContainsPt(lay.external_open_choice,x,y)) {r.region=HitTestResult::SettingsDropdown;r.index=2;return r;}
+            const D2D1_RECT_F terminal_choices[] = {
+                lay.terminal_shell_choice, lay.terminal_font_choice, lay.terminal_size_choice};
+            for (int i = 0; i < 3; ++i) {
+                if (ContainsPt(terminal_choices[i], x, y)) {
+                    r.region = HitTestResult::SettingsDropdown;
+                    r.index = 3 + i;
+                    return r;
+                }
+            }
+            if(ContainsPt(lay.terminal_follow_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=39;return r;}
             if(ContainsPt(lay.performance_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=4;return r;}
             if(ContainsPt(lay.auto_folder_size_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=35;return r;}
             if(ContainsPt(lay.staging_tray_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=36;return r;}
@@ -231,7 +240,6 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
             for(int i=0;i<3;++i) if(ContainsPt(actions[i],x,y)) {r.region=HitTestResult::SettingsContentAction;r.index=i+1;return r;}
 
             if (IsSettingsCategory(vm.settings_page)) {
-                if(ContainsPt(lay.startup_tray_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=31;return r;}
                 if(ContainsPt(lay.explorer_takeover_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=24;return r;}
                 if(!vm.settings_system_pending && ContainsPt(lay.file_dialog_bridge_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=38;return r;}
                 if(ContainsPt(lay.file_dialog_takeover_row,x,y)) {r.region=HitTestResult::SettingsToggle;r.index=37;return r;}
@@ -757,6 +765,17 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         return r;
     }
 
+    if (vm.terminal) {
+        const auto panel = DetailsPanelRect(rect.right, rect.bottom);
+        if (panel.right > panel.left && y >= panel.top && y < panel.bottom &&
+            x >= panel.left - 4 * scale_ && x < rect.right - margin_) {
+            r.region = x < panel.left + 4 * scale_ ? HitTestResult::DetailsResize
+                : RectContains(TerminalCloseRect(rect.right, rect.bottom), x, y) ? HitTestResult::TerminalClose
+                : HitTestResult::TerminalBody;
+            return r;
+        }
+    }
+
     // Details panel (right edge): its interactive rects come from the same
     // layout the draw path uses.
     if (vm.details_visible) {
@@ -1032,8 +1051,7 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
                         const D2D1_RECT_F nameRc = layout.NameRect(viewRow);
                         const D2D1_RECT_F cell = layout.ItemRect(viewRow);
                         const ListEntryView& entry = MakeVisibleEntry(paneVm, static_cast<size_t>(idx));
-                        const std::wstring display_name = entry.is_dir && !entry.record_only
-                            ? pulse::path::KnownFolderDisplayName(entry.path, entry.name) : entry.name;
+                        const auto display_name = DisplayRowName(paneVm, entry);
                         if (ShowsFolderSize(paneVm.view_mode) && paneVm.folder_size_actions.contains(idx) &&
                             ContainsPt(layout.FolderSizeRect(viewRow), x, y)) {
                             out.region = HitTestResult::RowFolderSize; out.index = idx; return out;

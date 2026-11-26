@@ -21,6 +21,6 @@ ops::OpStatus ArchiveFailureStatus(const ops::ArchiveOperationResult& result,
 
 bool ShowArchiveProgressWindow(HWND owner, bool dark, COLORREF accent,
     std::atomic_bool& done, std::atomic_bool& cancel,
-    const std::function<ops::OpStatus()>& read_status);
+    const std::function<ops::OpStatus()>& read_status, bool modal = true);
 
 } // namespace pulse::app

@@ -5,6 +5,7 @@
 
 #include "command_catalog.h"
 #include "context_menu.h"
+#include "../ui/command_icons.h"
 #include <algorithm>
 #include <cwctype>
 
@@ -19,6 +20,7 @@ constexpr CommandDescriptor kCommands[] = {
     {CmdCut, S::Cut, L"\xE8C6", {'X', true}, A::MutableSelection},
     {CmdPaste, S::Paste, L"\xE77F", {'V', true}, A::Paste},
     {CmdRename, S::Rename, L"\xE8AC", {VK_F2}, A::Rename},
+    {CmdDisplayAlias, S::DisplayAliasSet, ui::command_icons::kDisplayAliasGlyph, {VK_F2, false, true}, A::DisplayAlias},
     {CmdDelete, S::Delete, L"\xE74D", {VK_DELETE}, A::MutableSelection},
     {CmdProperties, S::Properties, L"\xE946", {VK_RETURN, false, false, true}, A::Properties},
     {CmdCopyPath, S::CopyPath, L"\xE71B", {'C', true, true}, A::CopyPath},
@@ -50,6 +52,7 @@ constexpr CommandDescriptor kCommands[] = {
     {CmdViewBase + 6, S::ViewTiles, L"\xECA5", {}, A::View},
     {CmdViewBase + 7, S::ViewContent, L"\xE8FD", {}, A::View},
     {CmdDetailsPanel, S::DetailsPane, L"\xE700", {}, A::View},
+    {CmdTerminalPanel, S::TerminalPanel, ui::command_icons::kEmbeddedTerminalGlyph, {VK_F4, true, true}, A::View},
     {CmdOperationCenter, S::OperationCenter, L"\xE9D9", {}, A::Always},
     {CmdAdvancedSearch, S::AdvancedSearch, L"\xE721", {'F', true, true}, A::Always},
     {CmdInstallFullIndex, S::EnableFullIndex, L"\xE721", {}, A::Always},
@@ -57,6 +60,11 @@ constexpr CommandDescriptor kCommands[] = {
     {CmdOpenRecycle, S::RecycleBin, L"\xE75C", {}, A::Always},
     {CmdNewMenu, S::New, L"\xE710", {}, A::NewItem},
     {CmdSplitMenu, S::SplitLayout, L"\xE8A7", {}, A::Always, P::LayoutSideBySide},
+    {CmdLinkedBrowsing, S::LinkedBrowsing, ui::command_icons::kLinkedBrowsingGlyph, {}, A::LinkedBrowsing},
+    {CmdDirectorySync, S::DirectorySync, ui::command_icons::kDirectorySyncGlyph, {}, A::DirectorySync},
+    {CmdSyncLeftToRight, S::SyncLeftToRight, L"\xE72A", {}, A::DirectorySync},
+    {CmdSyncRightToLeft, S::SyncRightToLeft, L"\xE72B", {}, A::DirectorySync},
+    {CmdSyncNewerBothWays, S::SyncNewerBothWays, ui::command_icons::kDirectorySyncGlyph, {}, A::DirectorySync},
     {CmdColumnLayout, S::ColumnLayout, L"\xE8FD", {}, A::View},
     {CmdCustomizeCommands, S::CustomizeCommands, L"\xE713", {}, A::Always},
     {CmdPathAliases, S::PathAliases, L"\xE71B", {}, A::Always},
@@ -108,6 +116,9 @@ bool Enabled(CommandAvailability availability, const CommandContext& context) {
         return selected && !context.read_only && !context.device_selection &&
             (!context.selection_has_drive_root || context.selected_count == 1);
     case A::BatchRename: return mutable_selection && context.selected_count >= 2;
+    case A::DisplayAlias:
+        return transferable && context.selected_count == 1 &&
+            !context.shell_selection && !context.device_selection && !context.recycle_selection;
     case A::Properties: return context.shell_selection || context.archive_view || selected;
     case A::Paste:
         return context.filesystem_folder && !context.archive_view && !context.read_only && context.can_paste;
@@ -123,6 +134,8 @@ bool Enabled(CommandAvailability availability, const CommandContext& context) {
     case A::Terminal: return context.terminal_available && !context.archive_view;
     case A::CopyPath: return context.copy_path_available && !context.archive_view;
     case A::View: return context.can_view;
+    case A::LinkedBrowsing: return context.can_link_browsing;
+    case A::DirectorySync: return context.can_sync_directories;
     case A::GroupSelection: return mutable_selection && context.filesystem_folder && context.can_group_selection;
     case A::DissolveSelection: return mutable_selection && context.filesystem_folder && context.can_dissolve_selection;
     }
@@ -315,6 +328,13 @@ ui::FluentMenuItem BuildCommandMenuItem(int command, const CommandContext& conte
     item.glyph = descriptor->glyph;
     item.shortcut = CommandShortcutText(EffectiveCommandShortcut(command));
     item.pictogram = descriptor->pictogram;
+    if (command == CmdLinkedBrowsing) {
+        item.toggle = true;
+        item.checked = context.link_browsing_on;
+    } else if (command == CmdTerminalPanel) {
+        item.toggle = true;
+        item.checked = context.terminal_panel_open;
+    }
     if (command == CmdViewBase) item.glyph_scale = 1.16f;
     else if (command == CmdViewBase + 2) item.glyph_scale = 0.82f;
     return item;

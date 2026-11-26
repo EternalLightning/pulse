@@ -20,6 +20,8 @@ class SurfaceTransition {
 public:
     bool pending = false;
 
+    bool HasCurrent() const noexcept { return current_.get() != nullptr; }
+
     void Reset() {
         current_.reset(); previous_.reset(); key_.clear(); variant_.clear(); pending = false;
         owner_ = revision_ = 0;

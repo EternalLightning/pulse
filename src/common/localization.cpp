@@ -9,6 +9,8 @@
 #include <atomic>
 #include <cwchar>
 #include <mutex>
+#include <unordered_map>
+#include <utility>
 
 namespace pulse::l10n {
 namespace {
@@ -44,8 +46,8 @@ std::atomic<Language> g_effective{Language::EnUS};
 std::mutex g_mutex;
 // Published strings stay immutable when the UI language changes. Workers may
 // still hold references to the previous language while finishing an operation.
-std::array<std::array<std::wstring, kLastString - kFirstString + 1>, 2> g_cache;
-std::array<std::array<bool, kLastString - kFirstString + 1>, 2> g_loaded{};
+// Resource IDs are sparse. Allocate only strings requested by this process.
+std::array<std::unordered_map<UINT, std::wstring>, 2> g_cache;
 const std::wstring g_empty;
 
 #include "runtime_messages.generated.h"
@@ -128,21 +130,17 @@ const std::wstring& Get(StringId id) {
 const std::wstring& Get(StringId id, Language language) {
     const UINT value = static_cast<UINT>(id);
     if (value < kFirstString || value > kLastString) return g_empty;
-    const size_t index = value - kFirstString;
     std::lock_guard lock(g_mutex);
     if (language == Language::System) language = SystemLanguage();
     if (!g_module) return RuntimeMessage(value, language);
     const size_t locale = language == Language::ZhCN ? 0 : 1;
-    if (!g_loaded[locale][index]) {
-        g_cache[locale][index] = LoadStringResource(value, ResourceLanguage(language));
-        if (g_cache[locale][index].empty() && language != Language::EnUS) {
-            g_cache[locale][index] = LoadStringResource(value, ResourceLanguage(Language::EnUS));
-        }
-        if (g_cache[locale][index].empty())
-            g_cache[locale][index] = RuntimeMessage(value, language);
-        g_loaded[locale][index] = true;
-    }
-    return g_cache[locale][index];
+    auto& cache = g_cache[locale];
+    if (const auto found = cache.find(value); found != cache.end()) return found->second;
+    auto text = LoadStringResource(value, ResourceLanguage(language));
+    if (text.empty() && language != Language::EnUS)
+        text = LoadStringResource(value, ResourceLanguage(Language::EnUS));
+    if (text.empty()) text = RuntimeMessage(value, language);
+    return cache.emplace(value, std::move(text)).first->second;
 }
 
 } // namespace pulse::l10n

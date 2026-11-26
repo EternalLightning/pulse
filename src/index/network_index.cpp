@@ -669,8 +669,6 @@ void NetworkIndex::ObserveChanges(const std::wstring& root, const BYTE* data, DW
         if (info->NextEntryOffset > bytes - offset || info->NextEntryOffset < offsetof(FILE_NOTIFY_INFORMATION, FileName)) { changes_.Gap(); break; }
         offset += info->NextEntryOffset;
     }
-    // The SMB watcher is rearmed after reconciliation; its gap is explicit.
-    changes_.Gap();
 }
 
 bool NetworkIndex::LoadConfiguration(std::vector<std::wstring>& configured) {
@@ -888,7 +886,6 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
         for (auto& root : roots_) {
             if (!EqualPath(root.info.path, path)) continue;
             root.info.building = true;
-            root.info.watching = false;
             root.info.progress = 0;
             root.info.state = l10n::Get(l10n::StringId::NetworkIndexScanning).c_str();
             root.info.error.clear();
@@ -1002,6 +999,7 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
                 DeleteFileW(ShardPath(path).c_str());
             } else {
                 root.info.online = server_accessible && root.shard != nullptr;
+                if (!root.info.online) root.info.watching = false;
                 root.info.indexed_items = root.shard ? root.shard->count : 0;
                 root.info.state = server_accessible && root.shard
                     ? l10n::Get(l10n::StringId::NetworkIndexSyncFailedPreserved).c_str()
@@ -1051,105 +1049,119 @@ void NetworkIndex::WatchLoop() {
         HANDLE directory = INVALID_HANDLE_VALUE;
         HANDLE event = nullptr;
         OVERLAPPED overlapped{};
+        bool pending = false;
         std::vector<uint8_t> buffer = std::vector<uint8_t>(32 * 1024);
 
         Watch() = default;
         Watch(const Watch&) = delete;
         Watch& operator=(const Watch&) = delete;
-        Watch(Watch&& other) noexcept
-            : path(std::move(other.path)), directory(other.directory), event(other.event),
-              overlapped(other.overlapped), buffer(std::move(other.buffer)) {
-            other.directory = INVALID_HANDLE_VALUE;
-            other.event = nullptr;
+        bool Arm() {
+            ResetEvent(event);
+            overlapped = {};
             overlapped.hEvent = event;
+            pending = ReadDirectoryChangesW(directory, buffer.data(),
+                static_cast<DWORD>(buffer.size()), TRUE,
+                FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
+                FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE,
+                nullptr, &overlapped, nullptr) != FALSE;
+            return pending;
         }
         ~Watch() {
-            if (directory != INVALID_HANDLE_VALUE) {
+            if (pending) {
                 CancelIoEx(directory, &overlapped);
                 DWORD transferred = 0;
                 GetOverlappedResult(directory, &overlapped, &transferred, TRUE);
-                CloseHandle(directory);
             }
+            if (directory != INVALID_HANDLE_VALUE) CloseHandle(directory);
             if (event) CloseHandle(event);
         }
     };
 
+    if (!watch_wake_event_) return;
+    std::vector<std::unique_ptr<Watch>> watches;
+    bool refresh = true;
     while (running_) {
-        std::vector<std::wstring> paths;
-        {
-            std::lock_guard<std::mutex> lock(mu_);
-            for (const auto& root : roots_) {
-                if (root.info.online && paths.size() + 1 < MAXIMUM_WAIT_OBJECTS)
-                    paths.push_back(root.info.path);
+        const auto has_watch = [&](const std::wstring& path) {
+            return std::any_of(watches.begin(), watches.end(), [&](const auto& watch) {
+                return EqualPath(watch->path, path);
+            });
+        };
+        if (refresh) {
+            std::vector<std::wstring> paths;
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                for (const auto& root : roots_) {
+                    if (root.info.online && paths.size() + 1 < MAXIMUM_WAIT_OBJECTS)
+                        paths.push_back(root.info.path);
+                }
             }
-        }
-        std::vector<Watch> watches;
-        std::vector<HANDLE> events;
-        if (watch_wake_event_) events.push_back(watch_wake_event_);
-        watches.reserve(paths.size());
-        for (const auto& path : paths) {
-            watches.emplace_back();
-            Watch& watch = watches.back();
-            watch.path = path;
-            watch.directory = CreateFileW(LongPath(path).c_str(), FILE_LIST_DIRECTORY,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr);
-            if (watch.directory == INVALID_HANDLE_VALUE) {
-                watches.pop_back();
-                continue;
+            std::erase_if(watches, [&](const auto& watch) {
+                return std::none_of(paths.begin(), paths.end(), [&](const auto& path) {
+                    return EqualPath(watch->path, path);
+                });
+            });
+            for (const auto& path : paths) {
+                if (!running_) return;
+                if (has_watch(path)) continue;
+                auto watch = std::make_unique<Watch>();
+                watch->path = path;
+                watch->directory = CreateFileW(LongPath(path).c_str(), FILE_LIST_DIRECTORY,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr);
+                if (watch->directory == INVALID_HANDLE_VALUE) continue;
+                watch->event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+                if (watch->event && watch->Arm()) watches.push_back(std::move(watch));
             }
-            watch.event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-            if (!watch.event) {
-                watches.pop_back();
-                continue;
-            }
-            watch.overlapped.hEvent = watch.event;
-            if (!ReadDirectoryChangesW(watch.directory, watch.buffer.data(),
-                    static_cast<DWORD>(watch.buffer.size()), TRUE,
-                    FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME |
-                    FILE_NOTIFY_CHANGE_SIZE | FILE_NOTIFY_CHANGE_LAST_WRITE,
-                    nullptr, &watch.overlapped, nullptr)) {
-                watches.pop_back();
-                continue;
-            }
-            events.push_back(watch.event);
             {
                 std::lock_guard<std::mutex> lock(mu_);
                 for (auto& root : roots_) {
-                    if (!EqualPath(root.info.path, path)) continue;
-                    root.info.watching = true;
-                    root.info.state = l10n::Format(l10n::StringId::NetworkIndexWatchingCountFormat, static_cast<unsigned long long>(root.info.indexed_items));
+                    root.info.watching = root.info.online && has_watch(root.info.path);
+                    if (root.info.watching && !root.info.building && root.info.error.empty())
+                        root.info.state = l10n::Format(l10n::StringId::NetworkIndexWatchingCountFormat,
+                            static_cast<unsigned long long>(root.info.indexed_items));
+                }
+            }
+            NotifyStatus();
+        }
+        std::vector<HANDLE> events{watch_wake_event_};
+        for (const auto& watch : watches) events.push_back(watch->event);
+#ifdef PULSE_NETWORK_INDEX_TESTING
+        if (testing::network_hooks && testing::network_hooks->before_watch_wait)
+            testing::network_hooks->before_watch_wait(events);
+#endif
+        const DWORD wait = WaitForMultipleObjects(static_cast<DWORD>(events.size()), events.data(),
+                                                  FALSE, INFINITE);
+        if (!running_ || wait >= WAIT_OBJECT_0 + events.size()) return;
+        refresh = wait == WAIT_OBJECT_0;
+        bool dirty = false;
+        for (auto it = watches.begin(); it != watches.end();) {
+            auto& watch = **it;
+            if (WaitForSingleObject(watch.event, 0) != WAIT_OBJECT_0) {
+                ++it;
+                continue;
+            }
+            DWORD bytes = 0;
+            const bool completed = GetOverlappedResult(watch.directory, &watch.overlapped, &bytes, FALSE) != FALSE;
+            const DWORD error = completed ? ERROR_SUCCESS : GetLastError();
+            watch.pending = false;
+            if (completed && bytes) ObserveChanges(watch.path, watch.buffer.data(), bytes);
+            // Windows buffers changes between reads while this directory handle stays open.
+            const bool watching = (completed || error == ERROR_NOTIFY_ENUM_DIR) && watch.Arm();
+            if (!completed || !bytes || !watching) changes_.Gap();
+            {
+                std::lock_guard<std::mutex> lock(mu_);
+                for (auto& root : roots_) {
+                    if (!EqualPath(root.info.path, watch.path)) continue;
+                    dirty_roots_.insert(root.info.path);
+                    root.info.watching = watching && root.info.online;
+                    dirty = true;
                     break;
                 }
             }
+            if (watching) ++it;
+            else it = watches.erase(it);
         }
-        NotifyStatus();
-        if (events.empty()) return;
-        const DWORD wait = WaitForMultipleObjects(static_cast<DWORD>(events.size()), events.data(),
-                                                  FALSE, INFINITE);
-        if (!running_) return;
-        if (wait > WAIT_OBJECT_0 && wait < WAIT_OBJECT_0 + events.size()) {
-            const size_t index = static_cast<size_t>(wait - WAIT_OBJECT_0 - 1);
-            if (index < watches.size()) {
-                DWORD bytes = 0;
-                if (GetOverlappedResult(watches[index].directory, &watches[index].overlapped, &bytes, FALSE) && bytes)
-                    ObserveChanges(watches[index].path, watches[index].buffer.data(), bytes);
-                else changes_.Gap();
-                {
-                    std::lock_guard<std::mutex> lock(mu_);
-                    dirty_roots_.insert(watches[index].path);
-                    for (auto& root : roots_) {
-                        if (EqualPath(root.info.path, watches[index].path)) {
-                            root.info.watching = false;
-                            break;
-                        }
-                    }
-                }
-                crawl_cv_.notify_one();
-            }
-        }
-        // A root changed, was added/removed, or completed its first crawl.
-        // Recreate all overlapped requests so the watched set stays coherent.
+        if (dirty) crawl_cv_.notify_one();
     }
 }
 

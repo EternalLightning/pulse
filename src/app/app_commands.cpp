@@ -8,8 +8,11 @@
 // app_commands.cpp — extracted from app_main.cpp.
 #include "quick_access.h"
 #include "app_column_view.h"
+#include "app_pane_tools.h"
+#include "../fs/directory_sync.h"
 #include "../ui/toolbar_layout.h"
 #include "app_internal.h"
+#include "app_terminal.h"
 #include "command_customization_ui.h"
 #include "toolbar_menus.h"
 #include "path_aliases_ui.h"
@@ -48,7 +51,7 @@
 #include "resource.h"
 #include "../ops/clipboard.h"
 #include "../ipc/ctx_menu_util.h"
-#include "../ipc/shell_interaction_client.h"
+#include "app_file_picker.h"
 #include <windows.h>
 #include <windowsx.h>
 #include <commctrl.h>
@@ -115,6 +118,8 @@ HANDLE g_shell_watch_thread = nullptr;
 
 app::CommandContext BuildCommandContext(AppState& s) {
     app::CommandContext context;
+    FillPaneToolsCommandContext(s, context);
+    context.terminal_panel_open = s.showTerminalPanel;
     const auto* tab = ActiveTab(s);
     context.can_undo = s.ops.CanUndo();
     context.can_view = tab != nullptr;
@@ -597,6 +602,30 @@ void ShowTagSidebarMenu(AppState& s, const app::TagId& tag_id, POINT screen_pt) 
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
 
+static void ShowDirectorySyncDropdown(AppState& s) {
+    const auto context = BuildCommandContext(s);
+    if (!context.can_sync_directories || !EnsureMenu(s)) return;
+    const float width = static_cast<float>(s.compositor.Width());
+    const float left = s.renderer.EffectiveSidebarWidth(width);
+    const auto layout = ui::MakeToolbarLayout(width, s.scale, s.renderer.TitleBarHeight(),
+        s.renderer.Margin(), s.renderer.NewButtonWidthPx(width - left < 600 * s.scale), left,
+        s.pane ? s.pane->filter_expand : 0.0f, false, false, s.appPrefs.toolbar_order);
+    const auto button = std::find_if(layout.placed_commands.begin(), layout.placed_commands.end(),
+        [](const auto& placement) { return placement.command == app::CmdDirectorySync; });
+    const auto bounds = button == layout.placed_commands.end() ? layout.overflow : button->bounds;
+    POINT anchor{static_cast<LONG>(bounds.left), static_cast<LONG>(bounds.bottom)};
+    ClientToScreen(s.hwnd, &anchor);
+    SetMenuToggleRect(s, bounds);
+    const int command = s.menu->TrackToolbarPopup(anchor, app::BuildDirectorySyncMenu(context));
+    if (command != app::CmdNone) DispatchMenuCommand(s, command);
+}
+
+static std::wstring SelectedShortcutTarget(const app::Tab* tab) {
+    if (!tab || tab->SelectedCount() != 1 || tab->selected_index < 0 ||
+        static_cast<size_t>(tab->selected_index) >= tab->EntryCount()) return {};
+    return tab->EntryAt(static_cast<size_t>(tab->selected_index)).link_target;
+}
+
 void DispatchMenuCommand(AppState& s, int cmd) {
     if (const auto* tab = ActiveTab(s); tab && BuildCommandContext(s).shell_selection) {
         if (cmd == app::CmdProperties) {
@@ -620,7 +649,8 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         if (cmd == app::CmdBatchRename || cmd == app::CmdCopyPath || cmd == app::CmdOpenPath ||
             cmd == app::CmdOpenTerminal || cmd == app::CmdCopyToTarget || cmd == app::CmdMoveToTarget) return;
     }
-    const bool needs_files=cmd==app::CmdProperties || cmd==app::CmdOpenPath || cmd==app::CmdOpenInNewTab || cmd==app::CmdRename || cmd==app::CmdOpenTerminal;
+    const bool needs_files=cmd==app::CmdProperties || cmd==app::CmdOpenPath || cmd==app::CmdOpenInNewTab ||
+        cmd==app::CmdRename || cmd==app::CmdDisplayAlias || cmd==app::CmdOpenTerminal;
     if(needs_files && DeferContentSelection(s,[cmd](AppState& v){DispatchMenuCommand(v,cmd);},
         cmd == app::CmdOpenTerminal)) return;
     if (cmd >= app::CmdViewBase && cmd < app::CmdViewBase + 8) {
@@ -630,8 +660,19 @@ void DispatchMenuCommand(AppState& s, int cmd) {
     switch (cmd) {
     case app::CmdNewMenu: ShowNewDropdown(s); return;
     case app::CmdSplitMenu: ShowSplitDropdown(s); return;
+    case app::CmdLinkedBrowsing: ToggleLinkedBrowsing(s); return;
+    case app::CmdDirectorySync: ShowDirectorySyncDropdown(s); return;
+    case app::CmdSyncLeftToRight: BeginDirectorySync(s, fs::DirectorySyncMode::LeftToRight); return;
+    case app::CmdSyncRightToLeft: BeginDirectorySync(s, fs::DirectorySyncMode::RightToLeft); return;
+    case app::CmdSyncNewerBothWays: BeginDirectorySync(s, fs::DirectorySyncMode::NewerBothWays); return;
     case app::CmdCustomizeCommands: ShowCommandCustomization(s); return;
     case app::CmdPathAliases: ShowPathAliases(s); return;
+    case app::CmdDisplayAlias:
+        if (app::IsCommandEnabled(cmd, BuildCommandContext(s))) {
+            const auto paths = SelectedFullPaths(*ActiveTab(s));
+            if (paths.size() == 1) EditDisplayAlias(s, paths.front());
+        }
+        return;
     case app::CmdSetPathAlias:
         if (const auto* tab = ActiveTab(s)) SetPathAlias(s, tab->current_path);
         return;
@@ -726,10 +767,11 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         }
         break;
     }
-    case app::CmdOpenPath: {
-        // Reveal the hit in its containing folder (search results).
+    case app::CmdOpenPath:
+    case app::CmdOpenShortcutLocation: {
         app::Tab* tab = ActiveTab(s);
-        const std::wstring full = tab ? SelectedFullPath(s) : L"";
+        const std::wstring full = cmd == app::CmdOpenShortcutLocation
+            ? SelectedShortcutTarget(tab) : tab ? SelectedFullPath(s) : L"";
         if (!full.empty()) {
             const std::wstring parent = fs::ParentPath(full);
             const size_t slash = full.find_last_of(L"\\/");
@@ -835,8 +877,10 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         ToggleColumnLayout(s,-1);
         break;
     case app::CmdDetailsPanel:
-        s.showDetailsPanel = !s.showDetailsPanel;
-        s.renderer.SetDetailsPanelVisible(s.showDetailsPanel);
+        ToggleDetailsPanel(s);
+        break;
+    case app::CmdTerminalPanel:
+        ToggleEmbeddedTerminal(s);
         break;
     case app::CmdLayoutSingle: ApplyLayoutPreset(s, app::LayoutPreset::Single); break;
     case app::CmdLayoutTwoVertical: ApplyLayoutPreset(s, app::LayoutPreset::TwoVertical); break;
@@ -961,6 +1005,13 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
     // Search results mix folders, so keep "reveal in containing folder"
     // with the other open/navigation commands in item menus.
     const app::Tab* tab = ActiveTab(s);
+    if (!SelectedShortcutTarget(tab).empty()) {
+        ui::FluentMenuItem location;
+        location.command = app::CmdOpenShortcutLocation;
+        location.text = l10n::Get(l10n::StringId::OpenLocation);
+        location.glyph = L"\xE8B7";
+        items.insert(items.begin() + 1, std::move(location));
+    }
     std::wstring view_kind;
     if (tab && app::ParsePulsePath(tab->current_path, &view_kind, nullptr) &&
         view_kind == L"search") {
@@ -979,6 +1030,8 @@ std::vector<ui::FluentMenuItem> BuildFinderItemMenu(
         items.insert(items.begin() + 1, std::move(batch));
     }
     const auto context = BuildCommandContext(s);
+    if (app::IsCommandEnabled(app::CmdDisplayAlias, context))
+        items.push_back(app::BuildCommandMenuItem(app::CmdDisplayAlias, context));
     if (context.can_group_selection)
         items.push_back(app::BuildCommandMenuItem(app::CmdNewFolderWithSelection, context));
     if (context.can_dissolve_selection)
@@ -1420,7 +1473,8 @@ void ShowSplitDropdown(AppState& s, int pane_index) {
     POINT pt{static_cast<LONG>(anchor.left), static_cast<LONG>(anchor.bottom)};
     ClientToScreen(s.hwnd, &pt);
     SetMenuToggleRect(s, anchor);
-    int cmd = s.menu->TrackToolbarPopup(pt, app::BuildSplitMenu(static_cast<int>(LayoutOf(s))));
+    const auto items = app::BuildSplitMenu(static_cast<int>(LayoutOf(s)), BuildCommandContext(s));
+    int cmd = s.menu->TrackToolbarPopup(pt, items);
     if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
 }
 
@@ -1684,7 +1738,7 @@ void SetViewMode(AppState& s, ui::ViewMode mode, bool direct_manipulation) {
         s.viewWheelAccum = 0;
         s.viewWheelTab = nullptr;
     }
-    if (s.appPrefs.folder_views.Set(tab->current_path, mode)) s.appPrefs.Save();
+    if (s.appPrefs.folder_views.Set(tab->current_path, mode)) s.appPrefs.ScheduleSave(GetTickCount64());
     if (tab->view_mode == mode) return;
     if (s.renameIndex >= 0) HideRenameOverlay(s, false);
     const auto before = BuildVm(s, false);
@@ -1734,7 +1788,8 @@ void ShowViewDropdown(AppState& s, int pane_index) {
     const D2D1_RECT_F button = s.renderer.PaneViewButtonRect(paneRect, filterExpand);
     POINT anchor{ static_cast<LONG>(button.left), static_cast<LONG>(button.bottom) };
     ClientToScreen(s.hwnd, &anchor);
-    auto items = app::BuildViewMenu(tab->view_mode, s.showDetailsPanel);
+    auto items = app::BuildViewMenu(tab->view_mode, s.showDetailsPanel && !s.showTerminalPanel);
+    items.push_back(app::BuildCommandMenuItem(app::CmdTerminalPanel, BuildCommandContext(s)));
     SetMenuToggleRect(s, button);
     const int cmd = s.menu->TrackToolbarPopup(anchor, items);
     if (cmd != app::CmdNone) DispatchMenuCommand(s, cmd);
@@ -1859,7 +1914,13 @@ void ShowAdvancedSearch(AppState& s, bool require_scope) {
     if (spec.location == app::LocationScope::Indexed && !current.empty() &&
         (require_scope || rest.empty()))
         spec.location = app::LocationScope::CurrentFolder;
-    const auto result = ui::ShowAdvancedSearchDialog(s.hwnd, spec, s.darkMode, s.accentColor);
+    const auto result = ui::ShowAdvancedSearchDialog(s.hwnd, spec, s.darkMode, s.accentColor,
+        [&](HWND owner, std::wstring& path) {
+            ui::FilePickerSpec picker;
+            picker.mode = ui::PickerMode::Folder;
+            picker.title = l10n::Get(l10n::StringId::AdvSearchBrowse);
+            return PickPulsePath(s, owner, std::move(picker), path);
+        });
     if (result.accepted)
         NavigateTo(s, app::MakeSearchPath(result.query));
 }
@@ -2034,7 +2095,8 @@ void ShowOmnibar(AppState& s, OmnibarMode mode) {
         }
         const std::wstring current = ActiveTab(s) ? ActiveTab(s)->current_path : L"";
         auto items = app::BuildCommandPalette(query, s.places.RecentFolderPaths(), s.paletteHits,
-                                              project_only, s.paletteTotal, current, BuildCommandContext(s));
+                                              project_only, s.paletteTotal, current, BuildCommandContext(s),
+                                              s.places.display_aliases);
         if (s.paletteSearching) {
             ui::FluentMenuItem wait;
             wait.text = l10n::Get(l10n::StringId::Searching);
@@ -2104,13 +2166,23 @@ void ApplyAppWindowChrome(AppState& s) {
 }
 
 bool PickImageFile(HWND owner, std::wstring& path) {
-    return ipc::PickShellPath(owner, false, l10n::Get(l10n::StringId::TooltipChooseBackground), path,
-        {l10n::Get(l10n::StringId::Images), L"*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.jfif",
-         l10n::Get(l10n::StringId::AllFiles), L"*.*"});
+    auto* state = GetAppState(owner);
+    if (!state) return false;
+    ui::FilePickerSpec picker;
+    picker.title = l10n::Get(l10n::StringId::TooltipChooseBackground);
+    picker.filters = {{l10n::Get(l10n::StringId::Images), L"*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.jfif"},
+                      {l10n::Get(l10n::StringId::AllFiles), L"*.*"}};
+    return PickPulsePath(*state, owner, std::move(picker), path);
 }
 
 bool PickFolder(HWND owner, std::wstring& path, const wchar_t* title) {
-    return ipc::PickShellPath(owner, true, title ? title : L"", path);
+    auto* state = GetAppState(owner);
+    if (!state) return false;
+    ui::FilePickerSpec picker;
+    picker.mode = ui::PickerMode::Folder;
+    if (title) picker.title = title;
+    picker.initial_path = path;
+    return PickPulsePath(*state, owner, std::move(picker), path);
 }
 
 D2D1_COLOR_F ResolveAccentColor(const app::AppPrefs& prefs, bool dark) {

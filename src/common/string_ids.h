@@ -1198,9 +1198,43 @@
 #define IDS_CUSTOMIZE_COMMANDS                                         3254
 #define IDS_PATH_ALIASES                                               3255
 #define IDS_PATH_ALIAS_SET                                             3256
+#define IDS_DISPLAY_ALIAS_SET                                          5750
+#define IDS_DISPLAY_ALIAS_TITLE                                        5751
+#define IDS_DISPLAY_ALIAS_CUE                                          5752
+#define IDS_DISPLAY_ALIAS_INVALID                                      5753
+#define IDS_DISPLAY_ALIAS_BUSY                                         5754
+#define IDS_DISPLAY_ALIAS_CHANGED                                      5755
+#define IDS_DISPLAY_ALIAS_UNREADABLE                                   5756
+#define IDS_ALIAS_SAVE_FAILED                                          5757
 #define IDS_SHELL_LIBRARIES                                            3257
 #define IDS_SHELL_CONTROL_PANEL                                        3258
 #define IDS_SHELL_APPLICATIONS                                         3259
+
+#define IDS_LINKED_BROWSING                                               5700
+#define IDS_LINKED_FOLDER_MISSING_FORMAT                                  5701
+#define IDS_DIRECTORY_SYNC                                                5702
+#define IDS_SYNC_LEFT_TO_RIGHT                                            5703
+#define IDS_SYNC_RIGHT_TO_LEFT                                            5704
+#define IDS_SYNC_NEWER_BOTH_WAYS                                          5705
+#define IDS_SYNC_LEFT_ARROW_RIGHT                                         5706
+#define IDS_SYNC_RIGHT_ARROW_LEFT                                         5707
+#define IDS_SYNC_COPY_FOLDER_FORMAT                                       5708
+#define IDS_SYNC_CONFLICT_FILE_FORMAT                                     5709
+#define IDS_SYNC_COPY_FILE_FORMAT                                         5710
+#define IDS_SYNC_SKIP_LINK_FORMAT                                         5711
+#define IDS_SYNC_SKIP_TYPE_FORMAT                                         5712
+#define IDS_SYNC_SKIP_NAME_FORMAT                                         5713
+#define IDS_SYNC_SKIP_TIME_FORMAT                                         5714
+#define IDS_SYNC_QUEUE_FAILED                                             5715
+#define IDS_SYNC_COMPARE_FAILED_FORMAT                                    5716
+#define IDS_SYNC_OVERLAP                                                  5717
+#define IDS_SYNC_PLAN_CHANGED                                             5718
+#define IDS_SYNC_NOTHING_TO_COPY                                          5719
+#define IDS_SYNC_PLAN_FORMAT                                              5720
+#define IDS_SYNC_APPLY                                                    5721
+#define IDS_SYNC_MORE_ROWS_FORMAT                                         5722
+#define IDS_SYNC_CONFLICT_NOTE                                            5723
+#define IDS_SYNC_COMPARING                                                5724
 
 #define IDS_SETTINGS_FILE_DIALOG_TAKEOVER 3260
 #define IDS_SETTINGS_FILE_DIALOG_TAKEOVER_DESC 3261
@@ -1220,7 +1254,27 @@
 #define IDS_PICKER_OVERWRITE_TITLE 3275
 #define IDS_PICKER_OVERWRITE_MESSAGE 3276
 
-#define IDS_LOCALIZATION_LAST 3276
+#define IDS_TERMINAL_PANEL 5800
+#define IDS_TERMINAL_STARTING 5801
+#define IDS_TERMINAL_START_FAILED 5802
+#define IDS_TERMINAL_EXITED 5803
+#define IDS_TERMINAL_NEED_WIDTH 5804
+#define IDS_TERMINAL_UNAVAILABLE 5805
+#define IDS_SETTINGS_TERMINAL_SHELL 5806
+#define IDS_SETTINGS_TERMINAL_SHELL_DESC 5807
+#define IDS_TERMINAL_WINDOWS_POWERSHELL 5808
+#define IDS_TERMINAL_COMMAND_PROMPT 5809
+#define IDS_TERMINAL_POWERSHELL_7 5810
+#define IDS_TERMINAL_CHOOSE_PWSH 5811
+#define IDS_TERMINAL_PWSH_MISSING 5812
+#define IDS_TERMINAL_FONT 5813
+#define IDS_TERMINAL_FONT_DEFAULT 5814
+#define IDS_TERMINAL_FONT_SIZE 5815
+#define IDS_TERMINAL_FOLLOW_DIRECTORY 5816
+#define IDS_TERMINAL_FOLLOW_DIRECTORY_DESC 5817
+#define IDS_TERMINAL_END 5818
+#define IDS_TERMINAL_END_RUNNING_TASK 5819
+#define IDS_LOCALIZATION_LAST 5819
 
 #endif
 

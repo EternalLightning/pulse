@@ -12,7 +12,7 @@
 
 namespace pulse::ui {
 // Stable MenuCmd IDs; this geometry header does not link the application catalog.
-inline constexpr std::array<int, 8> kDefaultToolbarOrder{186, 2, 3, 4, 6, 5, 7, 306};
+inline constexpr std::array<int, 10> kDefaultToolbarOrder{186, 5800, 2, 3, 4, 6, 5750, 5, 7, 306};
 inline constexpr std::array<int, 9> kLegacyToolbarCommands{2, 3, 4, 6, 5, 7, 306, 101, 181};
 struct ToolbarCommandPlacement {
     int command = 0;

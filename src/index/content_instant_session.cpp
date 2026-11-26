@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <filesystem>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <set>
@@ -22,6 +23,9 @@ namespace {
 bool Under(const std::wstring& path, const std::wstring& root) {
     const auto p = ContentScopeKey(path), r = ContentScopeKey(root);
     return ContentPathUnder(p, r);
+}
+bool IsMissingPathError(DWORD error) {
+    return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
 }
 struct Changes {
     struct Change { std::wstring path; bool imported = false; };
@@ -151,9 +155,9 @@ bool RunInstantContentSession(ContentIndex& index, ContentSearchRequest request,
             if (overflow && !armed->exchange(true)) return;
             if (overflow) fail(ContentSubscriptionFailure::WatchOverflow);
             for (const auto& event : events) {
-                if (!event.name.empty()) enqueue(base + L"\\" + event.name,
+                if (!event.name.empty()) enqueue(JoinContentPath(base, event.name),
                     event.action == FILE_ACTION_ADDED || event.action == FILE_ACTION_RENAMED_NEW_NAME);
-                if (!event.old_name.empty()) enqueue(base + L"\\" + event.old_name);
+                if (!event.old_name.empty()) enqueue(JoinContentPath(base, event.old_name));
             }
         }, true);
         const auto until = GetTickCount64() + 2000;
@@ -195,7 +199,9 @@ bool RunInstantContentSession(ContentIndex& index, ContentSearchRequest request,
             index.SearchTask(query, cancelled, std::move(deliver));
     };
     const bool ok = search(request, [&](auto progress, auto hits) {
-        for (const auto& hit : hits) matched[ContentScopeKey(hit.path)] = hit.path;
+        if (request.subscribe) {
+            for (const auto& hit : hits) matched[ContentScopeKey(hit.path)] = hit.path;
+        }
         progress.live = request.subscribe;
         final = progress;
         if (progress.done) { std::lock_guard lock(changes.mutex); changes.initial_complete = true; }
@@ -224,17 +230,33 @@ bool RunInstantContentSession(ContentIndex& index, ContentSearchRequest request,
         }
         std::set<std::wstring> files;
         std::vector<ContentHit> removed;
+        const auto remove_matches = [&](const std::wstring& key, auto is_removed) {
+            const auto remove = [&](auto it) {
+                if (!is_removed(it->second)) return std::next(it);
+                ContentHit hit;
+                hit.path = it->second;
+                hit.removed = true;
+                removed.push_back(std::move(hit));
+                return matched.erase(it);
+            };
+            // Sibling names can sort between an exact key and its descendants.
+            auto prefix = key;
+            if (!key.ends_with(L'\\')) {
+                const auto exact = matched.find(key);
+                if (exact != matched.end()) remove(exact);
+                prefix += L'\\';
+            }
+            for (auto it = matched.lower_bound(prefix);
+                 it != matched.end() && !cancelled && ContentPathUnder(it->first, key);)
+                it = remove(it);
+        };
         for (const auto& [key, change] : pending) {
             if (cancelled) break;
             const auto& path = change.path;
             const auto attributes = GetFileAttributesW(path.c_str());
             if (attributes == INVALID_FILE_ATTRIBUTES) {
-                const auto error = GetLastError();
-                if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) continue;
-                for (auto it = matched.begin(); it != matched.end();) {
-                    if (Under(it->second, path)) { ContentHit hit; hit.path = it->second; hit.removed = true; removed.push_back(std::move(hit)); it = matched.erase(it); }
-                    else ++it;
-                }
+                if (IsMissingPathError(GetLastError()))
+                    remove_matches(key, [](const auto&) { return true; });
             } else if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
                 if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) files.insert(path);
                 else if (change.imported) {
@@ -252,17 +274,10 @@ bool RunInstantContentSession(ContentIndex& index, ContentSearchRequest request,
                     // Directory events can coalesce a removal and replacement.
                     // Only confirmed absence invalidates old descendants; an
                     // incomplete enumeration or access error preserves them.
-                    for (auto old = matched.begin(); old != matched.end() && !cancelled;) {
-                        if (Under(old->second, path) && GetFileAttributesW(old->second.c_str()) == INVALID_FILE_ATTRIBUTES) {
-                            const auto missing = GetLastError();
-                            if (missing == ERROR_FILE_NOT_FOUND || missing == ERROR_PATH_NOT_FOUND) {
-                                ContentHit hit; hit.path = old->second; hit.removed = true;
-                                removed.push_back(std::move(hit)); old = matched.erase(old);
-                                continue;
-                            }
-                        }
-                        ++old;
-                    }
+                    remove_matches(key, [](const std::wstring& old_path) {
+                        return GetFileAttributesW(old_path.c_str()) == INVALID_FILE_ATTRIBUTES &&
+                            IsMissingPathError(GetLastError());
+                    });
                 }
             }
         }

@@ -6,6 +6,7 @@ Pulse 自身的代码、脚本和文档采用根目录的 [Apache-2.0](LICENSE)�
 | --- | --- | --- | --- |
 | ib-matcher 拼音数据 | MIT；包括生成的 `ascii_data.inc` | [许可证](third_party/ib-pinyin-cpp/LICENSE.txt)、[来源及修改](third_party/ib-pinyin-cpp/README.pulse.txt) | `licenses/ib-pinyin/` |
 | SQLite | 公有领域；原始源码中的声明保留 | [来源及公有领域说明](third_party/sqlite/README.md)；`sqlite3.c`、`sqlite3.h` 文件头 | `licenses/SQLite/README.md` |
+| libvterm 0.3.3 | MIT；内嵌终端使用的 VT 模拟器 | [许可证](third_party/libvterm/LICENSE)、[官方源码](https://www.leonerd.org.uk/code/libvterm/) | 本文件的 [libvterm 许可证](#libvterm-许可证) |
 | PDFium 及其依赖 | 多种许可证；须保留完整许可证树，不能只保留二进制分发者的 MIT 许可证 | [分发许可证](third_party/pdfium/LICENSE)、[完整许可证目录](third_party/pdfium/licenses)、[来源](third_party/pdfium/README.pulse.md) | `licenses/PDFium/` |
 | LumaText 及其依赖 | MIT，以及 FreeType、HarfBuzz、Unicode 等各自条款 | [完整许可证目录](third_party/lumatext/share/LumaText/licenses) | `licenses/LumaText/` |
 | 7-Zip | LGPL-2.1-or-later，部分代码另含 BSD 和 unRAR 限制 | [许可证及版权](third_party/7zip/License.txt)、[来源](third_party/7zip/README.md) | `7zip/` |
@@ -18,6 +19,30 @@ Pulse 自身的代码、脚本和文档采用根目录的 [Apache-2.0](LICENSE)�
 7-Zip 是单独调用的程序，不能将其二进制按 Apache-2.0 再许可。发行包在 `7zip/7z2603-src.7z` 中附带官方 26.03 对应源码，并包含 LGPL 2.1、GPL 2 全文及 BSD、unRAR 声明；unRAR 限制禁止将相关代码用于开发 RAR 压缩器。版本、校验值及源码获取信息见其 README。更新任何依赖时，应同步更新对应源码、许可证和本索引。
 
 商标和产品名称属于各自权利人；此处列明来源不表示其对 Pulse 的认可或关联关系。本清单覆盖已识别的随程序分发的组件；构建工具和测试夹具若另行分发，也应保留其原有声明。
+
+## libvterm 许可证
+
+The MIT License
+
+Copyright (c) 2008 Paul Evans <leonerd@leonerd.org.uk>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ## Files 工具栏图标来源
 

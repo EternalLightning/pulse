@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "../common/windows_compat.h"
+#include "../app/app_file_picker.h"
+#include "../app/app_prefs.h"
 #include "../ops/clipboard.h"
 #include "../ops/picker_file_operations.h"
 #include "../ui/file_picker_commands.h"
 #include "../ui/file_picker_dialog.h"
+#include "../ui/file_picker_listing.h"
+#include "../ui/file_view_menu.h"
+#include "../ui/view_mode_transition.h"
 
 #include <algorithm>
 #include <atomic>
@@ -201,6 +206,57 @@ int ClipboardCases() {
     return failures ? 1 : 0;
 }
 
+bool DoubleClickAfterRefresh(const std::filesystem::path& root) {
+    namespace fs = std::filesystem;
+    const auto original = root / L"before.txt";
+    const auto replacement = root / L"after.txt";
+    std::ofstream(original) << "file";
+    std::thread driver;
+    std::atomic_bool finish{false};
+    std::atomic_int submissions{0};
+    bool retained = false;
+    pulse::ui::FilePickerSpec spec;
+    spec.initial_path = root.wstring() + L"\\";
+    spec.software_device = true;
+    spec.should_close = [&] { return finish.load(); };
+    spec.begin_submit = [&](const pulse::ui::FilePickerResult&) { return ++submissions == 1; };
+    spec.on_ready = [&](HWND picker) {
+        const int dpi = static_cast<int>(pulse::compat::WindowDpi(picker));
+        const auto px = [dpi](int dip) { return MulDiv(dip, dpi, 96); };
+        SetWindowPos(picker, nullptr, 0, 0, px(530), px(420), SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
+        driver = std::thread([&, picker, px] {
+            const HWND first = FindWindowExW(picker, nullptr, L"Edit", nullptr);
+            const HWND second = FindWindowExW(picker, first, L"Edit", nullptr);
+            const bool first_address = EditText(first).starts_with(root.wstring());
+            const HWND address = first_address ? first : second;
+            const HWND filename = first_address ? second : first;
+            const LPARAM row = MAKELPARAM(px(236), px(182));
+            std::error_code error;
+            if (WaitFor([&] { return EditText(address) == root.wstring(); })) {
+                SendMessageW(picker, WM_LBUTTONDOWN, MK_LBUTTON, row);
+                SendMessageW(picker, WM_LBUTTONUP, 0, row);
+                if (EditText(filename) == original.filename().wstring()) {
+                    fs::rename(original, replacement, error);
+                    SendMessageW(address, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L"refresh pending"));
+                    SendMessageW(picker, WM_KEYDOWN, VK_F5, 1);
+                    if (!error && WaitFor([&] { return EditText(address) == root.wstring(); })) {
+                        SendMessageW(picker, WM_LBUTTONDBLCLK, MK_LBUTTON, row);
+                        SendMessageW(picker, WM_LBUTTONUP, 0, row);
+                        retained = submissions.load() == 0 && EditText(filename) == replacement.filename().wstring();
+                        if (retained) SendMessageW(picker, WM_LBUTTONDBLCLK, MK_LBUTTON, row);
+                    }
+                }
+            }
+            finish.store(true);
+        });
+    };
+    pulse::ui::FilePickerResult result;
+    const bool submitted = pulse::ui::ShowFilePicker(nullptr, spec, false, {0.0f, 0.47f, 0.83f, 1.0f}, result);
+    if (driver.joinable()) driver.join();
+    return retained && submitted && submissions.load() == 1 &&
+        result.paths.size() == 1 && result.paths.front() == replacement.wstring();
+}
+
 template <typename Check>
 void SaveRenameCase(const std::filesystem::path& root, Check check) {
     namespace fs = std::filesystem;
@@ -356,6 +412,337 @@ void CancelSubmitCase(const std::filesystem::path& root, bool close, Check check
         close ? "WM_CLOSE cancels pending submission and discards late acceptance" :
             "the Cancel button cancels pending submission and discards late acceptance");
 }
+bool PickerProjection(const std::filesystem::path& root) {
+    using namespace pulse;
+    for (const auto* name : {L"alpha.txt", L"beta.txt", L"alpha.pdf", L"beta.pdf"})
+        std::ofstream(root / name) << "fixture";
+    const auto load = [](const ui::Listing& request) {
+        if (!ui::SubmitPickerListing(request)) return false;
+        if (WaitFor([&] { return request->ready.load(std::memory_order_acquire); }, 3000))
+            return request->succeeded;
+        request->cancelled = true;
+        return false;
+    };
+    const auto matches = [](const ui::Listing& request, const std::vector<std::wstring_view>& names) {
+        const auto& view = request->projection;
+        if (view.indices.size() != names.size() || view.source_to_view.size() != request->base->size()) return false;
+        for (size_t row = 0; row < names.size(); ++row) {
+            const auto source = static_cast<size_t>(view.indices[row]);
+            if (source >= request->base->size() || view.source_to_view[source] != static_cast<int>(row) ||
+                (*request->base)[source].name != names[row]) return false;
+        }
+        return true;
+    };
+    const auto initial = std::make_shared<ui::ListingRequest>();
+    initial->directory = root.wstring();
+    initial->sort_direction = model::SortDirection::Desc;
+    if (!load(initial) || !matches(initial, {L"beta.txt", L"beta.pdf", L"alpha.txt", L"alpha.pdf"})) return false;
+
+    const auto filtered = std::make_shared<ui::ListingRequest>();
+    filtered->directory = initial->directory;
+    filtered->base = initial->base;
+    filtered->project_only = true;
+    filtered->query = L"beta";
+    filtered->grouping = {ui::GroupMode::Type, model::SortDirection::Asc};
+    return load(filtered) && filtered->base == initial->base && filtered->base->size() == 4 &&
+        matches(filtered, {L"beta.pdf", L"beta.txt"}) && filtered->projection.groups.size() == 2 &&
+        std::count(filtered->projection.source_to_view.begin(), filtered->projection.source_to_view.end(), -1) == 2;
+}
+
+bool PickerVisibility(const std::filesystem::path& root) {
+    using namespace pulse;
+    constexpr const wchar_t* names[]{L"a-ordinary.txt", L"b-system.txt", L"c-hidden.txt", L"d-protected.txt"};
+    constexpr DWORD attributes[]{FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_SYSTEM, FILE_ATTRIBUTE_HIDDEN,
+        FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM};
+    for (size_t i = 0; i < std::size(names); ++i) {
+        const auto file = root / names[i];
+        std::ofstream(file) << "fixture";
+        if (!SetFileAttributesW(file.c_str(), attributes[i])) return false;
+    }
+    const auto directory = root.wstring();
+    for (bool hidden : {false, true}) for (bool protected_files : {false, true}) {
+        bool passed = false;
+        std::atomic_bool done = false;
+        std::thread driver;
+        ui::FilePickerSpec spec;
+        spec.initial_path = directory + L"\\";
+        spec.filename = L"draft";
+        spec.visibility = {hidden, protected_files};
+        spec.software_device = true;
+        spec.should_close = [&] { return done.load(); };
+        spec.on_ready = [&](HWND picker) {
+            driver = std::thread([&, picker] {
+                HWND address = nullptr, filename = nullptr;
+                for (HWND edit = FindWindowExW(picker, nullptr, L"Edit", nullptr); edit;
+                     edit = FindWindowExW(picker, edit, L"Edit", nullptr)) {
+                    if (EditText(edit) == L"draft") filename = edit;
+                    if (EditText(edit).starts_with(directory)) address = edit;
+                }
+                const auto select = [&](WPARAM key, const wchar_t* expected) {
+                    SendMessageW(picker, WM_KEYDOWN, key, 1);
+                    return EditText(filename) == expected;
+                };
+                if (address && filename && WaitFor([&] { return EditText(address) == directory; })) {
+                    const auto* last = names[hidden ? (protected_files ? 3 : 2) : 1];
+                    passed = select(VK_HOME, names[0]) && select(VK_DOWN, names[1]) && select(VK_END, last);
+                }
+                done = true;
+            });
+        };
+        ui::FilePickerResult result;
+        ui::ShowFilePicker(nullptr, spec, false, {0.0f, 0.47f, 0.83f, 1.0f}, result);
+        if (driver.joinable()) driver.join();
+        if (!passed) {
+            std::printf("[DIAG] picker visibility failed for hidden=%d protected=%d\n", hidden, protected_files);
+            return false;
+        }
+    }
+    return true;
+}
+
+bool PickerNarrowFooter(const std::filesystem::path& root) {
+    using namespace pulse;
+    const auto directory = root.wstring();
+    const auto file = root / L"sample.txt";
+    std::ofstream(file) << "fixture";
+    std::atomic_bool custom_called = false, timed_out = false;
+    std::thread driver;
+    ui::FilePickerSpec spec;
+    spec.initial_path = directory + L"\\";
+    spec.filename = file.filename().wstring();
+    spec.custom_button_label = L"Choose the documents to attach to this message using this custom command";
+    spec.software_device = true;
+    spec.should_close = [&] { return timed_out.load(); };
+    spec.on_custom_button = [&](const ui::FilePickerSnapshot&) { custom_called = true; };
+    spec.on_ready = [&](HWND picker) {
+        const int dpi = static_cast<int>(compat::WindowDpi(picker));
+        const auto px = [dpi](int dip) { return MulDiv(dip, dpi, 96); };
+        const auto resize = [picker, px](int height) {
+            SetWindowPos(picker, nullptr, 0, 0, px(530), px(height),
+                SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
+        };
+        resize(500);
+        driver = std::thread([&, picker, px, resize] {
+            const auto click = [&](int x, int y) {
+                const auto point = MAKELPARAM(px(x), px(y));
+                SendMessageW(picker, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                SendMessageW(picker, WM_LBUTTONUP, 0, point);
+            };
+            const auto loaded = [&] {
+                for (HWND edit = FindWindowExW(picker, nullptr, L"Edit", nullptr); edit;
+                     edit = FindWindowExW(picker, edit, L"Edit", nullptr))
+                    if (EditText(edit) == directory) return true;
+                return false;
+            };
+            if (WaitFor(loaded)) {
+                click(250, 428);
+                resize(372);
+                click(470, 340);
+                if (WaitFor([&] { return !IsWindow(picker); }, 2000)) return;
+            }
+            timed_out = true;
+        });
+    };
+    ui::FilePickerResult result;
+    const bool accepted = ui::ShowFilePicker(nullptr, spec, false, {0.0f, 0.47f, 0.83f, 1.0f}, result);
+    if (driver.joinable()) driver.join();
+    return custom_called && accepted && !timed_out && result.paths == std::vector{file.wstring()};
+}
+
+bool SavedPickerViews(const std::filesystem::path& root) {
+    using namespace pulse;
+    const auto icons = (root / L"icons").wstring();
+    const auto grouped = (root / L"grouped").wstring();
+    std::filesystem::create_directory(icons);
+    std::filesystem::create_directory(grouped);
+    std::filesystem::create_directory(root / L"icons" / L"zzz");
+    for (int i = 0; i < 8; ++i)
+        std::ofstream(root / L"icons" / (L"item-" + std::to_wstring(i) + L".txt")) << i;
+    for (const auto* name : {L"a.pdf", L"b.pdf", L"y.txt", L"z.txt"})
+        std::ofstream(root / L"grouped" / name) << "fixture";
+
+    app::AppPrefs saved;
+    saved.folder_sort_mode = static_cast<int>(model::FolderSortMode::FollowDirection);
+    saved.folder_views.Set(icons, ui::ViewMode::LargeIcons);
+    saved.folder_views.SetSort(icons, ui::SortColumn::Name, ui::SortDirection::Desc);
+    saved.folder_views.SetSort(grouped, ui::SortColumn::Name, ui::SortDirection::Desc);
+    saved.folder_views.SetGroup(grouped, ui::GroupMode::Type, ui::SortDirection::Asc);
+    app::AppPrefs prefs;
+    if (!prefs.FromJson(saved.ToJson())) return false;
+
+    bool passed = false;
+    std::atomic_bool finished = false;
+    std::thread driver;
+    ui::FilePickerSpec spec;
+    spec.initial_path = icons + L"\\";
+    spec.filename = L"draft";
+    spec.software_device = true;
+    spec.should_close = [&] { return finished.load(); };
+    app::SetFilePickerFolderViews(spec, prefs);
+    spec.on_ready = [&](HWND picker) {
+        const int dpi = static_cast<int>(compat::WindowDpi(picker));
+        const auto px = [dpi](int dip) { return MulDiv(dip, dpi, 96); };
+        SetWindowPos(picker, nullptr, 0, 0, px(530), px(420), SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
+        driver = std::thread([&, picker, px] {
+            HWND address = nullptr, filename = nullptr;
+            const auto key = [picker](WPARAM code) { PostMessageW(picker, WM_KEYDOWN, code, 1); };
+            const auto click = [&](int x, int y) {
+                const auto point = MAKELPARAM(px(x), px(y));
+                PostMessageW(picker, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                PostMessageW(picker, WM_LBUTTONUP, 0, point);
+            };
+            const auto expect = [&](const wchar_t* name) {
+                const bool matched = WaitFor([&] { return EditText(filename) == name; }, 1500);
+                if (!matched) std::printf("[DIAG] expected %ls, saw %ls\n", name, EditText(filename).c_str());
+                return matched;
+            };
+            const auto navigate = [&](const std::wstring& path, const std::wstring& expected) {
+                SendMessageW(address, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(path.c_str()));
+                PostMessageW(address, WM_KEYDOWN, VK_RETURN, 1);
+                return WaitFor([&] { return EditText(address) == expected; }, 3000);
+            };
+            const bool loaded = WaitFor([&] {
+                for (HWND edit = FindWindowExW(picker, nullptr, L"Edit", nullptr); edit;
+                     edit = FindWindowExW(picker, edit, L"Edit", nullptr)) {
+                    if (EditText(edit) == icons) address = edit;
+                    if (EditText(edit) == L"draft") filename = edit;
+                }
+                return address && filename;
+            }, 3000);
+            const auto check_icons = [&] {
+                click(418, 155);
+                key(VK_HOME);
+                if (!expect(L"item-7.txt")) return false;
+                key(VK_DOWN);
+                return expect(L"item-5.txt");
+            };
+            if (loaded && check_icons() && navigate(grouped + L"\\.", grouped)) {
+                click(280, 192);
+                key(VK_HOME);
+                if (expect(L"b.pdf")) {
+                    key(VK_DOWN);
+                    passed = expect(L"a.pdf") && navigate(icons + L"\\.", icons) && check_icons() &&
+                        navigate(icons + L"\\missing", icons) && check_icons();
+                }
+            }
+            finished = true;
+        });
+    };
+    ui::FilePickerResult result;
+    const bool accepted = ui::ShowFilePicker(nullptr, spec, false, {0.0f, 0.47f, 0.83f, 1.0f}, result);
+    if (driver.joinable()) driver.join();
+    return passed && !accepted;
+}
+
+int PickerViews(const std::filesystem::path& root) {
+    using namespace pulse;
+    std::filesystem::create_directory(root / L"views");
+    const auto folder = (root / L"views").wstring();
+    const auto filename = [](int i) { return L"entry-" + std::to_wstring(100 + i) + L".txt"; };
+    for (int i = 0; i < 30; ++i) std::ofstream(root / L"views" / filename(i)) << i;
+    int failures = 0;
+    for (const auto mode : {ui::PickerMode::Open, ui::PickerMode::Save}) {
+        bool exercised = false;
+        std::atomic_bool failed = false;
+        std::thread driver;
+        ui::FilePickerSpec spec;
+        spec.mode = mode;
+        spec.title = mode == ui::PickerMode::Open ? L"Picker views - Open" : L"Picker views - Save";
+        spec.initial_path = folder + L"\\";
+        spec.filename = L"draft";
+        spec.software_device = true;
+        spec.should_close = [&] { return failed.load(); };
+        spec.on_ready = [&](HWND picker) {
+            const auto dpi = static_cast<int>(compat::WindowDpi(picker));
+            const auto px = [dpi](int dip) { return MulDiv(dip, dpi, 96); };
+            SetWindowPos(picker, nullptr, 0, 0, px(530), px(420), SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
+            driver = std::thread([&, picker, px] {
+                const auto click = [](HWND window, int x, int y) {
+                    const auto point = MAKELPARAM(x, y);
+                    PostMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                    PostMessageW(window, WM_LBUTTONUP, 0, point);
+                };
+                const auto key = [picker](WPARAM value) { PostMessageW(picker, WM_KEYDOWN, value, 1); };
+                HWND field = nullptr;
+                bool ready = WaitFor([&] {
+                    bool loaded = false;
+                    for (HWND edit = FindWindowExW(picker, nullptr, L"Edit", nullptr); edit;
+                         edit = FindWindowExW(picker, edit, L"Edit", nullptr)) {
+                        const auto text = EditText(edit);
+                        if (text == L"draft") field = edit;
+                        if (text == folder) loaded = true;
+                    }
+                    return loaded && field;
+                }, 3000);
+                const int menu_count = static_cast<int>(ui::BuildFileViewChoices(ui::ViewMode::Details, 1).size());
+                const auto change_view = [&](ui::ViewMode view) {
+                    click(picker, px(492), px(116));
+                    HWND menu = nullptr;
+                    if (!WaitFor([&] { return (menu = FindOnThread(picker, L"PulseFluentMenu")) != nullptr; }, 1500)) return false;
+                    RECT client{};
+                    GetClientRect(menu, &client);
+                    constexpr auto shadow = ui::FluentMenu::kShadowMargin;
+                    const int row = (client.bottom - 2 * shadow) / menu_count;
+                    click(menu, client.right / 2, shadow + ui::ViewModeIndex(view) * row + row / 2);
+                    if (!WaitFor([&] { return !FindOnThread(picker, L"PulseFluentMenu"); }, 1500)) return false;
+                    Sleep(static_cast<DWORD>(ui::ViewModeTransition::kDuration) + 50);
+                    return true;
+                };
+                for (const auto view : {ui::ViewMode::SmallIcons, ui::ViewMode::MediumIcons, ui::ViewMode::LargeIcons}) {
+                    if (!ready) break;
+                    ready = change_view(view) && EditText(field) ==
+                        (view == ui::ViewMode::SmallIcons ? L"draft" : filename(0));
+                    if (!ready) break;
+                    click(picker, px(418), px(155));
+                    ready = WaitFor([&] { return EditText(field) == filename(1); }, 1500);
+                    if (!ready) break;
+                    key(VK_DOWN);
+                    ready = WaitFor([&] { return EditText(field) == filename(3); }, 1500);
+                    key(VK_HOME);
+                    ready = ready && WaitFor([&] { return EditText(field) == filename(0); }, 1500);
+                }
+                if (ready && change_view(ui::ViewMode::List)) {
+                    click(picker, px(245), px(153));
+                    key(VK_RIGHT);
+                    ready = WaitFor([&] { return EditText(field) == filename(5); }, 1500);
+                } else ready = false;
+                if (ready) {
+                    POINT cursor{px(440), px(195)};
+                    ClientToScreen(picker, &cursor);
+                    const LPARAM wheel_at = MAKELPARAM(cursor.x, cursor.y);
+                    const auto half_step = [&] {
+                        PostMessageW(picker, WM_MOUSEWHEEL, MAKEWPARAM(MK_CONTROL, -WHEEL_DELTA / 2), wheel_at);
+                    };
+                    half_step();
+                    key(VK_HOME);
+                    ready = WaitFor([&] { return EditText(field) == filename(0); }, 1500);
+                    key(VK_RIGHT);
+                    ready = ready && WaitFor([&] { return EditText(field) == filename(5); }, 1500);
+                    half_step();
+                    key(VK_HOME);
+                    key(VK_RIGHT);
+                    key(VK_DOWN);
+                    ready = ready && WaitFor([&] { return EditText(field) == filename(1); }, 1500);
+                }
+                if (ready) {
+                    key(VK_END);
+                    ready = WaitFor([&] { return EditText(field) == filename(29); }, 1500);
+                }
+                exercised = ready;
+                if (ready) key(VK_RETURN);
+                if (!ready || !WaitFor([&] { return !IsWindow(picker); }, 1800)) failed = true;
+            });
+        };
+        ui::FilePickerResult result;
+        const bool accepted = ui::ShowFilePicker(nullptr, spec, false, {0.0f, 0.47f, 0.83f, 1.0f}, result);
+        if (driver.joinable()) driver.join();
+        const bool ok = exercised && !failed && accepted && result.paths == std::vector{folder + L"\\" + filename(29)};
+        std::printf("[%s] %s changes view by menu and high-resolution wheel, preserving selection and submission\n",
+            ok ? "PASS" : "FAIL", mode == ui::PickerMode::Open ? "Open" : "Save");
+        failures += !ok;
+    }
+    return failures ? 1 : 0;
+}
 }
 
 int wmain(int argc, wchar_t** argv) {
@@ -367,9 +754,58 @@ int wmain(int argc, wchar_t** argv) {
     compat::EnableDpiAwareness();
     if (FAILED(OleInitialize(nullptr))) return 2;
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
+    if (argc == 3 && std::wstring_view(argv[1]) == L"--visual-save") {
+        ui::FilePickerSpec spec;
+        spec.mode = ui::PickerMode::Save;
+        spec.title = L"Picker views - Visual Save";
+        spec.initial_path = fs::absolute(argv[2]).wstring();
+        const auto deadline = GetTickCount64() + 20000;
+        spec.should_close = [&] { return GetTickCount64() >= deadline; };
+        ui::FilePickerResult result;
+        ui::ShowFilePicker(nullptr, spec, false, {0.0f, 0.47f, 0.83f, 1.0f}, result);
+        OleUninitialize();
+        return 0;
+    }
     const auto root = fs::absolute(L"bench_data") /
         (L"picker-commands-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     if (!fs::create_directories(root)) return 2;
+    const std::wstring_view option = argc == 2 ? argv[1] : L"";
+    if (option == L"--projection-only") {
+        const bool passed = PickerProjection(root);
+        std::error_code error;
+        fs::remove_all(root, error);
+        OleUninitialize();
+        std::printf("[%s] sorting, filtering and grouping project row indices from one directory snapshot\n",
+            passed ? "PASS" : "FAIL");
+        return passed && !error ? 0 : 1;
+    }
+    if (option == L"--saved-views-only" || option == L"--visibility-only" || option == L"--narrow-footer-only") {
+        const bool visibility = option == L"--visibility-only";
+        const bool footer = option == L"--narrow-footer-only";
+        const bool passed = visibility ? PickerVisibility(root) : footer ? PickerNarrowFooter(root) : SavedPickerViews(root);
+        std::error_code error;
+        fs::remove_all(root, error);
+        OleUninitialize();
+        std::printf("[%s] %s\n", passed ? "PASS" : "FAIL",
+            visibility ? "picker matches all four hidden/protected visibility combinations" :
+            footer ? "long custom action remains clickable and narrow resize preserves the primary action" :
+            "picker loads saved icon layout, sort and group per directory and keeps them on a failed load");
+        return passed && !error ? 0 : 1;
+    }
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--views-only") {
+        const int result = PickerViews(root);
+        OleUninitialize();
+        return result;
+    }
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--double-click-only") {
+        const bool passed = DoubleClickAfterRefresh(root);
+        std::printf("[%s] refresh blocks a stale double click and a new pair submits the replacement\n",
+            passed ? "PASS" : "FAIL");
+        std::error_code error;
+        fs::remove_all(root, error);
+        OleUninitialize();
+        return passed && !error ? 0 : 1;
+    }
     const auto first = root / L"Project";
     const auto second = root / L"Renamed Project";
     int failures = 0;

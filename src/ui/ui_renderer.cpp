@@ -52,14 +52,18 @@ MainRenderer::~MainRenderer() {
 void MainRenderer::SetCompositor(Compositor* comp) {
     ClearFluentSvgRasterCache(this);
     details_open_motion_ = {};
+    terminal_mode_motion_ = {};
     details_motion_window_width_ = 0;
     details_exit_commands_.reset();
     page_surface_.Reset();
     address_path_surface_.Reset();
+    pane_layout_surface_.Reset();
+    pane_layout_owner_ = nullptr;
     settings_content_surface_.Reset();
     for (auto& surface : pane_surfaces_) surface.Reset();
     for (auto& surface : pane_title_surfaces_) surface.Reset();
     for (auto& surface : item_reflow_surfaces_) surface.Reset();
+    list_hover_layouts_ = {};
     for (auto& surface : view_mode_transitions_) surface.Reset();
     hover_tracks_.clear();
     RefreshMotionPreferences();
@@ -153,7 +157,7 @@ float MainRenderer::EffectiveSidebarWidth(float window_width) const {
     const float window_dip = window_width / scale_;
     if (window_dip < kSidebarRailWindowDip) return kSidebarRailWidthDip * scale_;
     const bool details_open = DetailsPanelWidth(window_width) > 0;
-    const float max_dip = MaxSidebarWidthDip(window_dip, details_width_, details_open,
+    const float max_dip = MaxSidebarWidthDip(window_dip, RightPanelPreferredWidth(), details_open,
                                              2.0f * margin_ / scale_);
     return (std::min)(sidebar_width_dip_, max_dip) * scale_;
 }
@@ -161,23 +165,31 @@ float MainRenderer::EffectiveSidebarWidth(float window_width) const {
 // The preferred width is only capped while drawing, so narrowing the window pushes
 // the panel back temporarily and widening it restores what the user dragged.
 float MainRenderer::DetailsPanelWidth(float window_w) const {
-    const float progress = details_open_motion_.initialized ? details_open_motion_.value : (details_visible_ ? 1.0f : 0.0f);
+    const float progress = details_open_motion_.initialized ? details_open_motion_.value
+        : (details_visible_ || terminal_visible_ ? 1.0f : 0.0f);
     return DetailsPanelTargetWidth(window_w) * progress;
+}
+
+float MainRenderer::RightPanelPreferredWidth() const {
+    const float terminal = terminal_mode_motion_.initialized ? terminal_mode_motion_.value
+        : (terminal_visible_ ? 1.0f : 0.0f);
+    return std::lerp(details_width_, terminal_width_, terminal);
 }
 
 float MainRenderer::DetailsPanelTargetWidth(float window_w) const {
     const float window_dip = window_w / scale_;
-    if (window_dip < kDetailsVisibleWindowDip) return 0.0f;
+    const bool terminal = terminal_visible_ || (!details_visible_ && terminal_mode_motion_.target > 0);
+    if (window_dip < (terminal ? kTerminalVisibleWindowDip : kDetailsVisibleWindowDip)) return 0.0f;
     const float max_dip = MaxDetailsWidthDip(window_dip, sidebar_width_dip_,
                                              window_dip < kSidebarRailWindowDip,
                                              2.0f * margin_ / scale_);
-    return (std::min)(details_width_, max_dip) * scale_ + margin_;
+    return (std::min)(RightPanelPreferredWidth(), max_dip) * scale_ + margin_;
 }
 
 float MainRenderer::SidebarMaxWidthDip(float window_w) const {
     const float window_dip = window_w / scale_;
     const bool details_open = DetailsPanelWidth(window_w) > 0;
-    return MaxSidebarWidthDip(window_dip, details_width_, details_open, 2.0f * margin_ / scale_);
+    return MaxSidebarWidthDip(window_dip, RightPanelPreferredWidth(), details_open, 2.0f * margin_ / scale_);
 }
 
 float MainRenderer::DetailsMaxWidthDip(float window_w) const {
@@ -364,6 +376,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     details_content_animating_ = false;
     surface_animating_ = false;
     if (vm.settings_open || vm.dark != item_reflow_dark_) {
+        pane_layout_surface_.Reset();
         for (auto& surface : item_reflow_surfaces_) surface.Reset();
         for (auto& surface : view_mode_transitions_) surface.Reset();
     }
@@ -383,7 +396,7 @@ void MainRenderer::Render(const WindowViewModel& vm, const D2D1_RECT_F& rect,
     settings_switch_now_ = AnimationTimeMs();
     if (!vm.details_motion_sampled)
         TickDetailsPanelAnimation(settings_switch_now_, rect.right, motion_enabled_ && !IsHighContrast());
-    surface_animating_ |= details_open_motion_.Pending();
+    surface_animating_ |= details_open_motion_.Pending() || terminal_mode_motion_.Pending();
     if (vm.settings_open || !vm.details_visible) details_content_reveal_.Reset();
     ThumbnailCache::FrameScope thumbnail_frame(thumbnail_cache_);
     if (vm.settings_open) for (auto& names : painted_name_truncation_) names.clear();

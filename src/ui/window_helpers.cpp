@@ -163,11 +163,13 @@ void LayoutDialogActions(fluent::Painter& painter, float scale, float width, flo
                          D2D1_RECT_F& primary, D2D1_RECT_F& cancel) {
     const float right = width - dialog_style::kMargin * scale;
     const float height = dialog_style::kControlHeight * scale;
-    const float primary_width = (std::max)(80 * scale, painter.MeasureButtonWidth(primary_text));
-    const float cancel_width = (std::max)(80 * scale, painter.MeasureButtonWidth(cancel_text));
+    const float gap = dialog_style::kGap * scale;
+    const float available = std::max(0.0f, right - dialog_style::kMargin * scale - gap);
+    const float minimum = std::min(80 * scale, available * 0.5f);
+    const float cancel_width = std::clamp(painter.MeasureButtonWidth(cancel_text), minimum, available - minimum);
+    const float primary_width = std::clamp(painter.MeasureButtonWidth(primary_text), minimum, available - cancel_width);
     primary = D2D1::RectF(right - primary_width, bottom - height, right, bottom);
-    cancel = D2D1::RectF(primary.left - dialog_style::kGap * scale - cancel_width,
-        bottom - height, primary.left - dialog_style::kGap * scale, bottom);
+    cancel = D2D1::RectF(primary.left - gap - cancel_width, bottom - height, primary.left - gap, bottom);
 }
 
 } // namespace pulse::ui

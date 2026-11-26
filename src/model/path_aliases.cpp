@@ -103,17 +103,44 @@ PathAliasError PathAliases::Resolve(std::wstring_view input, std::wstring& outpu
     return PathAliasError::None;
 }
 
+bool PathAliases::ValidDisplayName(std::wstring_view alias) {
+    return alias.size() <= kDisplayAliasLimit && std::none_of(alias.begin(), alias.end(), [](wchar_t ch) {
+        return ch < L' ' || ch == 0x7F || ch == 0x2028 || ch == 0x2029;
+    });
+}
+
+bool PathAliases::SetDisplayName(std::wstring_view path, std::wstring_view alias) {
+    if (!ValidTarget(path) || path::IsDriveRootPath(path) || !ValidDisplayName(alias)) return false;
+    const auto first = alias.find_first_not_of(L' ');
+    alias = first == std::wstring_view::npos ? std::wstring_view{}
+        : alias.substr(first, alias.find_last_not_of(L' ') - first + 1);
+    if (FindDisplayAlias(display_names_, path) == alias) return true;
+    auto names = display_names_ ? std::make_shared<DisplayAliases>(*display_names_)
+                                : std::make_shared<DisplayAliases>();
+    auto key = DisplayAliasPathKey(path);
+    if (alias.empty()) names->erase(key);
+    else (*names)[std::move(key)] = alias;
+    display_names_ = names->empty() ? nullptr : std::move(names);
+    return true;
+}
+
 bool PathAliases::LoadJson(std::wstring_view text) {
     const json::Document document(text);
     if (!document.Is(json::Kind::Object)) return false;
     const auto* aliases = document.Find(L"aliases");
+    const auto* display_names = document.Find(L"display_aliases");
     const auto* version = document.Find(L"version");
     if (version && (version->kind != json::Kind::Number || version->text != L"1")) return false;
     if (!aliases || (aliases->kind != json::Kind::Array && aliases->kind != json::Kind::Object)) return false;
     // Unknown metadata is retained by refusing to rewrite an unsupported schema.
     for (const auto& member : document.Root().children)
-        if (member.name != L"version" && member.name != L"aliases") return false;
+        if (member.name != L"version" && member.name != L"aliases" &&
+            member.name != L"display_aliases") return false;
     if (std::count_if(document.Root().children.begin(), document.Root().children.end(), [](const auto& member) { return member.name == L"aliases"; }) != 1) return false;
+    if (display_names && (display_names->kind != json::Kind::Object ||
+        std::count_if(document.Root().children.begin(), document.Root().children.end(), [](const auto& member) {
+            return member.name == L"display_aliases";
+        }) != 1)) return false;
     PathAliases next;
     for (const auto& item : aliases->children) {
         std::wstring name, target;
@@ -130,7 +157,16 @@ bool PathAliases::LoadJson(std::wstring_view text) {
         }
         if (next.Set(name, target) != PathAliasError::None) return false;
     }
-    items_ = std::move(next.items_);
+    if (display_names && !display_names->children.empty()) {
+        auto names = std::make_shared<DisplayAliases>();
+        for (const auto& item : display_names->children) {
+            if (item.kind != json::Kind::String || !ValidTarget(item.name) || path::IsDriveRootPath(item.name) ||
+                !ValidDisplayName(item.text) || item.text.find_first_not_of(L' ') == std::wstring::npos ||
+                !names->emplace(DisplayAliasPathKey(item.name), item.text).second) return false;
+        }
+        next.display_names_ = std::move(names);
+    }
+    *this = std::move(next);
     return true;
 }
 
@@ -142,6 +178,20 @@ std::wstring PathAliases::ToJson() const {
         json::Escape(items_[i].target, target);
         result += (i ? L",\n    " : L"\n    ") + std::wstring(L"{\"name\":\"") + name + L"\",\"target\":\"" + target + L"\"}";
     }
-    return result + L"\n  ]\n}\n";
+    result += L"\n  ]";
+    if (display_names_ && !display_names_->empty()) {
+        result += L",\n  \"display_aliases\":{";
+        bool first = true;
+        for (const auto& [path, alias] : *display_names_) {
+            std::wstring key, value;
+            json::Escape(path, key);
+            json::Escape(alias, value);
+            result += first ? L"\n    " : L",\n    ";
+            result += L"\"" + key + L"\":\"" + value + L"\"";
+            first = false;
+        }
+        result += L"\n  }";
+    }
+    return result + L"\n}\n";
 }
 } // namespace pulse::model

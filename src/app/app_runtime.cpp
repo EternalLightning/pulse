@@ -12,7 +12,9 @@
 #include "cloud_roots.h"
 #include "../fs/cloud_sync_probe.h"
 #include "../ui/cloud_status.h"
+#include "app_terminal.h"
 #include "app_column_view.h"
+#include "app_pane_tools.h"
 #include "app_surface_scroll.h"
 #include "pane_animations.h"
 #include "folder_sizes_ui.h"
@@ -278,12 +280,14 @@ void SyncVisibleWatches(AppState& s) {
 }
 
 void BindCurrentLayout(AppState& s) {
+    SyncEmbeddedTerminal(s, true);
     CancelPendingListRowClick(s);
     CancelAppSurfaceScroll(s);
     app::LayoutTab* tab = s.window_tabs.Active();
     if (!tab || tab->panes.empty()) {
         s.pane = nullptr;
         s.targetPane = nullptr;
+        ResetInvalidPaneTools(s);
         SyncVisibleWatches(s);
         return;
     }
@@ -297,6 +301,7 @@ void BindCurrentLayout(AppState& s) {
         s.targetPane = nullptr;
     }
     if (!tab->root) app::RebuildLayoutRoot(*tab);
+    ResetInvalidPaneTools(s);
     for (size_t i = 0; i < tab->panes.size(); ++i) {
         tab->panes[i]->focused = (static_cast<int>(i) == tab->focused_index);
         tab->panes[i]->target = (tab->panes[i].get() == s.targetPane);
@@ -308,8 +313,8 @@ void BindCurrentLayout(AppState& s) {
     SyncVisibleWatches(s);
 }
 
-void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target) {
-    app::Tab* tab = ActiveTab(s);
+void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target, app::Tab* tab) {
+    if (!tab) tab = ActiveTab(s);
     if (!tab || target.file_leaf.empty() || target.file_path.empty() ||
         !app::SameShellPath(tab->current_path, target.folder)) return;
     // Resolve through the same visible snapshot/filter checks as Shell delivery.
@@ -317,7 +322,7 @@ void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target) {
     std::vector<int> rows;
     const bool delivered = app::ApplyShellSelection(*tab, s.places, {target.file_path},
         SVSI_SELECT | SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE, rows);
-    if (delivered && !rows.empty()) EnsureRowVisible(s, *tab, rows.back());
+    if (delivered && !rows.empty() && tab == ActiveTab(s)) EnsureRowVisible(s, *tab, rows.back());
     // A filter that currently excludes (or cannot resolve) the requested row
     // must not gain an invisible selection through later listing restoration.
     if (!delivered && !tab->filter_text.empty()) return;
@@ -458,8 +463,9 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             if (vm.settings_page == 10) app::PopulateShortcutSettings(vm, s.appPrefs, s.settings.shortcut_filter());
             if (vm.settings_page == 11) app::PopulateHomeQuickAccessSettings(vm, s.appPrefs);
             vm.settings_scroll = s.settings.scroll();
+            vm.settings_terminal_shell = static_cast<int>(s.appPrefs.terminal_shell);
+            vm.settings_terminal_display = s.appPrefs.terminal_display;
             vm.settings_launch_on_startup = s.appPrefs.launch_on_startup;
-            vm.settings_start_to_tray = s.appPrefs.start_to_tray;
             vm.settings_text_compare = s.appPrefs.text_compare_enabled;
             vm.settings_close_last_tab_window = s.appPrefs.close_last_tab_window;
             vm.settings_keep_running = s.appPrefs.keep_running_on_close;
@@ -816,17 +822,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
                 slot.pane.drop_target_index = s.dropRow;
                 slot.pane.header_drop = s.dropHeader;
             }
-            if (slot.focused) {
-                slot.pane.rename_index = s.renameIndex;
-                if (s.marqueeActive) {
-                    slot.pane.marquee_active = true;
-                    slot.pane.marquee_rect = D2D1::RectF(
-                        static_cast<float>(std::min(s.marqueeStart.x, s.marqueeCur.x)),
-                        static_cast<float>(std::min(s.marqueeStart.y, s.marqueeCur.y)),
-                        static_cast<float>(std::max(s.marqueeStart.x, s.marqueeCur.x)),
-                        static_cast<float>(std::max(s.marqueeStart.y, s.marqueeCur.y)));
-                }
-            }
+            if (slot.focused) slot.pane.rename_index = s.renameIndex;
         }
         vm.pane_slots.push_back(std::move(slot));
     }
@@ -1611,7 +1607,7 @@ void PrepareViewState(AppState& s) {
     if (tab && app::ParsePulsePath(tab->current_path, &kind, &rest) &&
         kind == L"settings" && app::SettingsController::PageFromName(rest) == 4)
         RequestDuplicateVolumeCache(s);
-    if (!s.showDetailsPanel || !tab || tab->SelectedCount() != 1) {
+    if (!s.showDetailsPanel || s.showTerminalPanel || !tab || tab->SelectedCount() != 1) {
         if (!s.detailsSelPath.empty()) {
             s.detailsSelPath.clear();
             ++s.detailsRequestId;
@@ -1678,7 +1674,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     s.renderer.SetToolbarOrder(vm.toolbar_order);
     for (const int command : vm.toolbar_order) {
         const auto item = app::BuildCommandMenuItem(command, command_context);
-        vm.toolbar_commands.push_back({command, item.text, item.glyph, item.enabled, item.pictogram});
+        vm.toolbar_commands.push_back({command, item.text, item.glyph, item.enabled, item.pictogram, item.checked});
     }
     vm.can_paste = command_context.can_paste;
     vm.selection_has_drive_root = command_context.selection_has_drive_root;
@@ -1761,7 +1757,9 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     if (vm.address_searching && !s.addressSearching) vm.address_search_animation = 1.0f;
     vm.splitter_pressed = s.splitterDragging;
     vm.details_resize_pressed = s.detailsPanelResizing;
-    if (s.marqueeActive) {
+    const auto* marquee_tab = s.marqueeActive ? ActiveTab(s) : nullptr;
+    if (marquee_tab && marquee_tab->network_identity == s.marqueeTabIdentity &&
+        marquee_tab->view_generation == s.marqueeViewGeneration) {
         vm.pane.marquee_active = true;
         vm.pane.marquee_rect = D2D1::RectF(
             static_cast<float>(std::min(s.marqueeStart.x, s.marqueeCur.x)),
@@ -1934,8 +1932,11 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
         static_cast<float>(s.compositor.Height())));
     vm_profile.Mark(profile::VmPhase::Tray);
     // Right details panel: selection info + size walk + tag chips.
-    vm.details_visible = s.showDetailsPanel;
-    if (s.showDetailsPanel) {
+    vm.terminal = s.showTerminalPanel ? ActiveEmbeddedTerminal(s) : nullptr;
+    vm.terminal_focused = s.terminalFocused;
+    vm.terminal_close_pressed = s.terminalClosePressed;
+    vm.details_visible = s.showDetailsPanel && !vm.terminal;
+    if (vm.details_visible) {
         ui::DetailsPanelView& dv = vm.details;
         dv.scroll_y = s.detailsScroll;
         dv.preview_only = s.detailsPreviewOnly;
@@ -2269,7 +2270,8 @@ std::wstring TooltipForHover(AppState& s) {
     case R::EmptyRecycle: return text(I::EmptyRecycleBin);
     case R::Properties: return text(I::Properties);
     case R::SplitButton: return text(I::SplitLayout);
-    case R::DetailsToggle: return text(s.showDetailsPanel ? I::CollapseDetails : I::ExpandDetails);
+    case R::DetailsToggle: return text(s.showDetailsPanel && !s.showTerminalPanel ? I::CollapseDetails : I::ExpandDetails);
+    case R::TerminalClose: return text(I::TerminalEnd);
     case R::PaneMediumIcons: return text(I::MediumIcons);
     case R::PaneDetails: return text(I::ViewDetails);
     case R::ToolbarSort: return text(I::SortBy);

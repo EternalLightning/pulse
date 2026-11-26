@@ -5,6 +5,7 @@
 #include "picker_owner_guard.h"
 #include "current_user_security.h"
 #include <array>
+#include <new>
 #include <string>
 #include <atomic>
 #include <mutex>
@@ -154,6 +155,65 @@ struct ForeignLifetime {
     DWORD pid = 0, thread = 0;
     std::atomic<bool> destroyed{false};
 };
+
+struct PendingForeground {
+    HWND window;
+    HWND foreground;
+    DWORD process_id, thread;
+    DWORD input_time;
+    ULONGLONG deadline;
+    bool destroyed = false;
+
+    static inline thread_local PendingForeground* pending = nullptr;
+
+    static void CALLBACK WindowEvent(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG object, LONG child, DWORD, DWORD) {
+        if (pending && event == EVENT_OBJECT_DESTROY && hwnd == pending->window &&
+            object == OBJID_WINDOW && child == CHILDID_SELF) pending->destroyed = true;
+    }
+
+    static DWORD WINAPI WaitForEnable(void* context) {
+        std::unique_ptr<PendingForeground> state(static_cast<PendingForeground*>(context));
+        pending = state.get();
+        const auto hook = SetWinEventHook(EVENT_OBJECT_DESTROY, EVENT_OBJECT_STATECHANGE, nullptr, WindowEvent,
+            state->process_id, state->thread, WINEVENT_OUTOFCONTEXT);
+        if (hook) {
+            MSG message{};
+            for (;;) {
+                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {}
+                LASTINPUTINFO input{sizeof(input)};
+                DWORD pid = 0;
+                const auto now = GetTickCount64();
+                if (now >= state->deadline || state->destroyed || GetForegroundWindow() != state->foreground ||
+                    !GetLastInputInfo(&input) || input.dwTime != state->input_time ||
+                    GetWindowThreadProcessId(state->window, &pid) != state->thread ||
+                    pid != state->process_id || !IsWindowVisible(state->window) || IsIconic(state->window)) break;
+                if (IsWindowEnabled(state->window)) {
+                    SetForegroundWindow(state->window);
+                    break;
+                }
+                if (MsgWaitForMultipleObjectsEx(0, nullptr, static_cast<DWORD>(state->deadline - now),
+                    QS_ALLINPUT, MWMO_INPUTAVAILABLE) != WAIT_OBJECT_0) break;
+            }
+            UnhookWinEvent(hook);
+        }
+        pending = nullptr;
+        return 0;
+    }
+
+    static void Defer(HWND window, HWND foreground, DWORD pid, DWORD thread) noexcept {
+        LASTINPUTINFO input{sizeof(input)};
+        HMODULE module = nullptr;
+        if (!GetLastInputInfo(&input) ||
+            !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+                reinterpret_cast<LPCWSTR>(&WaitForEnable), &module)) return;
+        // The application can keep its owner disabled until Show() returns.
+        auto* state = new (std::nothrow) PendingForeground{window, foreground, pid, thread, input.dwTime, GetTickCount64() + 1000};
+        if (!state) return;
+        Handle worker(CreateThread(nullptr, 0, WaitForEnable, state, 0, nullptr));
+        if (!worker) delete state;
+    }
+};
+
 std::mutex foreign_events_mutex;
 std::unordered_map<HWINEVENTHOOK, std::shared_ptr<ForeignLifetime>> foreign_events;
 void CALLBACK ForeignEvent(HWINEVENTHOOK hook, DWORD event, HWND window, LONG object, LONG child, DWORD thread, DWORD) {
@@ -371,6 +431,25 @@ struct PickerOwnerGuard::Impl {
             }
         }
     }
+    void RestoreForeground(HWND target) noexcept {
+        const bool foreign_target = foreign_registered && target == window &&
+            foreign_lifetime && !foreign_lifetime->destroyed.load() && SameWindow();
+        if (error || (!foreign_target && !Alive())) return;
+        const HWND before = GetForegroundWindow();
+        if (cross_thread) {
+            if (!cross_thread->Restore(false)) return;
+        } else if (changed && GetCurrentThreadId() == thread) {
+            changed = false;
+            EnableWindow(window, TRUE);
+        }
+        DWORD target_pid = 0;
+        const DWORD target_thread = GetWindowThreadProcessId(target, &target_pid);
+        if ((!foreign_target && !Alive()) || GetForegroundWindow() != before || target == before ||
+            !target_thread || target_pid != (foreign_target ? pid : GetCurrentProcessId()) ||
+            !IsWindowVisible(target) || IsIconic(target)) return;
+        if (IsWindowEnabled(target)) SetForegroundWindow(target);
+        else PendingForeground::Defer(target, before, target_pid, target_thread);
+    }
     ~Impl() {
         if (foreign_hook) {
             UnhookWinEvent(foreign_hook);
@@ -396,4 +475,5 @@ PickerOwnerIdentityDiagnostics PickerOwnerGuard::Diagnostics() const noexcept { 
 bool PickerOwnerGuard::Alive() const { return !impl_->error && impl_->Alive(); }
 HWND PickerOwnerGuard::Window() const noexcept { return impl_->window; }
 void PickerOwnerGuard::RestoreBeforeDialogHide(HWND dialog) noexcept { impl_->RestoreBeforeDialogHide(dialog); }
+void PickerOwnerGuard::RestoreForeground(HWND target) noexcept { impl_->RestoreForeground(target); }
 }

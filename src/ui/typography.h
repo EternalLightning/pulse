@@ -11,7 +11,9 @@
 #include <dwrite_3.h>
 
 #include <cstdint>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace pulse::ui { class Compositor; }
 
@@ -47,7 +49,8 @@ const wchar_t* LocaleName() noexcept;
 bool HasIconFont(IDWriteFactory2* factory);
 const wchar_t* PreferredTextFamily() noexcept;
 HRESULT CreateTextFormat(IDWriteFactory2* factory, const TextFormatSpec& spec,
-                         IDWriteTextFormat** format);
+                         IDWriteTextFormat** format, const wchar_t* monospace_family = nullptr);
+std::vector<std::wstring> MonospaceFamilies(IDWriteFactory2* factory);
 HRESULT CreateRenderingParams(IDWriteFactory2* factory, HMONITOR monitor,
                               IDWriteRenderingParams2** params);
 

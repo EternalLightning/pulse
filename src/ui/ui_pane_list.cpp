@@ -5,6 +5,7 @@
 
 #include "search_banner_layout.h"
 #include "banner_reveal.h"
+#include "animation_clock.h"
 // ui_pane_list.cpp — Pane, list, empty states, columns, and icons.
 #include "ui_renderer.h"
 #include "../common/frame_profile.h"
@@ -13,7 +14,6 @@
 #include "ui_renderer_internal.h"
 #include "item_reflow_rows.h"
 #include "../common/localization.h"
-#include "../common/known_folder_labels.h"
 #include "tab_shape.h"
 #include "typography.h"
 #include "details_column_widths.h"
@@ -767,8 +767,7 @@ bool MainRenderer::PointInItemName(const PaneViewModel& vm, const D2D1_RECT_F& f
 
     const ListEntryView& entry = MakeVisibleEntry(vm, static_cast<size_t>(source_index));
     if (entry.name.empty()) return false;
-    const std::wstring display_name = entry.is_dir && !entry.record_only
-        ? pulse::path::KnownFolderDisplayName(entry.path, entry.name) : entry.name;
+    const auto display_name = DisplayRowName(vm, entry);
     const float extra_top = PaneExtraTop(vm, scale_, pane_bounds.right - pane_bounds.left, compositor_);
     if (const auto* reflow = ItemReflowFor(vm, PaneListRect(pane_bounds, extra_top, vm.view_mode))) {
         if (reflow->HitTest(x, y) != source_index) return false;
@@ -868,6 +867,29 @@ void MainRenderer::DrawEntryIcon(const ListEntryView& entry, float x, float y, f
     else DrawFileIcon(x, y, size, theme);
 }
 void MainRenderer::DrawPane(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
+    const auto tab_index = static_cast<size_t>(vm.active_tab);
+    const void* owner = tab_index < vm.tabs.size() ? vm.tabs[tab_index].identity : nullptr;
+    const bool split = vm.pane_slots.size() > 1;
+    if (owner != pane_layout_owner_) {
+        pane_layout_surface_.Reset();
+        pane_layout_owner_ = owner;
+    }
+
+    // Retain the split drawing for collapse and an in-flight reversal.
+    if (owner && motion_enabled_ && !IsHighContrast() && vm.pane.rename_index < 0 &&
+        (split || pane_layout_surface_.HasCurrent())) {
+        pane_layout_surface_.Paint(compositor_->Dc(), ContentRect(rect.right, rect.bottom),
+            split ? L"split" : L"single", true, settings_switch_now_, true, 0.0f, 200.0f,
+            [&] { DrawPaneSlots(vm, rect, theme); });
+        surface_animating_ |= pane_layout_surface_.pending;
+        if (!split && !pane_layout_surface_.pending) pane_layout_surface_.Reset();
+    } else {
+        pane_layout_surface_.Reset();
+        DrawPaneSlots(vm, rect, theme);
+    }
+}
+
+void MainRenderer::DrawPaneSlots(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme) {
     const auto draw_pane = [&](const PaneViewModel& pane, const D2D1_RECT_F& bounds,
                                int index, bool focused, bool target) {
         if (bounds.right - bounds.left <= 1.0f || bounds.bottom - bounds.top <= 1.0f) return;
@@ -1058,6 +1080,121 @@ void MainRenderer::DrawPaneEmptyState(const WindowViewModel& vm, const PaneViewM
     }
 }
 
+void MainRenderer::DrawFileColumnHeader(const PaneViewModel& pane, const D2D1_RECT_F& bounds,
+                                        const Theme& theme, std::wstring_view header_key, int pane_index,
+                                        bool divider_active, bool resizing, int hover_divider) {
+    auto* dc = compositor_->Dc();
+    const float x = bounds.left, y = bounds.top, w = bounds.right - bounds.left;
+    // Re-set the brush: earlier drawing (tray deck pills, toolbar) may
+    // have left a different color on this shared member.
+    MakeBrush(dc, theme.fill_input, brFillInput_);
+    FillRect(dc, brFillInput_.get(), x, y, w, column_header_height_);
+    FillRect(dc, brStrokeDivider_.get(), x, y + column_header_height_ - 1, w, 1);
+    const DetailsColumnLayout columns = DetailsColumns(bounds, pane);
+    if (pane_index >= 0 && pane_index < static_cast<int>(painted_columns_.size())) {
+        uint32_t mask = columns.two_line ? (1u << 31) : 0u;
+        for (int col = 0; col < columns.count; ++col)
+            mask |= 1u << static_cast<uint32_t>(columns.kinds[static_cast<size_t>(col)]);
+        painted_columns_[static_cast<size_t>(pane_index)] = mask;
+    }
+    float cx = columns.left;
+    auto drawCol = [&](const std::wstring& label, SortColumn col, float cw, bool right = false) {
+        const bool active = !pane.curated_order && pane.sort_column == col;
+        MakeBrush(dc, active ? theme.accent_ink : theme.text, brText_);
+        IDWriteTextFormat* fmt = compositor_->HeaderFormat();
+        const float textInset = 8.0f * scale_;
+        const float contentLeft = cx + textInset;
+        const float availableW = std::max(0.0f, cw - textInset * 2.0f);
+        const float iconW = active ? 12.0f * scale_ : 0.0f;
+        const float iconGap = active ? 3.0f * scale_ : 0.0f;
+        const float labelAvailable = std::max(0.0f, availableW - iconW - iconGap);
+        // LumaText clips to the supplied surface bounds.  DWrite's
+        // measured width can differ slightly from LumaText's raster
+        // advance (the final stem of a lowercase 'd' is a common case),
+        // so use both measurements and retain a small trailing allowance.
+        const float dwriteLabelW = MeasureTextWidth(
+            compositor_->DwriteFactory(), fmt, label);
+        float lumaLabelW = 0.0f;
+        compositor_->MeasureLumaText(label, fmt, lumaLabelW);
+        const float measuredLabelW = std::max(dwriteLabelW, lumaLabelW);
+        const float labelW = std::min(labelAvailable,
+                                      measuredLabelW + 4.0f * scale_);
+        const float groupW = labelW + iconGap + iconW;
+        const float groupLeft = right
+            ? contentLeft + availableW - groupW : contentLeft;
+        fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        if (measuredLabelW > labelAvailable) {
+            DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), fmt, brText_.get(), label,
+                groupLeft, y, labelW, column_header_height_);
+        } else {
+            DrawTextRect(dc, fmt, brText_.get(), label, groupLeft, y,
+                         labelW, column_header_height_);
+        }
+        if (active) {
+            DrawIconText(groupLeft + labelW + iconGap, y, iconW,
+                         column_header_height_,
+                         pane.sort_direction == SortDirection::Asc
+                             ? kIconChevronUp : kIconChevronDown,
+                         pane.sort_direction == SortDirection::Asc ? L"^" : L"v",
+                         theme.accent_ink, 0.75f);
+        }
+        fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+        cx += cw;
+    };
+    // The path column is display-only: never an active/clickable sort.
+    for (int col = 0; col < columns.count; ++col) {
+        const float cw = columns.widths[static_cast<size_t>(col)];
+        switch (columns.kinds[static_cast<size_t>(col)]) {
+        case ColumnKind::Name:
+            drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnName), SortColumn::Name, cw, false);
+            break;
+        case ColumnKind::Path:
+            drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnPath), SortColumn::Path, cw, false);
+            break;
+        case ColumnKind::Date:
+            drawCol(pane.date_column_label.empty()
+                        ? pulse::l10n::Get(pulse::l10n::StringId::ColumnModified)
+                        : pane.date_column_label,
+                    SortColumn::Mtime, cw, false);
+            break;
+        case ColumnKind::Type:
+            drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnType), SortColumn::Type, cw, false);
+            break;
+        case ColumnKind::Size:
+            drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnSize), SortColumn::Size, cw, true);
+            break;
+        case ColumnKind::Cloud:
+        case ColumnKind::Dimensions:
+        case ColumnKind::Duration:
+        case ColumnKind::DateTaken:
+            MakeBrush(dc, theme.text, brText_);
+            DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(),
+                compositor_->HeaderFormat(), brText_.get(), DetailsColumnLabel(columns.kinds[static_cast<size_t>(col)]),
+                cx + 8.0f * scale_, y, cw - 16.0f * scale_, column_header_height_);
+            cx += cw;
+            break;
+        }
+    }
+    MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);
+    const int active_divider = divider_active ? std::clamp(hover_divider, 0, std::max(0, columns.count - 2)) : -1;
+    for (int divider = 0; divider < columns.count - 1; ++divider) {
+        const float dividerX = columns.DividerX(divider);
+        FillRect(dc, brStrokeDivider_.get(),
+                 dividerX, y + 7.0f * scale_,
+                 std::max(1.0f, scale_),
+                 column_header_height_ - 14.0f * scale_);
+        const bool hot = active_divider == divider;
+        const float hover = HoverOpacity(std::wstring(header_key) + L"divider:" +
+            std::to_wstring(static_cast<int>(columns.kinds[divider])), hot);
+        const float highlight = hot && resizing ? 1.0f : hover;
+        if (highlight > 0.0f) {
+            MakeBrush(dc, WithAlpha(theme.accent, theme.accent.a * highlight), brFillHover_);
+            FillRect(dc, brFillHover_.get(), dividerX - scale_, y + 4.0f * scale_,
+                     2.0f * scale_, column_header_height_ - 8.0f * scale_);
+        }
+    }
+}
+
 void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel& pane,
                                   const D2D1_RECT_F& pane_rect, int pane_index, bool focused, bool target,
                                   const Theme& theme) {
@@ -1093,6 +1230,9 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
 
     dc->PushAxisAlignedClip(bounds, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
+    const bool high_contrast = IsHighContrast();
+    const std::wstring header_key = L"pane-header:" + std::to_wstring(pane_index) + L":" +
+        std::to_wstring(pane.navigation_owner) + L":";
     const std::wstring navigation_key = pane.is_query_search ? L"pulse:search" : pane.path;
     const bool navigation_ready = pane.is_query_search || !pane.loading;
     float y = y0;
@@ -1137,9 +1277,11 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
             if (rc.right <= rc.left) return;
             const bool hovered = focused && enabled && vm.hover_region == static_cast<int>(region) &&
                                  vm.hover_control_index == pane_index;
-            const D2D1_COLOR_F fill = active
-                ? WithAlpha(theme.accent, hovered ? 0.24f : 0.14f)
-                : (hovered ? theme.fill_hover : kTransparent);
+            const float hover = HoverOpacity(header_key + L"button:" + std::to_wstring(region), hovered);
+            auto fill = active
+                ? (high_contrast ? theme.fill_selected : WithAlpha(theme.accent, 0.14f + 0.10f * hover))
+                : theme.fill_hover;
+            if (!active) fill.a *= hover;
             if (fill.a > 0.0f) {
                 MakeBrush(dc, fill, brFillHover_);
                 FillRoundedRect(dc, brFillHover_.get(), rc.left, rc.top,
@@ -1147,7 +1289,8 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
                                 theme.radius_control * scale_);
             }
             DrawPaneHeaderIcon(rc, icon, !enabled ? theme.text_disabled
-                : (active ? theme.accent_ink : theme.text));
+                : high_contrast && fill.a > 0.0f ? theme.text_selected
+                : active ? theme.accent_ink : theme.text);
         };
         headerButton(detailsRc, HitTestResult::PaneDetails, PaneHeaderIcon::View,
                      pane.view_mode == ViewMode::Details);
@@ -1290,115 +1433,11 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
         (!pane.loading || pane.search_retaining_results) && !pane.is_recent && !pane.is_changes &&
         pane.rename_index < 0 && !pane.marquee_active && pane.EntryCount() > 0;
     if (ShowsColumnHeader(pane.view_mode)) {
-        // Re-set the brush: earlier drawing (tray deck pills, toolbar) may
-        // have left a different color on this shared member.
-        MakeBrush(dc, theme.fill_input, brFillInput_);
-        FillRect(dc, brFillInput_.get(), x, y, w, column_header_height_);
-        FillRect(dc, brStrokeDivider_.get(), x, y + column_header_height_ - 1, w, 1);
-        const DetailsColumnLayout columns = DetailsColumns(bounds, pane);
-        if (pane_index >= 0 && pane_index < static_cast<int>(painted_columns_.size())) {
-            uint32_t mask = columns.two_line ? (1u << 31) : 0u;
-            for (int col = 0; col < columns.count; ++col)
-                mask |= 1u << static_cast<uint32_t>(columns.kinds[static_cast<size_t>(col)]);
-            painted_columns_[static_cast<size_t>(pane_index)] = mask;
-        }
-        float cx = columns.left;
-        auto drawCol = [&](const std::wstring& label, SortColumn col, float cw, bool right = false) {
-            const bool active = !pane.curated_order && pane.sort_column == col;
-            MakeBrush(dc, active ? theme.accent_ink : theme.text, brText_);
-            IDWriteTextFormat* fmt = compositor_->HeaderFormat();
-            const float textInset = 8.0f * scale_;
-            const float contentLeft = cx + textInset;
-            const float availableW = std::max(0.0f, cw - textInset * 2.0f);
-            const float iconW = active ? 12.0f * scale_ : 0.0f;
-            const float iconGap = active ? 3.0f * scale_ : 0.0f;
-            const float labelAvailable = std::max(0.0f, availableW - iconW - iconGap);
-            // LumaText clips to the supplied surface bounds.  DWrite's
-            // measured width can differ slightly from LumaText's raster
-            // advance (the final stem of a lowercase 'd' is a common case),
-            // so use both measurements and retain a small trailing allowance.
-            const float dwriteLabelW = MeasureTextWidth(
-                compositor_->DwriteFactory(), fmt, label);
-            float lumaLabelW = 0.0f;
-            compositor_->MeasureLumaText(label, fmt, lumaLabelW);
-            const float measuredLabelW = std::max(dwriteLabelW, lumaLabelW);
-            const float labelW = std::min(labelAvailable,
-                                          measuredLabelW + 4.0f * scale_);
-            const float groupW = labelW + iconGap + iconW;
-            const float groupLeft = right
-                ? contentLeft + availableW - groupW : contentLeft;
-            fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            if (measuredLabelW > labelAvailable) {
-                DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), fmt, brText_.get(), label,
-                    groupLeft, y, labelW, column_header_height_);
-            } else {
-                DrawTextRect(dc, fmt, brText_.get(), label, groupLeft, y,
-                             labelW, column_header_height_);
-            }
-            if (active) {
-                DrawIconText(groupLeft + labelW + iconGap, y, iconW,
-                             column_header_height_,
-                             pane.sort_direction == SortDirection::Asc
-                                 ? kIconChevronUp : kIconChevronDown,
-                             pane.sort_direction == SortDirection::Asc ? L"^" : L"v",
-                             theme.accent_ink, 0.75f);
-            }
-            fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
-            cx += cw;
-        };
-        // The path column is display-only: never an active/clickable sort.
-        for (int col = 0; col < columns.count; ++col) {
-            const float cw = columns.widths[static_cast<size_t>(col)];
-            switch (columns.kinds[static_cast<size_t>(col)]) {
-            case ColumnKind::Name:
-                drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnName), SortColumn::Name, cw, false);
-                break;
-            case ColumnKind::Path:
-                drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnPath), SortColumn::Path, cw, false);
-                break;
-            case ColumnKind::Date:
-                drawCol(pane.date_column_label.empty()
-                            ? pulse::l10n::Get(pulse::l10n::StringId::ColumnModified)
-                            : pane.date_column_label,
-                        SortColumn::Mtime, cw, false);
-                break;
-            case ColumnKind::Type:
-                drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnType), SortColumn::Type, cw, false);
-                break;
-            case ColumnKind::Size:
-                drawCol(pulse::l10n::Get(pulse::l10n::StringId::ColumnSize), SortColumn::Size, cw, true);
-                break;
-            case ColumnKind::Cloud:
-            case ColumnKind::Dimensions:
-            case ColumnKind::Duration:
-            case ColumnKind::DateTaken:
-                MakeBrush(dc, theme.text, brText_);
-                DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(),
-                    compositor_->HeaderFormat(), brText_.get(), DetailsColumnLabel(columns.kinds[static_cast<size_t>(col)]),
-                    cx + 8.0f * scale_, y, cw - 16.0f * scale_, column_header_height_);
-                cx += cw;
-                break;
-            }
-        }
         const bool divider_active =
             (vm.hover_region == static_cast<int>(HitTestResult::ColumnDivider) ||
              vm.column_resize_pressed) && vm.hover_pane_index == pane_index;
-        const int active_divider = divider_active
-            ? std::clamp(vm.hover_control_index, 0, std::max(0, columns.count - 2))
-            : -1;
-        MakeBrush(dc, theme.stroke_divider, brStrokeDivider_);
-        for (int divider = 0; divider < columns.count - 1; ++divider) {
-            const float dividerX = columns.DividerX(divider);
-            FillRect(dc, brStrokeDivider_.get(),
-                     dividerX, y + 7.0f * scale_,
-                     std::max(1.0f, scale_),
-                     column_header_height_ - 14.0f * scale_);
-        }
-        if (active_divider >= 0) {
-            const float dividerX = columns.DividerX(active_divider);
-            FillRect(dc, brAccent_.get(), dividerX - scale_, y + 4.0f * scale_,
-                     2.0f * scale_, column_header_height_ - 8.0f * scale_);
-        }
+        DrawFileColumnHeader(pane, D2D1::RectF(x, y, x + w, bottom), theme, header_key,
+            pane_index, divider_active, vm.column_resize_pressed, vm.hover_control_index);
         y += column_header_height_;
     }
     auto& surface = pane_surfaces_[painting_pane_];
@@ -1624,6 +1663,39 @@ float MainRenderer::SelectionOpacity(const std::wstring& key, bool selected) {
     return track.animation.value;
 }
 
+D2D1_RECT_F MainRenderer::FileRowsRect(D2D1_RECT_F bounds, ViewMode mode) const {
+    if (ShowsColumnHeader(mode)) bounds.top = std::min(bounds.top + column_header_height_, bounds.bottom);
+    return bounds;
+}
+
+ViewLayout MainRenderer::MakeFileLayout(const PaneViewModel& vm, const D2D1_RECT_F& rows,
+                                       float scroll_x, float scroll_y) const {
+    return ViewLayout(vm.view_mode, rows, vm.EntryCount(), scroll_x, scroll_y, scale_,
+        ListRowHeightDip(vm, rows), vm.date_groups.get());
+}
+
+void MainRenderer::DrawEmbeddedFileView(const PaneViewModel& vm, const D2D1_RECT_F& bounds,
+                                        const Theme& theme, bool focused, float scrollbar_hover) {
+    surface_animating_ = false;
+    std::erase_if(hover_tracks_, [&](const auto& entry) { return entry.second.frame != settings_switch_frame_; });
+    ++settings_switch_frame_;
+    settings_switch_now_ = AnimationTimeMs();
+    ThumbnailCache::FrameScope thumbnails(thumbnail_cache_);
+    icon_cache_.SetDeviceContext(compositor_->Dc());
+    icon_cache_.SetScale(scale_);
+    UpdateBrushes(theme);
+    text_background_ = theme.bg;
+    painter_.BeginFrame(theme, IsHighContrast());
+    if (ShowsColumnHeader(vm.view_mode))
+        DrawFileColumnHeader(vm, bounds, theme, L"", 0, false, false, -1);
+    const auto rows = FileRowsRect(bounds, vm.view_mode);
+    auto* dc = compositor_->Dc();
+    dc->PushAxisAlignedClip(rows, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    DrawList(vm, rows.left, rows.top, rows.right - rows.left, rows.bottom - rows.top, theme, 0, -1, focused);
+    DrawScrollbar(vm, rows.left, rows.top, rows.right - rows.left, rows.bottom - rows.top, theme, scrollbar_hover);
+    dc->PopAxisAlignedClip();
+}
+
 void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, float h,
                             const Theme& theme, int hover_region, int hover_control_index,
                             bool pane_focused) {
@@ -1639,7 +1711,6 @@ void MainRenderer::DrawList(const PaneViewModel& vm, float x, float y, float w, 
         }, vm.view_mode_revision, ViewModeFrameSignature(vm, theme, pane_focused, hover_region, hover_control_index), CanReuseViewModeFrame());
     RetainViewModeFrame(vm, transition);
     surface_animating_ |= transition.Pending();
-    DrawScrollbar(vm, x, y, w, h, theme);
 }
 
 void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, float w, float h,
@@ -1656,6 +1727,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
     MakeBrush(dc, theme.accent, brAccent_);
     if (vm.loading && !vm.search_retaining_results) {
         reflow.Reset();
+        list_hover_layouts_[painting_pane_] = {};
         // Directory enumeration is asynchronous. Leave the list quiet for its
         // brief initial frame instead of presenting it like a search request.
         if (UsesThumbnails(vm.view_mode)) thumbnail_cache_.Warm();
@@ -1663,8 +1735,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
     }
     const size_t entryCount = vm.EntryCount();
     const D2D1_RECT_F viewport = D2D1::RectF(x, y, x + w, y + h);
-    ViewLayout layout(vm.view_mode, viewport, entryCount, vm.scroll_x, vm.scroll_y, scale_,
-                      ListRowHeightDip(vm, viewport), vm.date_groups.get());
+    const auto layout = MakeFileLayout(vm, viewport, vm.scroll_x, vm.scroll_y);
     const auto [startIdx, endIdx] = layout.VisibleRange();
     list_profile.Mark(profile::PaintPhase::ListLayout);
     // One neighboring page supplies old positions for rows crossing the viewport
@@ -1672,13 +1743,22 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
     const int page = std::max(1, endIdx - startIdx + 1);
     const int motion_first = std::max(0, startIdx - page);
     const int motion_last = std::min(static_cast<int>(entryCount) - 1, endIdx + page);
+    const auto first_group_at = [&](int row) {
+        return std::lower_bound(vm.date_groups->begin(), vm.date_groups->end(), row,
+            [](const DateGroup& group, int first) { return group.first < first; });
+    };
     auto& view_transition = view_mode_transitions_[painting_pane_];
     const bool animate_items = !view_transition.Pending() && motion_enabled_ && !IsHighContrast() && (vm.is_file_system || vm.is_query_search) &&
         (!vm.loading || vm.search_retaining_results) && !vm.is_recent &&
         !vm.is_changes && vm.rename_index < 0 && !vm.marquee_active &&
         motion_last - motion_first < 512;
     const auto motion_context = ItemReflowContext(vm);
-    const bool animate_row_hover = reflow.Matches(motion_context, viewport);
+    auto& hover_layout = list_hover_layouts_[painting_pane_];
+    const auto previous_viewport = hover_layout.viewport;
+    const bool animate_row_hover = hover_layout.context == motion_context &&
+        previous_viewport.left == viewport.left && previous_viewport.top == viewport.top &&
+        previous_viewport.right == viewport.right && previous_viewport.bottom == viewport.bottom;
+    if (!animate_row_hover) hover_layout = {motion_context, viewport};
     const auto row_hover_opacity = [&](const std::wstring& key, bool hovered, float enter_ms, float exit_ms) {
         // Scrolling moves the rows under a stationary pointer; old highlights must not follow them.
         if (!animate_row_hover)
@@ -1722,8 +1802,8 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             motion_slots.push_back({key, bounds, source, wrap_rows, stripe});
         }
         if (vm.view_mode == ViewMode::Details && vm.date_groups) {
-            for (const auto& group : *vm.date_groups) {
-                if (group.first < motion_first || group.first > motion_last) continue;
+            for (auto it = first_group_at(motion_first); it != vm.date_groups->end() && it->first <= motion_last; ++it) {
+                const auto& group = *it;
                 const auto first = layout.ItemRect(group.first);
                 const auto key = L"group:" + std::to_wstring(static_cast<int>(group.mode)) + L":" +
                     std::to_wstring(group.bucket) + L":" + group.label;
@@ -1788,14 +1868,19 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             l10n::StringId::DateToday, l10n::StringId::DateYesterday,
             l10n::StringId::DateThisWeek, l10n::StringId::DateLastWeek,
             l10n::StringId::DateEarlierThisMonth, l10n::StringId::DateOlder};
-        for (const DateGroup& group : *vm.date_groups) {
+        // A header exiting from an earlier position may still be visible during reflow.
+        const bool moving_headers = reflow.Pending();
+        const auto first_group = moving_headers ? vm.date_groups->begin() : first_group_at(startIdx);
+        const auto last_group = moving_headers ? vm.date_groups->end() : first_group_at(endIdx + 1);
+        for (auto it = first_group; it != last_group; ++it) {
+            const auto& group = *it;
             const D2D1_RECT_F first = layout.ItemRect(group.first);
             const float top = first.top - kDateGroupHeaderDip * scale_;
+            if (!moving_headers && (first.top < y || top > y + h)) continue;
             const auto key = L"group:" + std::to_wstring(static_cast<int>(group.mode)) + L":" +
                 std::to_wstring(group.bucket) + L":" + group.label;
             const auto header_bounds = D2D1::RectF(first.left, top, first.right, first.top);
-            if (animate_items ? !reflow.ShouldPaint(key, header_bounds)
-                              : first.top < y || top > y + h) continue;
+            if (moving_headers && !reflow.ShouldPaint(key, header_bounds)) continue;
             reflow.Paint(dc, key, header_bounds, [&] {
             wchar_t count[48]{};
             swprintf_s(count, l10n::Get(group.count == 1
@@ -1883,8 +1968,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                     problem ? L"!" : busy ? L"~" : online ? L"O" : L"v", color, 0.82f);
             }
         }
-        const std::wstring display_name = e.is_dir && !e.record_only
-            ? pulse::path::KnownFolderDisplayName(e.path, e.name) : e.name;
+        const auto display_name = DisplayRowName(vm, e);
 
         bool selected = vm.IsRowSelected(src);
         bool hover = (src == vm.hover_index);
@@ -1997,7 +2081,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
         const size_t totalTags = tagIndices ? tagIndices->size() : (tagDots ? tagDots->size() : 0);
         const int tagDotCount = static_cast<int>(std::min<size_t>(3, totalTags));
         const bool readonly_shell = e.path.starts_with(L"pulse:shell-item:") || e.path.starts_with(L"pulse:library:");
-        const bool actions_allowed = vm.view_mode == ViewMode::Details && src != vm.rename_index && !readonly_shell;
+        const bool actions_allowed = vm.show_item_actions && detailsView && src != vm.rename_index && !readonly_shell;
         const bool actions_visible = actions_allowed && (hover || (selected && vm.selected_count == 1));
         const bool star_visible = actions_allowed && (actions_visible || e.starred);
         const bool new_tab_visible = actions_allowed && hover && e.is_dir;
@@ -2378,28 +2462,36 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
 
 }
 
-void MainRenderer::DrawScrollbar(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme) {
-    (void)theme;
-    if (vm.loading && !vm.search_retaining_results) return;
-    ID2D1DeviceContext* dc = compositor_->Dc();
-    ViewLayout layout(vm.view_mode, D2D1::RectF(x, y, x + w, y + h), vm.EntryCount(),
-                      vm.scroll_x, vm.scroll_y, scale_, ListRowHeightDip(vm, D2D1::RectF(x, y, x + w, y + h)),
-                      vm.date_groups.get());
-    const float totalH = layout.ContentHeight();
-    auto sb = ComputeScrollbar(h, totalH, vm.scroll_y, layout.Metrics().cell_height);
-    if (sb.valid) {
-        const float thumbW = 6 * scale_;
-        FillRoundedRect(dc, brScrollbar_.get(), x + w - 10.0f * scale_, y + sb.thumbY,
-            thumbW, sb.thumbH, thumbW * 0.5f);
-    }
-    if (vm.view_mode == ViewMode::List && layout.MaxScrollX() > 0.0f) {
-        const float viewW = std::max(1.0f, w);
+bool MainRenderer::FileScrollbarGeometry(const ViewLayout& layout, const D2D1_RECT_F& rows,
+                                         float offset, D2D1_RECT_F& track, D2D1_RECT_F& thumb) const {
+    if (layout.Metrics().column_major) {
+        if (layout.MaxScrollX() <= 0.0f) return false;
+        const float viewW = std::max(1.0f, rows.right - rows.left);
         const float totalW = layout.ContentWidth();
         const float thumbW = std::max(28.0f * scale_, viewW * (viewW / totalW));
         const float travel = std::max(1.0f, viewW - thumbW);
-        const float thumbX = x + (vm.scroll_x / layout.MaxScrollX()) * travel;
-        FillRoundedRect(dc, brScrollbar_.get(), thumbX, y + h - 8.0f * scale_,
-                        thumbW, 6.0f * scale_, 3.0f * scale_);
+        const float thumbX = rows.left + (offset / layout.MaxScrollX()) * travel;
+        track = D2D1::RectF(rows.left, rows.bottom - 10.0f * scale_, rows.right, rows.bottom);
+        thumb = D2D1::RectF(thumbX, rows.bottom - 8.0f * scale_, thumbX + thumbW, rows.bottom - 2.0f * scale_);
+        return true;
+    }
+    const auto sb = ComputeScrollbar(rows.bottom - rows.top, layout.ContentHeight(), offset, layout.Metrics().cell_height);
+    if (!sb.valid) return false;
+    track = D2D1::RectF(rows.right - 10.0f * scale_, rows.top, rows.right, rows.bottom);
+    thumb = D2D1::RectF(track.left, rows.top + sb.thumbY, track.left + 6.0f * scale_, rows.top + sb.thumbY + sb.thumbH);
+    return true;
+}
+
+void MainRenderer::DrawScrollbar(const PaneViewModel& vm, float x, float y, float w, float h, const Theme& theme,
+                                 float hover) {
+    if (vm.loading && !vm.search_retaining_results) return;
+    const auto rows = D2D1::RectF(x, y, x + w, y + h);
+    const auto layout = MakeFileLayout(vm, rows, vm.scroll_x, vm.scroll_y);
+    D2D1_RECT_F track{}, thumb{};
+    if (FileScrollbarGeometry(layout, rows, layout.Metrics().column_major ? vm.scroll_x : vm.scroll_y, track, thumb)) {
+        if (hover > 0.0f) painter_.FillRoundedRect(track, 3.0f * scale_, WithAlpha(theme.fill_hover, theme.fill_hover.a * hover));
+        FillRoundedRect(compositor_->Dc(), brScrollbar_.get(), thumb.left, thumb.top,
+                        thumb.right - thumb.left, thumb.bottom - thumb.top, 3.0f * scale_);
     }
 }
 bool MainRenderer::PaneScrollbarGeometry(const PaneViewModel& vm, const D2D1_RECT_F& full_bounds,
@@ -2574,8 +2666,12 @@ int MainRenderer::ItemFromPointInPane(const PaneViewModel& vm,
                                       float x, float y) const {
     const D2D1_RECT_F pane_bounds = PaneBodyBounds(vm, full_bounds);
     const float extra = PaneExtraTop(vm, scale_, pane_bounds.right - pane_bounds.left, compositor_);
-    D2D1_RECT_F list = PaneListRect(pane_bounds, extra, vm.view_mode);
-    ViewLayout layout(vm.view_mode, list, vm.EntryCount(), vm.scroll_x, vm.scroll_y, scale_, ListRowHeightDip(vm, list), vm.date_groups.get());
+    const auto list = PaneListRect(pane_bounds, extra, vm.view_mode);
+    return FileItemFromPoint(vm, MakeFileLayout(vm, list, vm.scroll_x, vm.scroll_y), list, x, y);
+}
+
+int MainRenderer::FileItemFromPoint(const PaneViewModel& vm, const ViewLayout& layout,
+                                     const D2D1_RECT_F& list, float x, float y) const {
     if (const auto* transition = ViewModeTransitionFor(vm, list)) {
         const int source = transition->HitTest(x, y);
         if (source >= 0) return vm.ViewIndex(source) >= 0 ? source : -1;

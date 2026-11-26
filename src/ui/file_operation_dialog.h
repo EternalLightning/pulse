@@ -60,6 +60,7 @@ struct FileOperationCallbacks {
     std::function<void()> pause;
     std::function<void()> resume;
     std::function<void()> dismiss;
+    std::function<void()> refresh_progress;
 };
 
 struct FileOperationWindowOptions {

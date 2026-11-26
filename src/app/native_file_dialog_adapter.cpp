@@ -154,17 +154,26 @@ bool WindowIdentity(NativeFileDialog& dialog, std::wstring& reason) {
     return true;
 }
 
+bool VisibleControl(HWND control, HWND dialog) {
+    // Hiding the verified top-level window preserves its children's own visibility styles.
+    while (control && control != dialog) {
+        if (!(GetWindowLongPtrW(control, GWL_STYLE) & WS_VISIBLE)) return false;
+        control = GetParent(control);
+    }
+    return control == dialog;
+}
+
 Controls FindControls(HWND window) {
     Controls controls;
     controls.confirm = GetDlgItem(window, IDOK);
     controls.cancel = GetDlgItem(window, IDCANCEL);
-    struct Context { Controls& controls; size_t count = 0; } context{controls};
+    struct Context { Controls& controls; HWND dialog; size_t count = 0; } context{controls, window};
     EnumChildWindows(window, [](HWND child, LPARAM data) -> BOOL {
         auto& state = *reinterpret_cast<Context*>(data);
         if (++state.count > 512) return FALSE;
         auto& result = state.controls;
         const auto name = ClassName(child);
-        const bool visible = IsWindowVisible(child) != FALSE;
+        const bool visible = VisibleControl(child, state.dialog);
         if (name == L"SHELLDLL_DefView") result.shell = child;
         if (name == L"DirectUIHWND") result.direct = child;
         if (name == L"SHBrowseForFolder ShellNameSpace Control") result.browse = child;
@@ -192,7 +201,7 @@ Controls FindControls(HWND window) {
             filename = child;
         if (identifier == cmb13 && name == L"ComboBox" && visible)
             filename = FindWindowExW(child, nullptr, L"Edit", nullptr);
-        if (filename && IsWindowVisible(filename)) {
+        if (filename && VisibleControl(filename, state.dialog)) {
             if (result.filename && result.filename != filename) result.ambiguous_filename = true;
             result.filename = filename;
         }
@@ -259,7 +268,7 @@ bool AbsolutePath(std::wstring_view path) {
         path[server_end + 1] != L'\\';
 }
 
-bool ParseFilter(std::wstring label, ui::PickerFilter& filter) {
+std::wstring ParseFilterPattern(const std::wstring& label) {
     const size_t close = label.rfind(L')');
     const size_t open = close == std::wstring::npos ? std::wstring::npos : label.rfind(L'(', close);
     std::wstring pattern = open == std::wstring::npos ? label : label.substr(open + 1, close - open - 1);
@@ -267,12 +276,11 @@ bool ParseFilter(std::wstring label, ui::PickerFilter& filter) {
     while (!pattern.empty() && std::iswspace(pattern.back())) pattern.pop_back();
     if (pattern.empty() || pattern.size() > 4096 || pattern.find_first_of(L"*?") == std::wstring::npos ||
         pattern.find_first_of(L"\\/\r\n\"()") != std::wstring::npos ||
-        (open == std::wstring::npos && pattern.find_first_of(L" \t") != std::wstring::npos)) return false;
-    filter = {std::move(label), std::move(pattern)};
-    return true;
+        (open == std::wstring::npos && pattern.find_first_of(L" \t") != std::wstring::npos)) return {};
+    return pattern;
 }
 
-bool NativeFilters(HWND combo, std::vector<ui::PickerFilter>& filters, size_t& selected) {
+bool NativeFilters(HWND combo, NativeDialogKind kind, std::vector<ui::PickerFilter>& filters, size_t& selected) {
     if (ClassName(combo) != L"ComboBox") return false;
     const auto style = GetWindowLongPtrW(combo, GWL_STYLE);
     if ((style & (CBS_OWNERDRAWFIXED | CBS_OWNERDRAWVARIABLE)) && !(style & CBS_HASSTRINGS)) return false;
@@ -287,11 +295,14 @@ bool NativeFilters(HWND combo, std::vector<ui::PickerFilter>& filters, size_t& s
         // Use the full bounded buffer so a changed label cannot overflow it.
         DWORD_PTR length = 0, copied = 0;
         std::vector<wchar_t> label(kMaximumText);
-        ui::PickerFilter filter;
         if (!Send(combo, CB_GETLBTEXTLEN, index, 0, length) || !length || length >= label.size() - 1 ||
             !Send(combo, CB_GETLBTEXT, index, reinterpret_cast<LPARAM>(label.data()), copied) ||
-            copied != length || !ParseFilter(std::wstring(label.data(), static_cast<size_t>(copied)), filter)) return false;
-        result.push_back(std::move(filter));
+            copied != length) return false;
+        std::wstring text(label.data(), static_cast<size_t>(copied));
+        auto pattern = ParseFilterPattern(text);
+        // Browser save dialogs may expose just the type label. The original dialog still applies its type and extension.
+        if (pattern.empty() && kind != NativeDialogKind::Save) return false;
+        result.push_back({std::move(text), std::move(pattern)});
     }
     DWORD_PTR final_count = 0, final_selection = 0;
     if (!Send(combo, CB_GETCOUNT, 0, 0, final_count) || final_count != count ||
@@ -375,6 +386,29 @@ bool WriteFilename(const NativeFileDialog& dialog, const std::wstring& text,
     return true;
 }
 
+bool CommitStandardFilter(const NativeFileDialog& dialog, HWND combo, size_t index,
+    std::wstring& reason, const std::function<bool()>& cancelled) {
+    const HWND parent = GetParent(combo);
+    const auto matches = [&] {
+        DWORD process = 0;
+        return parent && (parent == dialog.window || IsChild(dialog.window, parent)) &&
+            GetParent(combo) == parent && GetDlgCtrlID(combo) == cmb1 &&
+            GetWindowThreadProcessId(parent, &process) == dialog.window_thread_id && process == dialog.process_id;
+    };
+    if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(dialog, reason) || !matches()) return false;
+    DWORD_PTR result = 0;
+    if (!Send(combo, CB_SETCURSEL, index, 0, result) || result != index)
+        return Fail(reason, L"原生文件类型未切换到选中的位置。");
+    // The host may update its extension and type separately from the ComboBox selection.
+    for (const auto notification : {CBN_SELENDOK, CBN_SELCHANGE}) {
+        if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(dialog, reason) || !matches()) return false;
+        if (!Send(parent, WM_COMMAND, MAKEWPARAM(cmb1, notification), reinterpret_cast<LPARAM>(combo), result))
+            return Fail(reason, L"原生文件类型变更通知未完成。");
+    }
+    return (Send(combo, CB_GETCURSEL, 0, 0, result) && result == index) ||
+        Fail(reason, L"原生文件类型通知后，选中项发生变化。");
+}
+
 bool SelectFilter(const NativeFileDialog& dialog, const Controls& controls, size_t index,
     const std::vector<ui::PickerFilter>& filters, std::wstring& reason,
     const std::function<bool()>& cancelled) {
@@ -384,6 +418,8 @@ bool SelectFilter(const NativeFileDialog& dialog, const Controls& controls, size
     DWORD process = 0;
     if (GetWindowThreadProcessId(controls.filter, &process) != dialog.window_thread_id || process != dialog.process_id)
         return Fail(reason, L"原生文件类型控件进程或线程发生变化。");
+    if (controls.standard_filter && !IsWindowVisible(dialog.window))
+        return CommitStandardFilter(dialog, controls.filter, index, reason, cancelled);
     ComPtr<IUIAutomation> automation;
     if (!Automation(automation, reason)) return false;
     auto combo = Element(automation.Get(), controls.filter);
@@ -433,41 +469,11 @@ bool SelectFilter(const NativeFileDialog& dialog, const Controls& controls, size
     if (!Send(controls.filter, CB_GETCURSEL, 0, 0, selected) || selected != index)
         return Fail(reason, L"原生文件类型 SelectionItem 选择后，ComboBox 选中索引仍不一致。");
     if (dialog.kind == NativeDialogKind::Save && controls.standard_filter) {
-        const HWND parent = GetParent(controls.filter);
-        const int identifier = GetDlgCtrlID(controls.filter);
-        const auto command_target_matches = [&] {
-            DWORD parent_process = 0, combo_process = 0;
-            return parent && identifier > 0 && identifier <= 0xffff &&
-                (parent == dialog.window || IsChild(dialog.window, parent)) &&
-                GetParent(controls.filter) == parent && GetDlgCtrlID(controls.filter) == identifier &&
-                ClassName(controls.filter) == L"ComboBox" && IsChild(dialog.window, controls.filter) &&
-                GetWindowThreadProcessId(controls.filter, &combo_process) == dialog.window_thread_id && combo_process == dialog.process_id &&
-                GetWindowThreadProcessId(parent, &parent_process) == dialog.window_thread_id && parent_process == dialog.process_id;
-        };
-        if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(dialog, reason) || !command_target_matches())
-            return Fail(reason, L"保存文件类型的命令接收窗口身份发生变化。");
-        // SelectionItem can update only the ComboBox selection. Close its list
-        // before synchronizing the save host's type model, which otherwise can
-        // restore the old type when the filename edit changes its extension.
+        if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(dialog, reason)) return false;
         if (!Send(controls.filter, CB_SHOWDROPDOWN, FALSE, 0, result))
             return Fail(reason, L"保存文件类型下拉列表未完成关闭。");
         dropdown.active = false;
-        if (!Send(controls.filter, CB_GETCURSEL, 0, 0, selected))
-            return Fail(reason, L"关闭后无法读取保存文件类型选中项。");
-        if (selected != index &&
-            (!Send(controls.filter, CB_SETCURSEL, index, 0, result) || result != index))
-            return Fail(reason, L"关闭下拉列表后无法保留请求的保存文件类型。");
-        if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(dialog, reason) || !command_target_matches()) return false;
-        // A committed ComboBox choice reports SELENDOK before SELCHANGE.
-        // Classic hooked save dialogs also use that acceptance notification
-        // to publish the selected type in OPENFILENAME, beyond its UI state.
-        if (!Send(parent, WM_COMMAND, MAKEWPARAM(identifier, CBN_SELENDOK), reinterpret_cast<LPARAM>(controls.filter), result))
-            return Fail(reason, L"原生保存宿主未完成文件类型选择结束通知。");
-        if (Cancelled(cancelled, reason) || !IdentityBeforeMutation(dialog, reason) || !command_target_matches()) return false;
-        if (!Send(parent, WM_COMMAND, MAKEWPARAM(identifier, CBN_SELCHANGE), reinterpret_cast<LPARAM>(controls.filter), result))
-            return Fail(reason, L"原生保存宿主未完成文件类型变更通知。");
-        if (!Send(controls.filter, CB_GETCURSEL, 0, 0, selected) || selected != index)
-            return Fail(reason, L"保存文件类型通知后，ComboBox 选中索引仍不一致。");
+        return CommitStandardFilter(dialog, controls.filter, index, reason, cancelled);
     }
     return true;
 }
@@ -574,13 +580,13 @@ bool InspectNativeFileDialog(HWND window, NativeFileDialog& dialog, std::wstring
     const Controls controls = FindControls(window);
     if (!IsSourceControl(controls.confirm, result, L"Button") ||
         !IsSourceControl(controls.cancel, result, L"Button") ||
-        !IsWindowVisible(controls.confirm) || !IsWindowVisible(controls.cancel) || !IsWindowEnabled(controls.cancel))
+        !VisibleControl(controls.confirm, window) || !VisibleControl(controls.cancel, window) || !IsWindowEnabled(controls.cancel))
         return Fail(reason, L"The standard confirm or cancel button is unavailable.");
     const bool legacy = controls.browse && controls.tree && !controls.shell && !controls.direct;
     if (!legacy && (!controls.shell || (!controls.direct && !controls.filter)))
         return Fail(reason, L"未识别到标准 DirectUI 或 Explorer 文件对话框结构。");
     if (controls.ambiguous_filename || !IsSourceControl(controls.filename, result, L"Edit") ||
-        !IsWindowVisible(controls.filename) || !IsWindowEnabled(controls.filename) ||
+        !VisibleControl(controls.filename, window) || !IsWindowEnabled(controls.filename) ||
         (GetWindowLongPtrW(controls.filename, GWL_STYLE) & ES_READONLY) ||
         !WindowText(controls.filename, result.filename))
         return Fail(reason, L"找不到已核实的标准文件名或目录输入框。");
@@ -592,21 +598,24 @@ bool InspectNativeFileDialog(HWND window, NativeFileDialog& dialog, std::wstring
     else if (controls.direct && !controls.filter &&
         (word == L"selectfolder" || word == L"选择文件夹" || word == L"選擇資料夾" || word == L"選取資料夾"))
         result.kind = NativeDialogKind::Folder;
-    else if (!word.empty() && controls.direct && controls.filter &&
-        dialog_bridge::HasNativeOpenMode(result.process_id, result.window_thread_id, GetWindow(window, GW_OWNER))) {
-        result.kind = NativeDialogKind::Open;
+    else if (!word.empty() && controls.direct && controls.filter) {
+        using Mode = dialog_bridge::NativeMode;
+        const auto mode = dialog_bridge::QueryNativeMode(result.process_id, result.window_thread_id, GetWindow(window, GW_OWNER));
+        if (mode == Mode::Unknown) return Fail(reason, L"无法可靠识别自定义确认按钮对应的文件对话框模式。");
+        result.kind = mode == Mode::Open ? NativeDialogKind::Open : NativeDialogKind::Save;
         result.ok_button_label = std::move(confirm);
     } else return Fail(reason, L"无法可靠区分打开、保存与目录模式；保留原生对话框。");
     if (controls.ambiguous_filter) return Fail(reason, L"存在多个文件类型控件；保留原生窗口。");
     if (result.kind != NativeDialogKind::Folder) {
         if (!IsSourceControl(controls.filter, result, L"ComboBox") ||
-            !NativeFilters(controls.filter, result.filters, result.filter_index))
-            return Fail(reason, L"无法读取完整原生文件类型过滤器及选中项；不使用猜测的通配符。");
+            !NativeFilters(controls.filter, result.kind, result.filters, result.filter_index))
+            return Fail(reason, L"无法读取完整原生文件类型列表及选中项。");
     } else if (controls.filter) return Fail(reason, L"目录模式与文件类型控件不一致。");
     result.title = WindowText(window);
     ComPtr<IUIAutomation> automation;
     std::wstring automation_reason;
-    if (controls.address_toolbar || result.kind == NativeDialogKind::Open) Automation(automation, automation_reason);
+    if (controls.address_toolbar || result.kind == NativeDialogKind::Open)
+        Automation(automation, automation_reason);
     result.initial_path = Directory(controls, automation.Get());
     if (result.kind == NativeDialogKind::Open) {
         result.allow_multiselect = !result.initial_path.empty() && MultipleSelection(automation.Get(), controls);
@@ -626,7 +635,7 @@ bool InspectNativeFileDialog(HWND window, NativeFileDialog& dialog, std::wstring
 
 bool NativeDialogStillMatches(const NativeFileDialog& dialog) {
     const HWND window = dialog.window;
-    if (!dialog.process_id || dialog.process_id == GetCurrentProcessId() || !IsWindowVisible(window) ||
+    if (!dialog.process_id || dialog.process_id == GetCurrentProcessId() ||
         GetAncestor(window, GA_ROOT) != window || ClassName(window) != L"#32770" || !SameThread(window, dialog)) return false;
     Handle process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, dialog.process_id)};
     FILETIME created{};

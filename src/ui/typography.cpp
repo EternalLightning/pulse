@@ -44,6 +44,24 @@ bool FamilyExists(IDWriteFactory2* factory, const wchar_t* family) {
     return SUCCEEDED(result) && exists;
 }
 
+bool IsMonospaceFamily(IDWriteFontFamily* family) {
+    ComPtr<IDWriteFont> font;
+    ComPtr<IDWriteFont1> metrics;
+    return SUCCEEDED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, &font)) &&
+        SUCCEEDED(font->QueryInterface(IID_PPV_ARGS(&metrics))) && metrics->IsMonospacedFont();
+}
+
+bool HasMonospaceFamily(IDWriteFactory2* factory, const wchar_t* name) {
+    ComPtr<IDWriteFontCollection> collection;
+    ComPtr<IDWriteFontFamily> family;
+    UINT32 index = 0;
+    BOOL exists = FALSE;
+    return SUCCEEDED(factory->GetSystemFontCollection(&collection, FALSE)) &&
+        SUCCEEDED(collection->FindFamilyName(name, &index, &exists)) && exists &&
+        SUCCEEDED(collection->GetFontFamily(index, &family)) && IsMonospaceFamily(family.get());
+}
+
 const wchar_t* ResolveFamily(IDWriteFactory2* factory, FontRole role) {
     const wchar_t* const text_fonts[] = {
         L"Microsoft YaHei UI", L"Microsoft YaHei", L"Segoe UI Variable Text",
@@ -125,12 +143,38 @@ const wchar_t* PreferredTextFamily() noexcept {
     return L"Microsoft YaHei UI";
 }
 
+std::vector<std::wstring> MonospaceFamilies(IDWriteFactory2* factory) {
+    std::vector<std::wstring> result;
+    ComPtr<IDWriteFontCollection> collection;
+    if (!factory || FAILED(factory->GetSystemFontCollection(&collection, FALSE))) return result;
+    for (UINT32 i = 0; i < collection->GetFontFamilyCount(); ++i) {
+        ComPtr<IDWriteFontFamily> family;
+        ComPtr<IDWriteLocalizedStrings> names;
+        if (FAILED(collection->GetFontFamily(i, &family)) || !IsMonospaceFamily(family.get()) ||
+            FAILED(family->GetFamilyNames(&names))) continue;
+        UINT32 index = 0, length = 0;
+        BOOL has_english = FALSE;
+        if (FAILED(names->FindLocaleName(L"en-US", &index, &has_english)) || !has_english) index = 0;
+        if (FAILED(names->GetStringLength(index, &length)) || length == 0 || length > 128) continue;
+        std::wstring name(static_cast<size_t>(length) + 1, L'\0');
+        if (SUCCEEDED(names->GetString(index, name.data(), length + 1))) {
+            name.resize(length);
+            result.push_back(std::move(name));
+        }
+    }
+    std::sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
+        return _wcsicmp(left.c_str(), right.c_str()) < 0;
+    });
+    return result;
+}
+
 HRESULT CreateTextFormat(IDWriteFactory2* factory, const TextFormatSpec& spec,
-                         IDWriteTextFormat** format) {
+                         IDWriteTextFormat** format, const wchar_t* monospace_family) {
     if (!format) return E_POINTER;
     *format = nullptr;
     if (!factory || spec.size <= 0.0f) return E_INVALIDARG;
-    const wchar_t* family = ResolveFamily(factory, spec.role);
+    const wchar_t* family = spec.role == FontRole::Monospace && monospace_family && *monospace_family &&
+        HasMonospaceFamily(factory, monospace_family) ? monospace_family : ResolveFamily(factory, spec.role);
     const wchar_t* locale = spec.role == FontRole::Icon ? L"en-US" : LocaleName();
     const HRESULT result = factory->CreateTextFormat(
         family, nullptr, spec.weight, spec.style, spec.stretch, spec.size, locale, format);

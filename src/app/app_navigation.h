@@ -36,10 +36,11 @@ void DeliverIndexSearchResult(AppState& s, uint32_t id,
                                      index::SearchResult&& result);
 void AcceptIndexProviderResult(AppState& s, uint32_t id,
                                       index::SearchResult&& result, bool network);
+void AcceptDisplayAliasSearchResult(AppState& s, app::DisplayAliasSearchResult result);
 void MaybePrefetchSearchPage(AppState& s);
 void CancelActiveContentSearch(AppState& s, app::Tab& tab);
 void TeardownTabSearch(AppState& s, const app::Tab& tab);
-enum class PathLoadReason { Navigate, RestoreSession, NetworkRetry, SearchInput };
+enum class PathLoadReason { Navigate, RestoreSession, NetworkRetry, SearchInput, LinkedPane };
 void MarkContentSearchStopped(app::Tab& tab);
 void LoadVirtualView(AppState& s, app::Tab& tab, const std::wstring& path,
                      PathLoadReason reason = PathLoadReason::Navigate);

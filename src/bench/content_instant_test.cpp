@@ -52,13 +52,20 @@ int RunInstantDirectoryTests(const std::filesystem::path& base) {
         const auto fixture = base / (mode == 2 ? L"configured-root-ancestor" : ancestor ? L"ancestor-import" : L"directory-replace");
         const auto root = fixture / L"files", profile = fixture / L"profile";
         const auto slot = root / L"slot";
+        const auto gone = root / L"gone", exact = root / L"exact.txt";
+        const auto gone_sibling = root / L"gone-sibling.txt", slot_sibling = root / L"slot-sibling.txt";
         const auto scope = ancestor ? slot / L"mid" / L"leaf" : root;
         std::filesystem::create_directories(scope);
         std::filesystem::create_directories(slot);
         std::filesystem::create_directories(profile);
         if (!ancestor) {
+            std::filesystem::create_directories(gone / L"sub");
             Write(slot / L"old.txt", "directory_marker old");
             Write(slot / L"changed.txt", "directory_marker before");
+            Write(gone / L"sub" / L"child.txt", "directory_marker deleted subtree");
+            Write(exact, "directory_marker deleted file");
+            Write(gone_sibling, "directory_marker untouched");
+            Write(slot_sibling, "directory_marker untouched");
         }
         ContentIndex index((profile / L"content.sqlite").wstring(), ContentAgentMode::Instant);
         ContentIndexConfig config; config.roots = {{(mode == 2 ? scope : root).wstring()}};
@@ -93,8 +100,13 @@ int RunInstantDirectoryTests(const std::filesystem::path& base) {
             enqueue(slot.wstring(), false);
             std::filesystem::create_directories(expected.parent_path());
             Write(expected, "directory_marker new");
-            if (!ancestor) Write(slot / L"changed.txt", "no match after replacement");
-            else {
+            if (!ancestor) {
+                Write(slot / L"changed.txt", "no match after replacement");
+                std::filesystem::rename(gone, fixture / L"deleted-tree");
+                std::filesystem::remove(exact);
+                enqueue((root / L"GONE").wstring(), false);
+                enqueue((root / L"EXACT.TXT").wstring(), false);
+            } else {
                 std::filesystem::create_directories(slot / L"sibling");
                 Write(slot / L"sibling" / L"outside.txt", "directory_marker unrelated");
                 std::filesystem::create_directories(scope / L"excluded");
@@ -116,9 +128,12 @@ int RunInstantDirectoryTests(const std::filesystem::path& base) {
             paused |= progress.subscription_error == ERROR_NOTIFY_ENUM_DIR;
             return true;
         }, &hooks);
-        Check(visible.size() == 1 && visible.contains(ContentScopeKey(expected.wstring())), ancestor ?
+        const bool siblings_kept = visible.contains(ContentScopeKey(gone_sibling.wstring())) &&
+            visible.contains(ContentScopeKey(slot_sibling.wstring()));
+        Check(visible.size() == (ancestor ? 1u : 3u) && visible.contains(ContentScopeKey(expected.wstring())) &&
+            (ancestor || siblings_kept), ancestor ?
             "deep ancestor import reaches the query root and restores its matching file" :
-            "coalesced directory replacement removes missing and nonmatching old descendants");
+            "replacement, subtree and exact deletions reconcile without removing similarly named siblings");
         Check(full_scans == 1 && bounded && local_scans == (ancestor ? 1u : 2u) && paused, ancestor ?
             "ancestor traversal skips unrelated siblings and excluded directories" :
             "directory replacement rescans only current files without restarting the full query");

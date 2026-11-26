@@ -6,6 +6,7 @@
 // places.h — Workspaces, color tags, network pins (plan.md stage 2 / ui.md §7.5–7.7).
 #pragma once
 #include "../fs/fs_enum.h"
+#include "display_aliases.h"
 #include "view_mode.h"
 #include <cstdint>
 #include <atomic>
@@ -92,6 +93,7 @@ public:
     PlacesCatalog() = default;
     ~PlacesCatalog();
     std::vector<Workspace> workspaces;
+    DisplayAliasSnapshot display_aliases;
     std::vector<ColorTag> tags;
     std::vector<NetworkPlace> networks;
     std::vector<std::wstring> quick_access_paths;

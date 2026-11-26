@@ -207,6 +207,86 @@ void NativeByteProgress(const fs::path& root) {
     Check(SUCCEEDED(result.hr) && Hash(source) == Hash(destination) && callbacks &&
         observed == fs::file_size(source) && expected == observed,
         "native Shell calls our progress adapter with real transferred byte counts");
+
+    const auto make_batch = [&](const fs::path& target) {
+        fs::create_directories(target);
+        pulse::ipc::ShellOperationRequest batch;
+        batch.kind = pulse::ipc::ShellOperationKind::CopyBatch;
+        batch.collision = pulse::ipc::ShellCollisionPolicy::KeepBoth;
+        for (const auto* name : {L"a.bin", L"b.bin", L"c.bin"}) {
+            const auto from = root / L"batch-source" / name;
+            Write(from, std::string(512 * 1024, static_cast<char>(name[0])));
+            pulse::FileIdentity identity;
+            if (!pulse::ReadPathFileIdentity(from.wstring(), identity)) throw std::runtime_error("cannot read fixture source identity");
+            batch.items.push_back({from.wstring(), (target / name).wstring(), identity, {}});
+        }
+        return batch;
+    };
+    const auto completed = make_batch(root / L"batch-completed");
+    uint64_t previous = 0;
+    size_t items_done = 0;
+    bool monotonic = true;
+    observed = expected = 0;
+    progress.bytes_progress = [&](uint64_t done, uint64_t total) {
+        monotonic &= done >= previous && done <= total;
+        previous = done; observed = (std::max)(observed, done); expected = (std::max)(expected, total);
+    };
+    progress.progress = [&](float, const std::wstring&, size_t done, size_t total) {
+        monotonic &= done >= items_done && done <= total && total == completed.items.size();
+        items_done = done;
+    };
+    // A target can appear between application planning and the Shell request.
+    Write(completed.items[1].destination, "already present");
+    const auto copies = pulse::shell::ExecuteFileOperation(completed, progress);
+    bool correct = copies.items.size() == completed.items.size();
+    for (size_t i = 0; correct && i < copies.items.size(); ++i) {
+        const auto& copy = copies.items[i];
+        const auto hash = Hash(completed.items[i].source);
+        correct &= copy.source == completed.items[i].source && SUCCEEDED(copy.hr) && !copy.skipped &&
+            hash && Hash(copy.destination) == hash;
+    }
+    Check(SUCCEEDED(copies.hr) && correct && Read(completed.items[1].destination) == "already present",
+        "a native copy batch reports each actual product and preserves a late collision");
+    Check(monotonic && items_done == completed.items.size() && observed == 3 * 512 * 1024 && expected == observed,
+        "one Shell operation reports cumulative bytes and each completed file");
+
+    auto invalid = make_batch(root / L"batch-invalid");
+    invalid.items[1].expected_identity = invalid.items[0].expected_identity;
+    const auto failed = pulse::shell::ExecuteFileOperation(invalid);
+    Check(failed.hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID) && failed.failed_path == invalid.items[1].source &&
+        failed.items.size() == invalid.items.size() && SUCCEEDED(failed.items[0].hr) &&
+        failed.items[1].hr == failed.hr && failed.items[2].hr == E_PENDING &&
+        fs::exists(invalid.items[0].destination) && !fs::exists(invalid.items[1].destination) && !fs::exists(invalid.items[2].destination),
+        "a native batch stops at the failing file and reports the confirmed product and untouched suffix");
+
+    const auto locked = make_batch(root / L"batch-locked");
+    HANDLE read_lock = CreateFileW(locked.items[1].source.c_str(), GENERIC_READ, FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (read_lock == INVALID_HANDLE_VALUE) throw std::runtime_error("cannot lock fixture source");
+    const auto blocked = pulse::shell::ExecuteFileOperation(locked);
+    CloseHandle(read_lock);
+    Check(FAILED(blocked.hr) && !blocked.cancelled && blocked.failed_path == locked.items[1].source &&
+        blocked.items.size() == locked.items.size() && SUCCEEDED(blocked.items[0].hr) &&
+        FAILED(blocked.items[1].hr) && blocked.items[2].hr == E_PENDING && fs::exists(locked.items[0].destination) &&
+        !fs::exists(locked.items[1].destination) && !fs::exists(locked.items[2].destination),
+        "a Shell sharing failure stops the batch without committing the next file");
+
+    const auto interrupted = make_batch(root / L"batch-interrupted");
+    bool cancellation = false;
+    pulse::shell::FileOperationCallbacks interrupt;
+    interrupt.cancelled = [&] { return cancellation; };
+    interrupt.progress = [&](float, const std::wstring&, size_t done, size_t) { cancellation = done != 0; };
+    const auto cancelled = pulse::shell::ExecuteFileOperation(interrupted, interrupt);
+    if (!cancelled.cancelled || cancelled.items.size() != interrupted.items.size() ||
+        cancelled.items[1].hr != E_PENDING || cancelled.items[2].hr != E_PENDING) {
+        std::printf("[DIAG] cancelled=%d hr=0x%08lX path=%ls\n", cancelled.cancelled, cancelled.hr, cancelled.failed_path.c_str());
+        for (const auto& copy : cancelled.items)
+            std::printf("[DIAG] cancelled item=%ls hr=0x%08lX skipped=%d\n", copy.source.c_str(), copy.hr, copy.skipped);
+    }
+    Check(cancelled.cancelled && cancelled.items.size() == interrupted.items.size() &&
+        SUCCEEDED(cancelled.items[0].hr) && cancelled.items[1].hr == E_PENDING && cancelled.items[2].hr == E_PENDING &&
+        fs::exists(interrupted.items[0].destination) && !fs::exists(interrupted.items[1].destination) &&
+        !fs::exists(interrupted.items[2].destination), "cancellation separates committed files from untouched requests");
     CoUninitialize();
 }
 
@@ -423,11 +503,12 @@ void Cancellation(const fs::path& root, HWND owner) {
         Check(status.phase == OpPhase::Cancelled && produced > 0 && produced < request.sources.size() && content_valid &&
             outcomes.size() == 1 && outcomes.front().phase == OpPhase::Cancelled && confirmed == produced &&
             !outcomes.front().remaining_sources.empty(), "mid-batch cancel retains only confirmed partial outputs with truthful terminal evidence");
-        Check(std::all_of(completions.begin(), completions.end(), [&](const auto& completion) {
+        Check(completions.size() == 1 && completions.front().destinations.size() == produced && session.manager.CanUndo() &&
+            std::all_of(completions.begin(), completions.end(), [&](const auto& completion) {
             return std::all_of(completion.destinations.begin(), completion.destinations.end(), [&](const auto& path) {
                 return fs::exists(path) && Hash(path) == Hash(source / fs::path(path).filename());
             });
-        }), "partial completion never advertises missing or incomplete output");
+        }), "partial completion retains undo for the confirmed products");
         const auto idle_until = GetTickCount64() + 200;
         while (GetTickCount64() < idle_until) Pump();
         Check(!session.manager.HasPendingFileOperations() && static_cast<size_t>(std::distance(fs::directory_iterator(destination),
@@ -441,6 +522,18 @@ void Cancellation(const fs::path& root, HWND owner) {
             Check(resumed_status.phase == OpPhase::Completed && exact &&
                 static_cast<size_t>(std::distance(fs::directory_iterator(destination), fs::directory_iterator{})) == request.sources.size(),
                 "explicit continuation copies untouched sources without replaying confirmed outputs");
+            const auto previous = session.manager.Status().completed_ops;
+            session.manager.Undo();
+            const bool undone = Wait([&] {
+                session.ConfirmFixtureDelete();
+                return session.manager.Status().completed_ops > previous && !session.manager.HasPendingFileOperations();
+            });
+            const auto undo_status = session.manager.Status();
+            if (!undone || undo_status.phase != OpPhase::Completed) Diagnostics(undo_status);
+            Check(undone && undo_status.phase == OpPhase::Completed && !completions.empty() &&
+                static_cast<size_t>(std::distance(fs::directory_iterator(destination), fs::directory_iterator{})) == produced &&
+                std::all_of(completions.front().destinations.begin(), completions.front().destinations.end(),
+                    [&](const auto& path) { return fs::exists(path); }), "undo removes the resumed batch and retains earlier products");
         } else Check(false, "cancelled batch exposes an explicit continuation for untouched sources");
     }
 }

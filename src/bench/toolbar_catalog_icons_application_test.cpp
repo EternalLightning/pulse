@@ -128,6 +128,9 @@ int ExpectedRoundedArtwork(ui::command_icons::Icon icon) {
     case I::Folder: return IDR_FILES_TOOLBAR_FOLDER_SVG;
     case I::NewFolder: return IDR_FILES_TOOLBAR_NEW_FOLDER_SVG;
     case I::Terminal: return IDR_FILES_TOOLBAR_TERMINAL_SVG;
+    case I::DisplayAlias: return IDR_WORKSPACE_DISPLAY_ALIAS_SVG;
+    case I::LinkedBrowsing: return IDR_WORKSPACE_LINKED_BROWSING_SVG;
+    case I::Sync: return IDR_WORKSPACE_DIRECTORY_SYNC_SVG;
     case I::Refresh: return IDR_FILES_TOOLBAR_REFRESH_SVG;
     case I::Search: return IDR_FILES_TOOLBAR_SEARCH_SVG;
     case I::Settings: return IDR_FILES_TOOLBAR_SETTINGS_SVG;
@@ -313,12 +316,14 @@ bool SaveOverview(ui::Compositor& compositor, const std::filesystem::path& path,
 }
 }
 
-int main() {
+int main(int argc, char** argv) {
     using namespace pulse;
+    const bool pane_tools_only = argc == 2 && std::string_view(argv[1]) == "--pane-tools";
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     OleInitialize(nullptr); l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const auto root = std::filesystem::absolute(L"../bench_data/toolbar-catalog-artwork");
+    const auto root = std::filesystem::absolute(pane_tools_only ? L"../bench_data/toolbar-pane-tools-artwork"
+        : L"../bench_data/toolbar-catalog-artwork");
     std::filesystem::create_directories(root);
     std::ofstream metrics(root / L"metrics.csv");
     metrics << "command,dark,dpi,width,height,pixels,core,peak,hover_core,disabled_core,disabled_peak,negative_core,negative_peak,disabled_background,disabled_peak_pixel,paired_pixels,paired_incorrect,paired_max_error,negative_incorrect\n";
@@ -338,7 +343,7 @@ int main() {
         const auto bounds = D2D1::RectF(0, 0, width, height);
         const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
         Check(!dark || (theme.text.r == 1 && theme.text.g == 1 && theme.text.b == 1), "ordinary dark foreground is white");
-        {
+        if (!pane_tools_only) {
             ui::WindowViewModel vm;
             vm.dark = dark; vm.safe_mode = true; vm.can_group = true; vm.can_paste = true;
             vm.pane.loading = true; vm.pane.selected_count = 1;
@@ -375,6 +380,9 @@ int main() {
         std::vector<Tile> tiles, failure_tiles;
         for (const auto& descriptor : app::GetCommandCatalog()) {
             const int id = descriptor.command;
+            if (pane_tools_only && id != app::CmdDisplayAlias && id != app::CmdTerminalPanel &&
+                id != app::CmdOpenTerminal && id != app::CmdLinkedBrowsing &&
+                id != app::CmdDirectorySync) continue;
             const auto artwork = ExpectedArtwork(id);
             const std::string label = "command " + std::to_string(id) + (dark ? " dark " : " light ") +
                 std::to_string(static_cast<int>(scale * 100)) + "%";
@@ -523,7 +531,7 @@ int main() {
             Check(ok, label + " resolves, renders within 18 DIP, retains its artwork on hover and dims when disabled");
         }
         const auto split = normal_ink.find(306), large = normal_ink.find(81);
-        Check(split != normal_ink.end() && large != normal_ink.end() &&
+        if (!pane_tools_only) Check(split != normal_ink.end() && large != normal_ink.end() &&
             std::abs(split->second.Width() - large->second.Width()) <= std::ceil(2 * scale) &&
             std::abs(split->second.Height() - large->second.Height()) <= std::ceil(2 * scale),
             "actual split and large-icon ink have comparable physical dimensions at this theme and DPI");

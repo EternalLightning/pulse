@@ -4,8 +4,11 @@
 #include "file_identity_protocol.h"
 
 namespace pulse::ipc {
-enum class ShellOperationKind : uint32_t { Copy, Move, Rename, CreateFolder, CreateFile, DeletePermanent, Recycle };
+enum class ShellOperationKind : uint32_t { Copy, Move, Rename, CreateFolder, CreateFile, DeletePermanent, Recycle, CopyBatch };
 enum class ShellCollisionPolicy : uint32_t { Replace, KeepBoth, Fail };
+// Bound one native operation and fit two extended-length paths per item in one frame.
+inline constexpr size_t kShellCopyBatchItems = 64;
+inline constexpr size_t kShellCopyBatchPathLength = 32767;
 struct ShellOperationItem {
     std::wstring source;
     std::wstring destination;
@@ -49,7 +52,7 @@ inline bool ReadShellOperation(const uint8_t* data, size_t size, ShellOperationR
     ShellOperationRequest parsed;
     uint32_t version = 0, kind = 0, policy = 0, count = 0, elevation = 0;
     if (!reader.GetU32(version) || (version != 1 && version != 2) || !reader.GetU32(kind) ||
-        kind > static_cast<uint32_t>(ShellOperationKind::Recycle) || !reader.GetU32(policy) ||
+        kind > static_cast<uint32_t>(ShellOperationKind::CopyBatch) || !reader.GetU32(policy) ||
         policy > static_cast<uint32_t>(ShellCollisionPolicy::Fail) || !reader.GetU64(parsed.owner_hwnd) ||
         (version == 2 && (!reader.GetU32(elevation) || elevation > 1)) ||
         !reader.GetU32(count) || !count || count > 65536 || count > reader.remaining() / 16) return false;

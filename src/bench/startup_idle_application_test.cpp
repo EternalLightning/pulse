@@ -35,12 +35,12 @@ template<class Ready> bool Wait(Ready ready, bool pump = true) {
     }
     return ready();
 }
-void Configure(pulse::AppState& s, const std::filesystem::path& directory) {
+void Configure(pulse::AppState& s, const std::filesystem::path& path) {
     s.isolatedTest = true;
     s.safeMode = true;
     s.appPrefs.persist = s.places.persist = s.ctxMenuPrefs.persist = s.searchHistory.persist = false;
     s.core.shared_preferences_loaded = true;
-    s.open_path = directory.wstring();
+    s.open_path = path.wstring();
 }
 }
 
@@ -53,6 +53,7 @@ int main() {
         (L"startup-idle-" + std::to_wstring(GetCurrentProcessId())));
     std::filesystem::create_directories(root / L"first");
     std::filesystem::create_directories(root / L"second");
+    std::ofstream(root / L"second" / L"earlier.txt") << "unselected";
     std::ofstream(root / L"second" / L"sample.txt") << "early preview";
     storage::OverrideDefaultRootForTesting((root / L"profile").wstring());
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -66,6 +67,13 @@ int main() {
         return CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
             wc.lpszClassName, L"Pulse startup fixture", WS_OVERLAPPEDWINDOW,
             -20000, -20000, 960, 720, nullptr, nullptr, wc.hInstance, &s);
+    };
+    const auto dispatch_open = [](HWND hwnd) {
+        MSG msg{};
+        if (!PeekMessageW(&msg, hwnd, WM_EXTERNAL_OPEN_READY, WM_EXTERNAL_OPEN_READY, PM_REMOVE))
+            return false;
+        DispatchMessageW(&msg);
+        return true;
     };
 
     auto owner = std::make_unique<AppState>();
@@ -81,10 +89,22 @@ int main() {
     UpdateWindow(primary);
     Check(first.first_frame_drawn && first.deferred_startup_step == 0 && !first.operationWindow,
         "production WM_PAINT draws before any deferred startup step");
+    Check(ActiveTab(first) && ActiveTab(first)->current_path == app::MakeHomePath() &&
+        ActiveTab(first)->loading && !first.home_catalog.Loading(),
+        "first paint can show pending startup without dispatching the result or loading Home drives");
+    const auto second_path = fs::NormalizePath((root / L"second").wstring());
+    NavigateTo(first, second_path);
+    bool startup_dispatched = false;
+    Check(Wait([&] {
+        startup_dispatched = startup_dispatched || dispatch_open(primary);
+        return startup_dispatched;
+    }, false) &&
+        ActiveTab(first) && ActiveTab(first)->current_path == second_path,
+        "a startup result cannot overwrite navigation in the initial tab");
 
     auto child = std::make_unique<AppState>(first.core);
     auto& second = *child;
-    Configure(second, root / L"second");
+    Configure(second, root / L"second" / L"sample.txt");
     const HWND secondary = create(second);
     Check(secondary != nullptr, "second window shares the process while owning deferred services");
     if (!secondary) { DestroyWindow(primary); child.reset(); owner.reset(); OleUninitialize(); return 2; }
@@ -93,11 +113,16 @@ int main() {
         second.deferred_startup_step == 0, "closing the first window before deferred work transfers global ownership");
 
     Check(Wait([&] {
+        dispatch_open(secondary);
         ProcessPendingResults(second);
-        return ActiveTab(second) && !ActiveTab(second)->loading;
+        return ActiveTab(second) && !ActiveTab(second)->loading &&
+            ActiveTab(second)->current_path == second_path;
     }, false), "early listing completes without running deferred startup messages");
     auto* tab = ActiveTab(second);
-    if (tab && tab->CountBound() > 0) tab->SelectOnly(0);
+    Check(tab && tab->CountBound() == 2 && tab->selected_index >= 0 && tab->selected_index < tab->CountBound() &&
+        tab->EntryAt(static_cast<size_t>(tab->selected_index)).name == L"sample.txt" &&
+        second.window_tabs.items.size() == 1 && tab->back_stack.empty(),
+        "startup opens a file's parent directly and selects the requested file");
     ToggleQuickPreview(second);
     Check(second.quickPreview.hwnd() && second.quickPreview.visible() && second.deferred_startup_step == 0,
         "Space action initializes and opens Quick Look before its deferred step");

@@ -11,6 +11,12 @@
 #include <cwctype>
 
 namespace pulse::index {
+inline std::wstring JoinContentPath(std::wstring_view directory, std::wstring_view name) {
+    std::wstring path(directory);
+    if (!path.empty() && !path.ends_with(L'\\') && !path.ends_with(L'/')) path.push_back(L'\\');
+    path.append(name);
+    return path;
+}
 inline std::wstring ContentScopeKey(std::wstring path) {
     std::replace(path.begin(), path.end(), L'/', L'\\');
     while (path.size() > 3 && path.back() == L'\\') path.pop_back();

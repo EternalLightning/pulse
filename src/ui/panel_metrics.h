@@ -24,6 +24,7 @@ inline constexpr float kListMinWidthDip = 112.0f;
 inline constexpr float kSidebarMinWidthDip = 160.0f;
 inline constexpr float kSidebarRailWidthDip = 48.0f;
 inline constexpr float kDetailsMinWidthDip = 300.0f;
+inline constexpr float kTerminalWidthDip = 520.0f;
 // Sanity bound for stored preferences; the window decides the effective limit.
 inline constexpr float kPanelWidthMaxDip = 4000.0f;
 
@@ -38,6 +39,7 @@ inline constexpr bool SidebarRailLayout(float sidebar_width_px, float scale) {
     return sidebar_width_px <= kSidebarRailLayoutDip * scale;
 }
 inline constexpr float kDetailsVisibleWindowDip = 1000.0f;
+inline constexpr float kTerminalVisibleWindowDip = 760.0f;
 
 // Widest the sidebar may become: window minus the open details panel, minus the
 // window chrome (margins) and the file-list minimum.

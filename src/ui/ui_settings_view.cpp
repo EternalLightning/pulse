@@ -867,6 +867,9 @@ void MainRenderer::DrawSettings(const WindowViewModel& vm, const D2D1_RECT_F& re
 
 D2D1_RECT_F MainRenderer::SettingsDropdownBounds(const WindowViewModel& vm, int index, float window_w, float window_h) const {
     const auto l=MakeSettingsLayout(vm,D2D1::RectF(0,0,window_w,window_h),scale_,title_bar_height_,status_height_,&painter_, EffectiveSidebarWidth(window_w));
+    if (index == 3) return l.terminal_shell_choice;
+    if (index == 4) return l.terminal_font_choice;
+    if (index == 5) return l.terminal_size_choice;
     return index==0 ? l.effect_choice : index==2 ? l.external_open_choice : l.language_choice;
 }
 
@@ -876,6 +879,11 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     D2D1_RECT_F target{};
     switch(static_cast<I>(setting_id)) {
     case I::SettingsTextRender: target=l.text_render_card;break;
+    case I::TerminalPanel:
+    case I::SettingsTerminalShell: target=l.terminal_shell_card;break;
+    case I::TerminalFont: target=l.terminal_font_card;break;
+    case I::TerminalFontSize: target=l.terminal_size_card;break;
+    case I::TerminalFollowDirectory: target=l.terminal_follow_row;break;
     case I::SettingsExplorerTakeover: target=l.explorer_takeover_row;break;
     case I::SettingsFileDialogBridge: target=l.file_dialog_bridge_row;break;
     case I::SettingsFileDialogTakeover: target=l.file_dialog_takeover_row;break;
@@ -888,7 +896,6 @@ float MainRenderer::SettingsDestinationOffset(const WindowViewModel& vm, int set
     case I::SettingsLaunch: target=l.startup_row[0];break;
     case I::SettingsKeepRunning: target=l.startup_row[1];break;
     case I::SettingsDefaultManager: target=l.startup_row[2];break;
-    case I::StartToTray: target=l.startup_tray_row;break;
     case I::CloseLastTabWindow: target=l.last_tab_row;break;
     case I::SettingsRowHeight: target=l.density_card;break;
     case I::SettingsShowPerformance: target=l.performance_row;break;

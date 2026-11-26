@@ -6,6 +6,7 @@
 #pragma once
 
 #include <windows.h>
+#include <functional>
 #include <string>
 
 namespace pulse::app {
@@ -18,7 +19,8 @@ struct ArchiveExtractOptions {
 
 bool ShowArchiveExtractDialog(HWND owner, bool dark, COLORREF accent,
                               const std::wstring& archive_path, bool all,
-                              ArchiveExtractOptions& options);
+                              ArchiveExtractOptions& options,
+                              const std::function<bool(HWND, std::wstring&)>& pick_folder = {});
 bool ShowArchivePasswordDialog(HWND owner, bool dark, COLORREF accent,
                                std::wstring& password);
 

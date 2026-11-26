@@ -39,9 +39,13 @@ bool SameName(std::wstring left, std::wstring right) {
     std::replace(right.begin(), right.end(), L'/', L'\\');
     return path::EqualInsensitive(left, right);
 }
-HRESULT MakeItem(const std::wstring& name, IShellItem** out) {
+std::wstring ShellPath(const std::wstring& name) {
     auto parsed = path::StripExtendedPathPrefix(name);
     std::replace(parsed.begin(), parsed.end(), L'/', L'\\');
+    return parsed;
+}
+HRESULT MakeItem(const std::wstring& name, IShellItem** out) {
+    const auto parsed = ShellPath(name);
     return shell_id::CreateItem(parsed, IID_PPV_ARGS(out));
 }
 bool Skipped(HRESULT hr) {
@@ -69,8 +73,8 @@ DWORD OperationFlags(const ShellOperationRequest& request, bool reporting_bytes)
 class ProgressSink final : public IFileOperationProgressSink {
 public:
     ProgressSink(const ShellOperationRequest& request, const ShellOperationItem& item,
-        const FileOperationCallbacks& callbacks, size_t index)
-        : request_(request), item_(item), callbacks_(callbacks), index_(index) {
+        const FileOperationCallbacks& callbacks, size_t index, size_t* batch_done = nullptr)
+        : request_(request), item_(item), callbacks_(callbacks), index_(index), batch_done_(batch_done) {
         result.source = item.source;
     }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
@@ -102,6 +106,7 @@ public:
         if (FAILED(hr)) return hr;
         const auto source_name = Name(source);
         if (source) original_names_[source] = source_name;
+        if (batch_done_ && !SameName(source_name, item_.source)) return Error(E_UNEXPECTED);
         if (item_.expected_identity.Valid() && SameName(source_name, item_.source)) {
             FileIdentity current;
             if (!ReadPathFileIdentity(item_.source, current) || current != item_.expected_identity)
@@ -130,7 +135,7 @@ public:
         const auto original = original_names_.find(source);
         const auto source_name = original == original_names_.end() ? Name(source) : original->second;
         const auto created_name = Name(created);
-        const bool primary = item_.source.empty() || request_.kind == ShellOperationKind::Rename ||
+        const bool primary = batch_done_ || item_.source.empty() || request_.kind == ShellOperationKind::Rename ||
             request_.kind == ShellOperationKind::Recycle ||
             SameName(source_name, item_.source) ||
             (!created_name.empty() && !item_.destination.empty() &&
@@ -183,8 +188,27 @@ public:
     HRESULT STDMETHODCALLTYPE PostRenameItem(DWORD, IShellItem* source, LPCWSTR, HRESULT hr, IShellItem* created) override { return Post(source, hr, created); }
     HRESULT STDMETHODCALLTYPE PreMoveItem(DWORD flags, IShellItem* source, IShellItem* folder, LPCWSTR name) override { return Pre(flags, source, folder, name); }
     HRESULT STDMETHODCALLTYPE PostMoveItem(DWORD, IShellItem* source, IShellItem*, LPCWSTR, HRESULT hr, IShellItem* created) override { return Post(source, hr, created); }
-    HRESULT STDMETHODCALLTYPE PreCopyItem(DWORD flags, IShellItem* source, IShellItem* folder, LPCWSTR name) override { return Pre(flags, source, folder, name); }
-    HRESULT STDMETHODCALLTYPE PostCopyItem(DWORD, IShellItem* source, IShellItem*, LPCWSTR, HRESULT hr, IShellItem* created) override { return Post(source, hr, created); }
+    HRESULT STDMETHODCALLTYPE PreCopyItem(DWORD flags, IShellItem* source, IShellItem* folder, LPCWSTR name) override {
+        HRESULT hr = Pre(flags, source, folder, name);
+        if (!batch_done_ || FAILED(hr)) return hr;
+        const DWORD attributes = GetFileAttributesW(item_.source.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
+            return Error(HRESULT_FROM_WIN32(ERROR_FILE_INVALID));
+        if (callbacks_.progress) callbacks_.progress(0.0f, item_.source, *batch_done_, request_.items.size());
+        hr = Check();
+        started = started || SUCCEEDED(hr);
+        return hr;
+    }
+    HRESULT STDMETHODCALLTYPE PostCopyItem(DWORD, IShellItem* source, IShellItem*, LPCWSTR, HRESULT hr, IShellItem* created) override {
+        const HRESULT checked = Post(source, hr, created);
+        if (!batch_done_) return checked;
+        if (SUCCEEDED(result.hr) && !result.skipped && !completion_reported_) {
+            completion_reported_ = true;
+            ++*batch_done_;
+            if (callbacks_.progress) callbacks_.progress(0.0f, item_.source, *batch_done_, request_.items.size());
+        }
+        return hr == COPYENGINE_S_USER_IGNORED ? E_ABORT : checked;
+    }
     HRESULT STDMETHODCALLTYPE PreDeleteItem(DWORD flags, IShellItem* source) override {
         // Providers report transfer flags such as 0x202 for valid recycle requests.
         // The recycle-only Shell path selects the mode; these flags cannot prove a permanent fallback.
@@ -194,7 +218,7 @@ public:
     HRESULT STDMETHODCALLTYPE PreNewItem(DWORD flags, IShellItem* folder, LPCWSTR name) override { return Pre(flags, nullptr, folder, name); }
     HRESULT STDMETHODCALLTYPE PostNewItem(DWORD, IShellItem*, LPCWSTR, LPCWSTR, DWORD, HRESULT hr, IShellItem* created) override { return Post(nullptr, hr, created); }
     HRESULT STDMETHODCALLTYPE UpdateProgress(UINT total, UINT done) override {
-        if (callbacks_.progress) callbacks_.progress(WorkProgressPercent(done, total),
+        if (!batch_done_ && callbacks_.progress) callbacks_.progress(WorkProgressPercent(done, total),
             item_.source.empty() ? item_.destination : item_.source, index_, request_.items.size());
         return Check();
     }
@@ -205,12 +229,15 @@ public:
     std::vector<ShellOperationItemResult> nested;
     HRESULT failure = S_OK;
     std::wstring failed_path;
+    bool started = false;
 private:
     ULONG references_ = 1;
     const ShellOperationRequest& request_;
     const ShellOperationItem& item_;
     const FileOperationCallbacks& callbacks_;
     size_t index_;
+    size_t* batch_done_;
+    bool completion_reported_ = false;
     std::map<IShellItem*, std::wstring> original_names_;
     std::map<std::wstring, size_t> nested_indices_;
 };
@@ -255,6 +282,87 @@ private:
     ProgressSink& sink_;
     const FileOperationCallbacks& callbacks_;
 };
+
+HRESULT ConfigureOperation(IFileOperation& operation, const ShellOperationRequest& request, ProgressDialog* dialog) {
+    HRESULT hr = operation.SetOperationFlags(OperationFlags(request, dialog != nullptr));
+    if (SUCCEEDED(hr) && dialog) hr = operation.SetProgressDialog(dialog);
+    if (SUCCEEDED(hr)) hr = operation.SetOwnerWindow(reinterpret_cast<HWND>(static_cast<uintptr_t>(request.owner_hwnd)));
+    return hr;
+}
+
+HRESULT PerformOperations(IFileOperation& operation, BOOL& aborted) {
+    const HRESULT hr = operation.PerformOperations();
+    const HRESULT queried = operation.GetAnyOperationsAborted(&aborted);
+    return SUCCEEDED(hr) && FAILED(queried) ? queried : hr;
+}
+
+bool CanBatchCopy(const ShellOperationRequest& request) {
+    if (request.collision != ShellCollisionPolicy::KeepBoth ||
+        request.elevation_authorized || request.items.size() < 2 || request.items.size() > kShellCopyBatchItems) return false;
+    const auto parent = Parent(ShellPath(request.items.front().destination));
+    return std::all_of(request.items.begin(), request.items.end(), [&](const auto& item) {
+        return item.expected_identity.Valid() && !item.expected_destination_identity.Valid() &&
+            Parent(ShellPath(item.destination)) == parent;
+    });
+}
+
+ShellOperationResult CopyBatch(const ShellOperationRequest& request, const FileOperationCallbacks& callbacks) {
+    ShellOperationResult result;
+    const auto fail = [&](HRESULT hr, const std::wstring& path) {
+        if (SUCCEEDED(result.hr)) { result.hr = hr; result.failed_path = path; }
+    };
+    size_t completed = 0;
+    std::vector<std::unique_ptr<ProgressSink>> sinks;
+    for (size_t i = 0; i < request.items.size(); ++i)
+        sinks.push_back(std::make_unique<ProgressSink>(request, request.items[i], callbacks, i, &completed));
+    ProgressDialog dialog(*sinks.front(), callbacks);
+    IFileOperation* raw = nullptr;
+    HRESULT prepare_hr = sinks.front()->Check();
+    if (SUCCEEDED(prepare_hr)) prepare_hr = CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&raw));
+    ComPtr<IFileOperation> operation(raw);
+    if (SUCCEEDED(prepare_hr)) prepare_hr = ConfigureOperation(*operation, request, callbacks.bytes_progress ? &dialog : nullptr);
+    IShellItem* folder = nullptr;
+    if (SUCCEEDED(prepare_hr)) prepare_hr = MakeItem(Parent(ShellPath(request.items.front().destination)), &folder);
+    ComPtr<IShellItem> destination(folder);
+    size_t queued = 0;
+    for (; SUCCEEDED(prepare_hr) && queued < request.items.size(); ++queued) {
+        const auto& item = request.items[queued];
+        IShellItem* parsed = nullptr;
+        prepare_hr = MakeItem(item.source, &parsed);
+        ComPtr<IShellItem> source(parsed);
+        if (SUCCEEDED(prepare_hr)) prepare_hr = operation->CopyItem(source.get(), destination.get(),
+            Leaf(item.destination).c_str(), sinks[queued].get());
+        if (FAILED(prepare_hr)) break;
+    }
+    BOOL aborted = FALSE;
+    const HRESULT run_hr = queued ? PerformOperations(*operation, aborted) : S_OK;
+    size_t first_pending = request.items.size();
+    for (size_t i = 0; i < request.items.size(); ++i) {
+        auto& sink = *sinks[i];
+        auto& item = sink.result;
+        sink.FinishOperations(S_OK);
+        // A cancellation after PostCopyItem still leaves a confirmed product.
+        if (!sink.started && (item.hr == E_PENDING || Cancelled(item.hr)) && Cancelled(sink.failure)) {
+            item.hr = E_PENDING;
+            item.skipped = true;
+            fail(sink.failure, item.source);
+        } else if (item.hr == E_PENDING || FAILED(item.hr) || item.skipped) {
+            if (FAILED(sink.failure)) item.hr = sink.failure;
+            else if (i == queued && FAILED(prepare_hr) && !Cancelled(prepare_hr)) item.hr = prepare_hr;
+            else if (item.hr != E_PENDING || sink.started) item.hr = FAILED(run_hr) ? run_hr : E_ABORT;
+            if (item.hr == E_PENDING) first_pending = (std::min)(first_pending, i);
+            else fail(item.hr, sink.failed_path.empty() ? item.source : sink.failed_path);
+        }
+        result.items.push_back(std::move(item));
+    }
+    if (SUCCEEDED(result.hr) && (FAILED(run_hr) || aborted || FAILED(prepare_hr) || first_pending < result.items.size())) {
+        const HRESULT hr = FAILED(run_hr) ? run_hr : FAILED(prepare_hr) ? prepare_hr : aborted ? E_ABORT : E_FAIL;
+        fail(hr, request.items[(std::min)(first_pending, request.items.size() - 1)].source);
+    }
+    result.cancelled = Cancelled(result.hr) && ((callbacks.cancelled && callbacks.cancelled()) ||
+        aborted || result.hr == COPYENGINE_E_USER_CANCELLED);
+    return result;
+}
 
 ShellOperationResult RenameCase(const ShellOperationRequest& request, const ShellOperationItem& item,
     const FileOperationCallbacks& callbacks) {
@@ -304,6 +412,11 @@ ipc::ShellOperationResult ExecuteFileOperation(const ipc::ShellOperationRequest&
     const FileOperationCallbacks& callbacks) {
     ShellOperationResult result;
     if (request.items.empty()) { result.hr = E_INVALIDARG; return result; }
+    if (request.kind == ShellOperationKind::CopyBatch) {
+        if (CanBatchCopy(request)) return CopyBatch(request, callbacks);
+        result.hr = E_INVALIDARG;
+        return result;
+    }
     for (size_t index = 0; index < request.items.size(); ++index) {
         const auto& item = request.items[index];
         if (request.kind == ShellOperationKind::Rename && SameName(item.source, item.destination) &&
@@ -334,9 +447,7 @@ ipc::ShellOperationResult ExecuteFileOperation(const ipc::ShellOperationRequest&
         if (SUCCEEDED(hr) && operation) {
             const bool reporting_bytes = callbacks.bytes_progress &&
                 (request.kind == ShellOperationKind::Copy || request.kind == ShellOperationKind::Move);
-            hr = operation->SetOperationFlags(OperationFlags(request, reporting_bytes));
-            if (SUCCEEDED(hr) && reporting_bytes) hr = operation->SetProgressDialog(&dialog);
-            if (SUCCEEDED(hr)) hr = operation->SetOwnerWindow(reinterpret_cast<HWND>(static_cast<uintptr_t>(request.owner_hwnd)));
+            hr = ConfigureOperation(*operation, request, reporting_bytes ? &dialog : nullptr);
             if (SUCCEEDED(hr)) { hr = operation->Advise(&sink, &cookie); advised = SUCCEEDED(hr); }
         }
         const bool creating = request.kind == ShellOperationKind::CreateFolder || request.kind == ShellOperationKind::CreateFile;
@@ -345,8 +456,7 @@ ipc::ShellOperationResult ExecuteFileOperation(const ipc::ShellOperationRequest&
         if (SUCCEEDED(hr) && !creating) {
             IShellItem* parsed = nullptr; hr = MakeItem(item.source, &parsed); source.reset(parsed);
         }
-        auto target = path::StripExtendedPathPrefix(item.destination);
-        std::replace(target.begin(), target.end(), L'/', L'\\');
+        const auto target = ShellPath(item.destination);
         if (SUCCEEDED(hr) && !deleting && request.kind != ShellOperationKind::Rename) {
             IShellItem* parsed = nullptr; hr = MakeItem(Parent(target), &parsed); destination.reset(parsed);
         }
@@ -368,15 +478,12 @@ ipc::ShellOperationResult ExecuteFileOperation(const ipc::ShellOperationRequest&
                 hr = operation->NewItem(destination.get(), request.kind == ShellOperationKind::CreateFolder ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL,
                     Leaf(target).c_str(), nullptr, nullptr); break;
             case ShellOperationKind::DeletePermanent: hr = operation->DeleteItem(source.get(), nullptr); break;
+            case ShellOperationKind::CopyBatch:
             case ShellOperationKind::Recycle: hr = E_UNEXPECTED; break;
             }
         }
         BOOL aborted = FALSE;
-        if (SUCCEEDED(hr) && operation) {
-            hr = operation->PerformOperations();
-            const HRESULT queried = operation->GetAnyOperationsAborted(&aborted);
-            if (SUCCEEDED(hr) && FAILED(queried)) hr = queried;
-        }
+        if (SUCCEEDED(hr) && operation) hr = PerformOperations(*operation, aborted);
         if (advised) operation->Unadvise(cookie);
         sink.FinishOperations(hr);
         if (FAILED(sink.failure)) hr = sink.failure;

@@ -482,7 +482,7 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
             l.system_status=row((SettingsCaptionHeight(vm.settings_system_status, right-left-70*scale,
                 scale, painter)+2*kSettingsRowPaddingDip*scale)/scale);
         section(I::SettingsSecStartupTray);
-        l.startup_row[0]=toggle_row(I::SettingsLaunchDesc); l.startup_tray_row=toggle_row(I::StartToTrayDesc);
+        l.startup_row[0]=toggle_row(I::SettingsLaunchDesc);
         l.startup_row[1]=toggle_row(I::SettingsKeepRunningDesc);
         section(I::ConfigurationLocation);
         l.configuration_path=row(152);
@@ -511,6 +511,14 @@ float LayoutSettingsGeneral(SettingsLayout& l, const WindowViewModel& vm, float 
         y = l.transfer_card.bottom;
         l.category_rows.push_back(l.transfer_card);
     } else if (vm.settings_page==9) {
+        section(I::TerminalPanel);
+        l.terminal_shell_card=row(narrow ? 98.0f : 64.0f);
+        l.terminal_shell_choice=choice(l.terminal_shell_card,224);
+        l.terminal_font_card=row(narrow ? 86.0f : 56.0f);
+        l.terminal_font_choice=choice(l.terminal_font_card,224);
+        l.terminal_size_card=row(narrow ? 86.0f : 56.0f);
+        l.terminal_size_choice=choice(l.terminal_size_card,112);
+        l.terminal_follow_row=toggle_row(I::TerminalFollowDirectoryDesc);
         section(I::SettingsSecStaging);
         l.staging_tray_row=toggle_row(I::SettingsStagingTrayDesc);
         l.text_compare_row=toggle_row(I::SettingsTextCompareDesc);

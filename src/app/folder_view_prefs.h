@@ -21,6 +21,10 @@ struct FolderSortPrefs {
     bool operator==(const FolderSortPrefs&) const = default;
 };
 
+constexpr FolderSortPrefs DefaultFolderSort(bool downloads) {
+    return downloads ? FolderSortPrefs{model::SortColumn::Mtime, model::SortDirection::Desc} : FolderSortPrefs{};
+}
+
 struct FolderGroupPrefs {
     ui::GroupMode mode = ui::GroupMode::Auto;
     model::SortDirection direction = model::SortDirection::Desc;

@@ -651,8 +651,10 @@ void Painter::DrawGlyphWithFormat(std::wstring_view glyph, const D2D1_RECT_F& bo
     if (command != command_icons::Icon::None) {
         EnsureStrokeStyle();
         const float size = format ? (std::min)(Px(20.0f), format->GetFontSize() * 1.2f) : Px(18.0f);
-        if (command_icons::Draw(dc_, ScratchBrush(color), round_stroke_.get(), command,
-                                command_icons::CenteredBounds(bounds, size))) return;
+        const auto icon_bounds = command_icons::CenteredBounds(bounds, size);
+        if (const int resource = command_icons::WorkspaceSvg(command))
+            if (DrawSvgResource(resource, icon_bounds, &color)) return;
+        if (command_icons::Draw(dc_, ScratchBrush(color), round_stroke_.get(), command, icon_bounds)) return;
     }
     DrawText(glyph, bounds, format, color, HorizontalAlignment::Center);
 }
@@ -757,8 +759,8 @@ void Painter::DrawArc(D2D1_POINT_2F center, float radius, float start_degrees,
                                    cap, cap), brush);
 }
 
-void Painter::DrawFocusRing(const D2D1_RECT_F& bounds, float radius) {
-    if (!theme_) {
+void Painter::DrawFocusRing(const D2D1_RECT_F& bounds, float radius, float opacity) {
+    if (!theme_ || opacity <= 0.0f) {
         return;
     }
     const float width = std::max(1.0f, Px(theme_->focus_ring));
@@ -767,13 +769,15 @@ void Painter::DrawFocusRing(const D2D1_RECT_F& bounds, float radius) {
         StrokeRoundedRect(ring, radius + Px(1.0f), theme_->bg, width + Px(2.0f));
         StrokeRoundedRect(ring, radius + Px(1.0f), theme_->text, width);
     } else {
-        StrokeRoundedRect(ring, radius + Px(1.0f), theme_->accent_ink, width);
+        StrokeRoundedRect(ring, radius + Px(1.0f), MultiplyAlpha(theme_->accent_ink, opacity), width);
     }
 }
 
 float Painter::HoverProgress(const D2D1_RECT_F& bounds, const ControlState& state) const {
     const bool hot = state.enabled && state.hovered;
-    const float progress = hover_sampler_ ? hover_sampler_(bounds, hot) : (hot ? 1.0f : 0.0f);
+    const float progress = high_contrast_ ? (hot ? 1.0f : 0.0f)
+        : state.hover_progress >= 0.0f ? Clamp01(state.hover_progress)
+        : hover_sampler_ ? hover_sampler_(bounds, hot) : (hot ? 1.0f : 0.0f);
     return !state.enabled ? 0.0f : state.pressed ? 1.0f : progress;
 }
 
@@ -972,9 +976,8 @@ void Painter::DrawButton(const ButtonSpec& spec) {
         if (body) body->SetWordWrapping(old_wrap);
     }
 
-    if (state.keyboard_focus) {
-        DrawFocusRing(spec.bounds, radius);
-    }
+    DrawFocusRing(spec.bounds, radius, state.focus_progress >= 0.0f
+        ? state.focus_progress : state.keyboard_focus ? 1.0f : 0.0f);
 }
 
 void Painter::DrawTextFieldFrame(const D2D1_RECT_F& bounds, const ControlState& state,
@@ -987,17 +990,13 @@ void Painter::DrawTextFieldFrame(const D2D1_RECT_F& bounds, const ControlState& 
     const float hover = state.focused || hosted_edit ? 0.0f : HoverProgress(bounds, state);
     const auto fill = TextFieldFillColor(*theme_, state, dark_, high_contrast_, hosted_edit, hover);
     D2D1_COLOR_F border;
-    D2D1_COLOR_F bottom;
     if (high_contrast_) {
         border = theme_->stroke_card;
-        bottom = state.focused ? theme_->accent : theme_->stroke_input_bottom;
     } else if (dark_) {
         border = !state.enabled ? RgbaF(0xFFFFFF, 0.0698f)
                                 : RgbaF(0xFFFFFF, 0.08f);
-        bottom = state.focused ? theme_->accent : theme_->stroke_input_bottom;
     } else {
         border = Rgba(0x000000, 13);
-        bottom = state.focused ? theme_->accent : theme_->stroke_input_bottom;
     }
 
     if (!high_contrast_ && state.enabled && !state.focused && !hosted_edit)
@@ -1005,7 +1004,18 @@ void Painter::DrawTextFieldFrame(const D2D1_RECT_F& bounds, const ControlState& 
     FillRoundedRect(bounds, radius, fill);
     StrokeRoundedRect(bounds, radius, border);
 
-    if (state.focused && state.enabled) {
+    const float focus = !state.enabled ? 0.0f : !high_contrast_ && state.focus_progress >= 0.0f
+        ? Clamp01(state.focus_progress) : state.focused ? 1.0f : 0.0f;
+    if (state.enabled && focus < 1.0f) {
+        const auto clip = D2D1::RectF(bounds.left + 1.0f,
+                                      bounds.bottom - std::max(1.5f, Px(1.5f)),
+                                      bounds.right - 1.0f,
+                                      bounds.bottom);
+        dc_->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        StrokeRoundedRect(bounds, radius, theme_->stroke_input_bottom);
+        dc_->PopAxisAlignedClip();
+    }
+    if (focus > 0.0f) {
         const float arc = std::max(2.0f, Px(2.0f));
         const float bowl = Px(10.0f);
         const auto clip = D2D1::RectF(bounds.left, bounds.bottom - arc,
@@ -1013,15 +1023,7 @@ void Painter::DrawTextFieldFrame(const D2D1_RECT_F& bounds, const ControlState& 
         dc_->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         FillRoundedRect(D2D1::RectF(bounds.left, bounds.bottom - bowl,
                                     bounds.right, bounds.bottom),
-                        radius, bottom);
-        dc_->PopAxisAlignedClip();
-    } else if (state.enabled) {
-        const auto clip = D2D1::RectF(bounds.left + 1.0f,
-                                      bounds.bottom - std::max(1.5f, Px(1.5f)),
-                                      bounds.right - 1.0f,
-                                      bounds.bottom);
-        dc_->PushAxisAlignedClip(clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        StrokeRoundedRect(bounds, radius, bottom);
+                        radius, MultiplyAlpha(theme_->accent, focus));
         dc_->PopAxisAlignedClip();
     }
 }
@@ -1294,17 +1296,20 @@ void Painter::DrawTitleBarButton(const D2D1_RECT_F& bounds, TitleBarButtonRole r
     }
     D2D1_COLOR_F fill{};
     D2D1_COLOR_F foreground = state.enabled ? theme_->text : theme_->text_disabled;
+    const float hover = HoverProgress(bounds, state);
     bool draw_fill = false;
-    if (state.enabled && (state.hovered || state.pressed)) {
+    if (state.enabled && hover > 0.0f) {
         draw_fill = true;
         if (role == TitleBarButtonRole::Close) {
             fill = high_contrast_ ? theme_->fill_selected : theme_->danger;
-            foreground = high_contrast_ ? theme_->text_selected : HexColor(0xFFFFFF);
+            foreground = high_contrast_ ? theme_->text_selected
+                : InterpolateColor(foreground, HexColor(0xFFFFFF), hover);
         } else {
             fill = high_contrast_ ? (state.pressed ? theme_->fill_pressed : theme_->fill_hover)
                                   : dark_ ? Rgba(0xFFFFFF, state.pressed ? 7 : 10)
                                           : Rgba(0x000000, state.pressed ? 7 : 10);
         }
+        if (!high_contrast_) fill.a *= hover;
     } else if (state.enabled && state.checked) {
         draw_fill = true;
         fill = high_contrast_ ? theme_->fill_selected
@@ -1333,8 +1338,9 @@ void Painter::DrawTitleBarButton(const D2D1_RECT_F& bounds, TitleBarButtonRole r
         DrawGlyphWithFormat(glyph, Inset(bounds, Px(12.0f)), foreground,
                             SmallIconFormat());
     }
-    if (state.enabled && state.keyboard_focus) {
-        DrawFocusRing(Inset(bounds, Px(3.0f)), Px(theme_->radius_control));
+    if (state.enabled) {
+        DrawFocusRing(Inset(bounds, Px(3.0f)), Px(theme_->radius_control),
+            state.focus_progress >= 0.0f ? state.focus_progress : state.keyboard_focus ? 1.0f : 0.0f);
     }
 }
 
@@ -1424,17 +1430,23 @@ void Painter::DrawMenuItem(const MenuItemSpec& spec) {
     auto item = Inset(spec.bounds, Px(6.0f));
     item.top = spec.bounds.top + Px(2.0f);
     item.bottom = spec.bounds.bottom - Px(2.0f);
+    const float hover = HoverProgress(spec.bounds, spec.state);
+    const float selection = high_contrast_ || spec.selection_progress < 0.0f
+        ? (spec.state.selected ? 1.0f : 0.0f) : Clamp01(spec.selection_progress);
     if (spec.state.enabled &&
-        (spec.state.hovered || spec.state.selected || spec.state.pressed)) {
+        (hover > 0.0f || selection > 0.0f)) {
         D2D1_COLOR_F interaction;
         if (high_contrast_) {
             interaction = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
         } else if (dark_) {
+            const float emphasis = spec.selection_progress < 0.0f ? 0.0f : 0.04f * std::min(hover, selection);
             interaction = spec.state.pressed ? RgbaF(0xFFFFFF, 0.06f)
-                                             : RgbaF(0xFFFFFF, 0.08f);
+                : RgbaF(0xFFFFFF, 0.08f * std::max(hover, selection) + emphasis);
         } else {
-            interaction = spec.state.pressed ? RgbaF(0x000000, 0.06f)
-                         : spec.state.selected ? Rgba(0x000000, 7) : Rgba(0x000000, 9);
+            const float alpha = spec.selection_progress < 0.0f && spec.state.selected
+                ? 7.0f : std::max(7.0f * selection, 9.0f * hover) +
+                    (spec.selection_progress < 0.0f ? 0.0f : 6.0f * std::min(hover, selection));
+            interaction = RgbaF(0x000000, spec.state.pressed ? 0.06f : alpha / 255.0f);
         }
         FillRoundedRect(item, Px(5.0f), interaction);
     }

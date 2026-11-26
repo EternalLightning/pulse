@@ -20,20 +20,26 @@ bool BetterHit(const Hit& a, const Hit& b, const Query& query) {
 } // namespace
 
 SearchResult MergeSearchResults(const Query& query, const SearchResult& local,
-                                const SearchResult& network) {
+                                const SearchResult& network,
+                                std::span<const SupplementalFilenameHit> supplemental) {
     SearchResult result;
-    result.total = local.total + network.total;
+    result.total = local.total + network.total + supplemental.size();
     result.revision = (std::max)(local.revision, network.revision);
     result.error = local.error ? local.error : network.error;
     result.incomplete = local.incomplete || network.incomplete || result.error != ERROR_SUCCESS;
     result.scanning = local.scanning || network.scanning;
-    const size_t count = local.hits.size() + network.hits.size();
+    const size_t provider_count = local.hits.size() + network.hits.size();
+    const size_t count = provider_count + supplemental.size();
     const size_t begin = (std::min)(query.offset, count);
     const size_t end = begin + (std::min)(query.limit, count - begin);
     if (begin == end) return result;
     result.hits.reserve(end - begin);
     if (!query.rank && query.sort == ResultSort::Index) {
         for (size_t i = begin; i < end; ++i) {
+            if (i >= provider_count) {
+                result.hits.push_back(supplemental[i - provider_count].hit);
+                continue;
+            }
             result.hits.push_back(i < local.hits.size() ? local.hits[i]
                 : network.hits[i - local.hits.size()]);
         }
@@ -55,6 +61,7 @@ SearchResult MergeSearchResults(const Query& query, const SearchResult& local,
         };
         append(local);
         append(network);
+        for (const auto& match : supplemental) ranked.push_back({&match.hit, match.rank});
         // Providers cut ranked pages by score, preserving their own order on ties.
         std::stable_sort(ranked.begin(), ranked.end(), [](const RankedHit& a, const RankedHit& b) {
             if (a.score != b.score) return a.score > b.score;
@@ -67,6 +74,7 @@ SearchResult MergeSearchResults(const Query& query, const SearchResult& local,
     candidates.reserve(count);
     for (const auto& hit : local.hits) candidates.push_back(&hit);
     for (const auto& hit : network.hits) candidates.push_back(&hit);
+    for (const auto& match : supplemental) candidates.push_back(&match.hit);
     std::stable_sort(candidates.begin(), candidates.end(), [&](const Hit* a, const Hit* b) {
         return BetterHit(*a, *b, query);
     });

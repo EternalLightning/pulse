@@ -62,10 +62,11 @@ std::vector<std::wstring> VisibleFolderPaths(const AppState& s);
 void SyncVisibleWatches(AppState& s);
 void BindCurrentLayout(AppState& s);
 // Consumes already-resolved metadata; selection performs no filesystem queries.
-void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target);
+void SelectLaunchedFile(AppState& s, const ResolvedOpenTarget& target, app::Tab* tab = nullptr);
 void RestoreAppWindow(AppState& s);
 void OpenFolderInNewTab(AppState& s, const std::wstring& raw);
 void OpenFolderInNewTab(AppState& s, const ResolvedOpenTarget& target);
+bool RouteStartupOpen(AppState& s, const app::Tab& tab);
 bool RouteExternalFolderOpen(AppState& s, const std::wstring& raw,
     uint64_t takeover_token = 0, std::vector<std::wstring> selected_paths = {},
     unsigned selection_flags = 0);

@@ -2,17 +2,22 @@
 // Pulse project; see LICENSE and NOTICE for licensing and attribution.
 
 #include "native_dialog_takeover.h"
+#include "app_file_picker.h"
+#include "app_prefs.h"
 #include "file_picker_places.h"
 #include "native_file_dialog_adapter.h"
 #include "../common/file_dialog_bridge_bypass.h"
 #include "../common/localization.h"
 #include "../common/display_path.h"
+#include "../common/user_storage.h"
+#include "../common/utf8_file.h"
 #include "../fs/fs_enum.h"
 
 #include <ole2.h>
 #include <d2d1helper.h>
 #include <atomic>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -36,9 +41,10 @@ struct AutomationApartment {
 
 struct Appearance {
     bool dark = false;
-    bool show_hidden = false;
+    model::FileVisibility visibility;
     D2D1_COLOR_F accent{};
     bool verify_copies = false;
+    bool zebra_rows = true;
 };
 
 struct PickerRequest {
@@ -53,7 +59,6 @@ struct Session {
 
     const NativeFileDialog source;
     const uint64_t generation;
-    std::atomic<HWND> picker{nullptr};
     std::atomic<bool> finishing{false};
     std::atomic<bool> returned{false};
     std::mutex mutex;
@@ -64,7 +69,8 @@ struct Session {
     ULONGLONG confirmation_deadline = 0;
 };
 
-bool SourceOpen(const NativeFileDialog& source) {
+bool SourceOpen(const Session& session) {
+    const auto& source = session.source;
     DWORD pid = 0;
     return GetWindowThreadProcessId(source.window, &pid) == source.window_thread_id &&
         pid == source.process_id && IsWindowVisible(source.window);
@@ -125,7 +131,7 @@ bool QueueAction(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
                  const std::shared_ptr<Session>& session, PickerRequest request) {
     std::lock_guard lock(session->mutex);
     if (!IsCurrent(*shared, *session) || (!request.cancel && !session->can_request) ||
-        !SourceOpen(session->source))
+        !SourceOpen(*session))
         return false;
     session->can_request = false;
     request.revision = ++session->request_revision;
@@ -160,11 +166,18 @@ void RunPicker(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
         spec.allow_multiselect = source.allow_multiselect;
         if (source.allow_multiselect)
             spec.multiselect_directory = path::FriendlyPathText(fs::NormalizePath(source.initial_path));
-        spec.show_hidden = appearance.show_hidden;
+        spec.visibility = appearance.visibility;
         spec.verify_copies = appearance.verify_copies;
+        spec.zebra_rows = appearance.zebra_rows;
+        AppPrefs prefs;
+        const auto config = storage::ConfigurationRoot();
+        std::wstring json;
+        if (!config.empty() && ReadUtf8File(config + L"\\app.json", json)) prefs.FromJson(json);
+        SetFilePickerFolderViews(spec, prefs);
         spec.software_device = true;
         spec.cover_source = true;
-        spec.load_places = LoadFilePickerPlaces;
+        spec.external_handoff = true;
+        spec.load_places = LoadTakeoverPickerPlaces;
         spec.begin_submit = [&](const ui::FilePickerResult& result) {
             return QueueAction(shared, session, {false, result});
         };
@@ -174,12 +187,31 @@ void RunPicker(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
             return std::exchange(session->reply, std::nullopt);
         };
         spec.should_close = [&] {
-            return !IsCurrent(*shared, *session) || !SourceOpen(source) ||
-                (!session->picker && ForegroundForObservation(*shared) != source.window);
+            return !IsCurrent(*shared, *session) || !SourceOpen(*session);
         };
-        spec.on_ready = [&](HWND picker) {
-            session->picker = picker;
-            SetEvent(shared->wake);
+        const HWND owner = GetWindow(source.window, GW_OWNER);
+        DWORD owner_pid = 0;
+        const DWORD owner_thread = GetWindowThreadProcessId(owner, &owner_pid);
+        const auto return_target = [&]() -> HWND {
+            if (SourceOpen(*session)) {
+                if (const HWND popup = ValidationPopup(source)) return popup;
+                return source.window;
+            }
+            DWORD pid = 0;
+            if (!owner_thread || GetWindowThreadProcessId(owner, &pid) != owner_thread || pid != owner_pid) return nullptr;
+            for (HWND target = owner; target; target = GetWindow(target, GW_OWNER)) {
+                if (!GetWindowThreadProcessId(target, &pid) || pid != owner_pid) return nullptr;
+                if (IsWindowVisible(target) && !IsIconic(target)) return target;
+            }
+            return nullptr;
+        };
+        ULONGLONG handoff_deadline = 0;
+        spec.defer_hide = [&](HWND dialog, bool) {
+            return ui::DeferFilePickerHide(dialog, return_target(), handoff_deadline);
+        };
+        spec.on_foreground_close = [&] {
+            if (const HWND target = return_target(); target && IsWindowEnabled(target))
+                SetForegroundWindow(target);
         };
         spec.current_pulse_directory = [&] {
             std::lock_guard lock(shared->appearance_mutex);
@@ -203,7 +235,7 @@ void Reply(Session& session, bool accepted, bool retry, I error = I::PickerSubmi
 
 void ServiceSession(const std::shared_ptr<NativeDialogTakeover::Shared>& shared, Session& session) {
     if (!IsCurrent(*shared, session)) return;
-    if (!SourceOpen(session.source)) {
+    if (!SourceOpen(session)) {
         if (session.confirmation_deadline) Reply(session, true, false);
         session.finishing = true;
         return;
@@ -215,9 +247,8 @@ void ServiceSession(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
         if (!session.confirmation_deadline) request = std::exchange(session.request, std::nullopt);
     }
     if (session.confirmation_deadline) {
-        if (HWND popup = ValidationPopup(session.source)) {
+        if (ValidationPopup(session.source)) {
             session.finishing = true;
-            SetForegroundWindow(popup);
         } else if (GetTickCount64() >= session.confirmation_deadline) {
             session.confirmation_deadline = 0;
             Reply(session, false, false, I::PickerConfirmationPending);
@@ -227,7 +258,7 @@ void ServiceSession(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
     if (!request) return;
     const auto cancelled = [&] {
         return session.request_revision != request->revision ||
-            !IsCurrent(*shared, session) || session.returned || !SourceOpen(session.source);
+            !IsCurrent(*shared, session) || session.returned || !SourceOpen(session);
     };
     bool attempted = false;
     std::wstring reason;
@@ -253,6 +284,8 @@ void ServiceSession(const std::shared_ptr<NativeDialogTakeover::Shared>& shared,
     if (sent || attempted) {
         session.confirmation_deadline = GetTickCount64() + kConfirmationMs;
     } else if (!cancelled()) {
+        if (shared->source_process && !reason.empty())
+            std::fwprintf(stderr, L"[DIAG] Native picker submission: %ls\n", reason.c_str());
         Reply(session, false, true);
     }
 }
@@ -305,8 +338,9 @@ void WatchDialogs(const std::shared_ptr<NativeDialogTakeover::Shared>& shared) {
         }
         if (session && session->returned) session.reset();
         if (enabled && IsEnabled(*shared)) {
-            std::erase_if(handled, [](const auto& entry) {
-                return !IsWindowVisible(entry.first) || GetWindowThreadProcessId(entry.first, nullptr) != entry.second;
+            std::erase_if(handled, [&](const auto& entry) {
+                return GetWindowThreadProcessId(entry.first, nullptr) != entry.second ||
+                    (!IsWindowVisible(entry.first) && (!session || session->source.window != entry.first));
             });
             if (session) ServiceSession(shared, *session);
             const auto now = GetTickCount64();
@@ -358,14 +392,14 @@ void WatchDialogs(const std::shared_ptr<NativeDialogTakeover::Shared>& shared) {
 
 NativeDialogTakeover::~NativeDialogTakeover() { Stop(); }
 
-bool NativeDialogTakeover::Configure(bool enabled, bool dark, D2D1_COLOR_F accent, bool show_hidden,
-                                     std::wstring pulse_folder, bool verify_copies) {
-    return ConfigureImpl(enabled, dark, accent, show_hidden, std::move(pulse_folder), 0, verify_copies);
+bool NativeDialogTakeover::Configure(bool enabled, bool dark, D2D1_COLOR_F accent, model::FileVisibility visibility,
+                                     std::wstring pulse_folder, bool verify_copies, bool zebra_rows) {
+    return ConfigureImpl(enabled, dark, accent, visibility, std::move(pulse_folder), 0, verify_copies, zebra_rows);
 }
 
 bool NativeDialogTakeover::StartForTesting(DWORD source_process) {
     if (!source_process || source_process == GetCurrentProcessId()) return false;
-    return ConfigureImpl(true, false, D2D1::ColorF(0x0078d4), false, {}, source_process, false);
+    return ConfigureImpl(true, false, D2D1::ColorF(0x0078d4), {}, {}, source_process, false, true);
 }
 
 bool NativeDialogTakeover::ReadyForTesting() const {
@@ -387,8 +421,8 @@ bool NativeDialogTakeover::ObserveForTesting(HWND source) {
     return SetEvent(shared_->wake) != FALSE;
 }
 
-bool NativeDialogTakeover::ConfigureImpl(bool enabled, bool dark, D2D1_COLOR_F accent, bool show_hidden,
-                                         std::wstring pulse_folder, DWORD source_process, bool verify_copies) {
+bool NativeDialogTakeover::ConfigureImpl(bool enabled, bool dark, D2D1_COLOR_F accent, model::FileVisibility visibility,
+                                         std::wstring pulse_folder, DWORD source_process, bool verify_copies, bool zebra_rows) {
     std::lock_guard owner(mutex_);
     if (stopped_) return !enabled;
     if (shared_ && shared_->source_process != source_process) return false;
@@ -402,7 +436,7 @@ bool NativeDialogTakeover::ConfigureImpl(bool enabled, bool dark, D2D1_COLOR_F a
     }
     {
         std::lock_guard lock(shared_->appearance_mutex);
-        shared_->appearance = {dark, show_hidden, accent, verify_copies};
+        shared_->appearance = {dark, visibility, accent, verify_copies, zebra_rows};
         if (!pulse_folder.empty()) shared_->pulse_folder = std::move(pulse_folder);
     }
     if (enabled != IsEnabled(*shared_)) {

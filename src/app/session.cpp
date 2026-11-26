@@ -56,6 +56,8 @@ std::wstring SessionPreferencesToJson(const WindowSessionSnapshot& snap) {
         static_cast<int>(ui::kPanelWidthMaxDip))
       << L",\n";
     f << L"  \"detailsPreviewOnly\":" << (snap.details_preview_only ? L"true" : L"false") << L",\n";
+    f << L"  \"terminalPanelWidth\":" << std::clamp(snap.terminal_panel_width,
+        static_cast<int>(ui::kDetailsMinWidthDip), static_cast<int>(ui::kPanelWidthMaxDip)) << L",\n";
     f << L"  \"detailsPreview\":" << (snap.details_preview ? L"true" : L"false");
     f << L"\n";
     f << L"}\n";
@@ -124,6 +126,10 @@ static bool ParseWindowPreferences(const pulse::json::Value& doc, WindowSessionS
     if (snap.details_panel_width < static_cast<int>(ui::kDetailsMinWidthDip) ||
         snap.details_panel_width > static_cast<int>(ui::kPanelWidthMaxDip))
         snap.details_panel_width = 340;
+    snap.terminal_panel_width = pulse::json::Int(doc.Find(L"terminalPanelWidth"));
+    if (snap.terminal_panel_width < static_cast<int>(ui::kDetailsMinWidthDip) ||
+        snap.terminal_panel_width > static_cast<int>(ui::kPanelWidthMaxDip))
+        snap.terminal_panel_width = static_cast<int>(ui::kTerminalWidthDip);
     const std::array<int, 3> columnEdges{
         pulse::json::Int(doc.Find(L"detailsColumn0")),
         pulse::json::Int(doc.Find(L"detailsColumn1")),

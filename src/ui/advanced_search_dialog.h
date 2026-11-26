@@ -8,6 +8,7 @@
 #include "../model/search_query.h"
 #include <windows.h>
 #include <d2d1.h>
+#include <functional>
 #include <string>
 
 namespace pulse::ui {
@@ -20,6 +21,7 @@ struct AdvancedSearchDialogResult {
 AdvancedSearchDialogResult ShowAdvancedSearchDialog(HWND owner,
                                                     model::AdvancedSearchSpec spec,
                                                     bool dark,
-                                                    D2D1_COLOR_F accent);
+                                                    D2D1_COLOR_F accent,
+                                                    const std::function<bool(HWND, std::wstring&)>& pick_folder = {});
 
 } // namespace pulse::ui

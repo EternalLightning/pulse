@@ -4,6 +4,7 @@
 #include "dialog_style.h"
 #include "window_helpers.h"
 #include "animation_clock.h"
+#include "binary_transition.h"
 #include "edit_frame_scheduler.h"
 #include "smooth_scroll.h"
 #include "toolbar_icons.h"
@@ -11,6 +12,7 @@
 #include <windowsx.h>
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 namespace pulse::ui {
 ToolbarCustomizationModel::ToolbarCustomizationModel(const ToolbarCustomizationSpec& spec) {
@@ -48,8 +50,10 @@ namespace {
 constexpr int kAvailable = 100, kCurrent = 101, kAdd = 102, kRemove = 103,
     kUp = 104, kDown = 105, kRestore = 106, kClose = 107;
 constexpr UINT_PTR kDragTimer = 1;
-constexpr UINT_PTR kScrollTimer = 2;
+constexpr UINT_PTR kFrameTimer = 2;
 struct AvailableRow { const ToolbarCustomizationAction* action = nullptr; std::wstring category; };
+struct ControlMotion { BinaryTransition hover, focus; };
+struct RowMotion { BinaryTransition hover, selection; };
 
 class ToolbarWindow {
 public:
@@ -122,36 +126,50 @@ private:
     }
     void StopScroll() {
         available_motion_.Reset(); current_motion_.Reset();
-        frame_scheduler_.Cancel();
-        if (hwnd_) KillTimer(hwnd_, kScrollTimer);
     }
-    void ScheduleScroll() {
-        if (!available_motion_.Pending() && !current_motion_.Pending()) { StopScroll(); return; }
-        if (frame_scheduler_.Request(hwnd_)) KillTimer(hwnd_, kScrollTimer);
-        else if (!SetTimer(hwnd_, kScrollTimer, USER_TIMER_MINIMUM, nullptr)) {
-            available_motion_.Tick(available_scroll_, ScrollMax(false), AnimationTimeMs(), false);
-            current_motion_.Tick(current_scroll_, ScrollMax(true), AnimationTimeMs(), false);
-            StopScroll();
+    void CancelFrame() {
+        frame_scheduler_.Cancel();
+        if (hwnd_) KillTimer(hwnd_, kFrameTimer);
+    }
+    void StopMotion() {
+        StopScroll(); CancelFrame();
+        control_motion_.clear(); available_row_motion_.clear(); current_row_motion_.clear();
+        interaction_pending_ = snap_motion_ = false;
+    }
+    void ScheduleFrame() {
+        if (done_ || !IsWindowVisible(hwnd_) ||
+            (!interaction_pending_ && !available_motion_.Pending() && !current_motion_.Pending())) {
+            CancelFrame();
+            return;
+        }
+        if (frame_scheduler_.Request(hwnd_)) KillTimer(hwnd_, kFrameTimer);
+        else if (!SetTimer(hwnd_, kFrameTimer, USER_TIMER_MINIMUM, nullptr)) {
+            snap_motion_ = true;
+            TickFrame();
         }
     }
     void RefreshMotion() {
         BOOL enabled = TRUE;
         SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0);
         motion_enabled_ = enabled && !IsHighContrast();
-        TickScroll();
+        TickFrame();
     }
-    void TickScroll() {
+    void UpdateHover(float x, float y) {
+        hover_ = Hit(x, y);
+        hover_command_ = hover_ == kAvailable || hover_ == kCurrent ? RowCommand(hover_ == kCurrent, x, y) : 0;
+    }
+    void TickFrame() {
         const auto now = AnimationTimeMs();
-        const bool available_changed = available_motion_.Tick(available_scroll_, ScrollMax(false), now, motion_enabled_);
-        const bool current_changed = current_motion_.Tick(current_scroll_, ScrollMax(true), now, motion_enabled_);
+        const bool animate = motion_enabled_ && !snap_motion_;
+        const bool available_changed = available_motion_.Tick(available_scroll_, ScrollMax(false), now, animate);
+        const bool current_changed = current_motion_.Tick(current_scroll_, ScrollMax(true), now, animate);
         if (available_changed || current_changed) {
-            POINT point{}; GetCursorPos(&point); ScreenToClient(hwnd_, &point);
-            if (hover_ == kAvailable || hover_ == kCurrent)
-                hover_command_ = RowCommand(hover_ == kCurrent, static_cast<float>(point.x), static_cast<float>(point.y));
-            if (dragging_) UpdateDrag(static_cast<float>(point.x), static_cast<float>(point.y), false);
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            if (hover_) UpdateHover(pointer_x_, pointer_y_);
+            if (dragging_) UpdateDrag(pointer_x_, pointer_y_, false);
         }
-        ScheduleScroll();
+        if (available_changed || current_changed || interaction_pending_ || snap_motion_ ||
+            available_motion_.Pending() || current_motion_.Pending())
+            InvalidateRect(hwnd_, nullptr, FALSE);
     }
     void ScrollList(bool current, float delta, bool reveal = false) {
         auto& offset = current ? current_scroll_ : available_scroll_;
@@ -160,13 +178,11 @@ private:
         if (reveal) motion.Reset();
         motion.ScrollBy(offset, delta, ScrollMax(current),
             std::max(viewport.bottom-viewport.top, reveal ? std::abs(delta) : 0.0f), AnimationTimeMs(), motion_enabled_);
-        ScheduleScroll();
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
     void EnsureSelectionVisible(bool current) {
-        TickScroll();
+        TickFrame();
         (current ? current_motion_ : available_motion_).Reset();
-        ScheduleScroll();
         size_t index = 0;
         if (current) {
             const auto found = std::find(model_.Order().begin(), model_.Order().end(), current_selection_);
@@ -204,6 +220,7 @@ private:
         up_ = {current_.left, tools_top, current_.left+move_width, tools_top+32*scale_};
         down_ = {up_.right+8*scale_, tools_top, up_.right+8*scale_+move_width, tools_top+32*scale_};
         ClampScroll();
+        if (hover_) UpdateHover(pointer_x_, pointer_y_);
     }
     bool Enabled(int id) const {
         if (id == kAdd) return Action(available_selection_) && !model_.Contains(available_selection_) && model_.Order().size() < 64;
@@ -213,10 +230,22 @@ private:
         if (id == kDown) return found != model_.Order().end() && found+1 != model_.Order().end();
         return true;
     }
-    fluent::ControlState State(int id) const {
+    float HoverOpacity(BinaryTransition& track, bool hovered) {
+        track.TickHover(hovered, frame_now_, motion_enabled_ && !snap_motion_);
+        interaction_pending_ |= track.Pending();
+        return track.value;
+    }
+    float FocusOpacity(int id, bool enabled = true) {
+        return HoverOpacity(control_motion_[id].focus,
+            enabled && keyboard_cues_ && GetFocus() == hwnd_ && focus_ == id);
+    }
+    fluent::ControlState State(int id) {
         fluent::ControlState state;
-        state.enabled = Enabled(id); state.hovered = hover_ == id; state.pressed = pressed_ == id;
-        state.keyboard_focus = GetFocus() == hwnd_ && focus_ == id;
+        state.enabled = Enabled(id);
+        state.hovered = state.enabled && hover_ == id;
+        state.pressed = state.hovered && pressed_ == id;
+        state.hover_progress = HoverOpacity(control_motion_[id].hover, state.hovered);
+        if (id != kClose) state.focus_progress = FocusOpacity(id, state.enabled);
         return state;
     }
     void MoveSelected(int direction) {
@@ -247,12 +276,14 @@ private:
             model_.Reset(); current_scroll_ = 0;
             current_selection_ = model_.Order().empty() ? 0 : model_.Order().front();
         }
+        std::erase_if(current_row_motion_, [&](const auto& entry) { return !model_.Contains(entry.first); });
+        if (hover_) UpdateHover(pointer_x_, pointer_y_);
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
     void Complete(bool accepted) {
         if (done_) return;
         if (accepted) result_ = {true, model_.Order()};
-        done_ = true; StopScroll(); CancelDrag();
+        done_ = true; StopMotion(); CancelDrag();
         if (IsWindow(hwnd_)) { HideComposedDialog(hwnd_, modal_owner_); DestroyWindow(hwnd_); }
     }
     int Hit(float x, float y) const {
@@ -288,13 +319,13 @@ private:
         targets.push_back({kCurrent}); targets.push_back({kRestore});
         if (Enabled(kUp)) targets.push_back({kUp});
         if (Enabled(kDown)) targets.push_back({kDown});
-        targets.push_back({IDCANCEL}); targets.push_back({IDOK}); targets.push_back({kClose});
+        targets.push_back({IDCANCEL}); targets.push_back({IDOK});
         MoveDialogFocus(hwnd_, focus_, targets, backwards);
     }
     void CancelDrag() {
         if (dragging_) StopScroll();
         KillTimer(hwnd_, kDragTimer); drag_command_ = 0; dragging_ = false; drop_before_ = 0;
-        pressed_ = 0;
+        pressed_ = 0; pressed_command_ = 0; scrollbar_drag_ = 0;
         if (GetCapture() == hwnd_) ReleaseCapture();
     }
     void UpdateDrag(float x, float y, bool scroll) {
@@ -311,28 +342,58 @@ private:
         drop_before_ = static_cast<size_t>(drop_index_) < model_.Order().size() ? model_.Order()[static_cast<size_t>(drop_index_)] : 0;
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
+    fluent::ScrollbarSpec Scrollbar(bool current) const {
+        const int id = current ? kCurrent : kAvailable;
+        const auto viewport = current ? current_ : available_;
+        const size_t count = current ? model_.Order().size() : rows_.size();
+        const auto motion = control_motion_.find(id);
+        return {viewport, current ? current_scroll_ : available_scroll_, viewport.bottom - viewport.top,
+            static_cast<float>(count)*RowHeight()+8*scale_,
+            motion == control_motion_.end() ? 0.0f : motion->second.hover.value};
+    }
+    D2D1_RECT_F ScrollbarThumb(bool current) const {
+        return fluent::ScrollbarThumbRect(Scrollbar(current), scale_, IsHighContrast());
+    }
+    void DragScrollbar(float y) {
+        const bool current = scrollbar_drag_ == kCurrent;
+        const auto spec = Scrollbar(current);
+        const auto thumb = ScrollbarThumb(current);
+        const float travel = spec.viewport_extent - (thumb.bottom - thumb.top);
+        if (travel <= 0.0f) return;
+        (current ? current_scroll_ : available_scroll_) =
+            std::clamp((y - scrollbar_grab_ - spec.viewport.top) / travel, 0.0f, 1.0f) * ScrollMax(current);
+    }
     void DrawList(bool current, const Theme& theme) {
         const auto viewport = current ? current_ : available_;
+        const int id = current ? kCurrent : kAvailable;
         painter_.FillRoundedRect(viewport, theme.radius_control*scale_, theme.fill_input);
         painter_.StrokeRoundedRect(viewport, theme.radius_control*scale_, theme.stroke_card, scale_);
         auto* dc = compositor_.Dc();
         const bool high_contrast = IsHighContrast();
         dc->PushAxisAlignedClip(viewport, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
         const size_t count = current ? model_.Order().size() : rows_.size();
+        auto& row_motion = current ? current_row_motion_ : available_row_motion_;
         for (size_t i = 0; i < count; ++i) {
             const auto bounds = RowRect(current, i);
-            if (bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) continue;
+            const bool visible = bounds.bottom > viewport.top && bounds.top < viewport.bottom;
             const auto* action = current ? Action(model_.Order()[i]) : rows_[i].action;
             if (!action) {
-                if (!current) painter_.DrawText(rows_[i].category,
+                if (!current && visible) painter_.DrawText(rows_[i].category,
                     {bounds.left+10*scale_, bounds.top, bounds.right, bounds.bottom}, compositor_.HeaderFormat(), theme.text_secondary);
                 continue;
             }
             fluent::MenuItemSpec row;
             row.bounds = bounds; row.text = action->text;
             row.state.selected = action->command == (current ? current_selection_ : available_selection_);
-            row.state.hovered = action->command == hover_command_ && hover_ == (current ? kCurrent : kAvailable);
-            row.state.keyboard_focus = row.state.selected && GetFocus() == hwnd_ && focus_ == (current ? kCurrent : kAvailable);
+            row.state.hovered = visible && action->command == hover_command_ && hover_ == id &&
+                !dragging_ && !scrollbar_drag_;
+            row.state.pressed = row.state.hovered && pressed_ == id && pressed_command_ == action->command;
+            auto& motion = row_motion[action->command];
+            row.state.hover_progress = HoverOpacity(motion.hover, row.state.hovered);
+            motion.selection.Tick(row.state.selected, frame_now_, motion_enabled_ && !snap_motion_, 120.0f);
+            row.selection_progress = motion.selection.value;
+            interaction_pending_ |= motion.selection.Pending();
+            if (!visible) continue;
             if (!current && model_.Contains(action->command)) row.shortcut = L"✓";
             painter_.DrawMenuItem(row);
             const auto color = high_contrast && (row.state.selected || row.state.hovered)
@@ -351,11 +412,10 @@ private:
             const float y = current_.top+4*scale_+static_cast<float>(drop_index_)*RowHeight()-current_scroll_;
             painter_.FillRoundedRect({current_.left+6*scale_, y-scale_, current_.right-12*scale_, y+scale_}, scale_, theme.accent_ink);
         }
-        painter_.DrawScrollbar({viewport, current ? current_scroll_ : available_scroll_, viewport.bottom-viewport.top,
-            static_cast<float>(count)*RowHeight()+8*scale_, hover_ == (current ? kCurrent : kAvailable) ? 1.0f : 0.0f});
+        HoverOpacity(control_motion_[id].hover, hover_ == id || scrollbar_drag_ == id);
+        painter_.DrawScrollbar(Scrollbar(current));
         dc->PopAxisAlignedClip();
-        if (GetFocus() == hwnd_ && focus_ == (current ? kCurrent : kAvailable))
-            painter_.DrawFocusRing(viewport, theme.radius_control*scale_);
+        painter_.DrawFocusRing(viewport, theme.radius_control*scale_, FocusOpacity(id));
     }
     bool Render(bool present = true) {
         if (compositor_.NeedsRecovery()) {
@@ -366,6 +426,8 @@ private:
         if (!compositor_.Dc()) return false;
         const bool high_contrast = IsHighContrast();
         const auto theme = high_contrast ? MakeHighContrastTheme() : MakeTheme(dark_, accent_);
+        frame_now_ = AnimationTimeMs();
+        interaction_pending_ = false;
         BeginSurface(compositor_, painter_, theme, dark_, high_contrast, backdrop_, scale_);
         DrawDialogHeader(compositor_, painter_, theme, scale_, spec_.title, L"\xE713", State(kClose));
         DrawDialogFooter(compositor_, painter_, theme, FooterTop());
@@ -376,10 +438,14 @@ private:
         painter_.DrawButton({remove_, spec_.remove_text, {}, fluent::ButtonKind::Standard, State(kRemove)});
         painter_.DrawButton({up_, spec_.up_text, {}, fluent::ButtonKind::Standard, State(kUp)});
         painter_.DrawButton({down_, spec_.down_text, {}, fluent::ButtonKind::Standard, State(kDown)});
-        painter_.DrawButton({restore_, spec_.restore_text, {}, fluent::ButtonKind::Standard, State(kRestore)});
+        painter_.DrawButton({restore_, spec_.restore_text, {}, fluent::ButtonKind::Transparent, State(kRestore)});
         painter_.DrawButton({cancel_, spec_.cancel_text, {}, fluent::ButtonKind::Standard, State(IDCANCEL)});
         painter_.DrawButton({primary_, spec_.save_text, {}, fluent::ButtonKind::Primary, State(IDOK)});
-        if (present) EndSurface(compositor_);
+        snap_motion_ = false;
+        if (present) {
+            EndSurface(compositor_);
+            ScheduleFrame();
+        }
         else {
             const HRESULT result = compositor_.Dc()->EndDraw();
             if (FAILED(result)) { compositor_.NotifyDeviceLost(result); return false; }
@@ -396,7 +462,7 @@ private:
     }
     LRESULT Handle(UINT message, WPARAM wparam, LPARAM lparam) {
         if (message == EditMotionFrameMessage()) {
-            if (frame_scheduler_.Consume(hwnd_, wparam)) TickScroll();
+            if (frame_scheduler_.Consume(hwnd_, wparam)) TickFrame();
             return 0;
         }
         switch (message) {
@@ -428,12 +494,19 @@ private:
         case WM_THEMECHANGED:
             RefreshMotion(); backdrop_ = ApplyBackdrop(hwnd_, dark_); InvalidateRect(hwnd_, nullptr, FALSE); return 0;
         case WM_SHOWWINDOW:
-            if (!wparam) StopScroll();
+            if (!wparam) {
+                StopMotion(); CancelDrag();
+                hover_ = 0; hover_command_ = 0;
+            }
             break;
+        case WM_SETFOCUS:
+        case WM_KILLFOCUS:
+            InvalidateRect(hwnd_, nullptr, FALSE); return 0;
         case WM_GETDLGCODE: return DLGC_WANTALLKEYS;
         case WM_KEYDOWN: {
+            keyboard_cues_ = true;
             const bool current = focus_ == kCurrent;
-            if (wparam == VK_ESCAPE) { if (drag_command_) { CancelDrag(); InvalidateRect(hwnd_, nullptr, FALSE); } else Complete(false); }
+            if (wparam == VK_ESCAPE) { if (drag_command_ || scrollbar_drag_) CancelDrag(); else Complete(false); }
             else if (wparam == VK_TAB) MoveFocus(GetKeyState(VK_SHIFT) < 0);
             else if ((focus_ == kAvailable || current) && (wparam == VK_UP || wparam == VK_DOWN)) {
                 if (current && (GetKeyState(VK_MENU) < 0 || GetKeyState(VK_CONTROL) < 0)) MoveSelected(wparam == VK_UP ? -1 : 1);
@@ -448,21 +521,27 @@ private:
         }
         case WM_SYSKEYDOWN:
             if (focus_ == kCurrent && (wparam == VK_UP || wparam == VK_DOWN)) {
+                keyboard_cues_ = true;
                 MoveSelected(wparam == VK_UP ? -1 : 1); InvalidateRect(hwnd_, nullptr, FALSE); return 0;
             }
             break;
         case WM_COMMAND: Invoke(LOWORD(wparam)); return 0;
         case WM_MOUSEWHEEL: {
+            if (scrollbar_drag_) return 0;
             POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)}; ScreenToClient(hwnd_, &point);
             const bool current = ContainsRect(current_, static_cast<float>(point.x), static_cast<float>(point.y));
             if (!current && !ContainsRect(available_, static_cast<float>(point.x), static_cast<float>(point.y))) return 0;
+            pointer_x_ = static_cast<float>(point.x); pointer_y_ = static_cast<float>(point.y);
+            UpdateHover(pointer_x_, pointer_y_);
             ScrollList(current, -static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam))/WHEEL_DELTA*RowHeight()*3);
             return 0;
         }
         case WM_MOUSEMOVE: {
-            const float x = static_cast<float>(GET_X_LPARAM(lparam)), y = static_cast<float>(GET_Y_LPARAM(lparam));
-            hover_ = Hit(x, y); hover_command_ = (hover_ == kAvailable || hover_ == kCurrent) ? RowCommand(hover_ == kCurrent, x, y) : 0;
-            if (drag_command_) UpdateDrag(x, y, false);
+            pointer_x_ = static_cast<float>(GET_X_LPARAM(lparam));
+            pointer_y_ = static_cast<float>(GET_Y_LPARAM(lparam));
+            if (scrollbar_drag_) DragScrollbar(pointer_y_);
+            UpdateHover(pointer_x_, pointer_y_);
+            if (drag_command_) UpdateDrag(pointer_x_, pointer_y_, false);
             TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd_, 0}; TrackMouseEvent(&track);
             InvalidateRect(hwnd_, nullptr, FALSE); return 0;
         }
@@ -471,12 +550,27 @@ private:
         case WM_LBUTTONDOWN: {
             StopScroll();
             const float x = static_cast<float>(GET_X_LPARAM(lparam)), y = static_cast<float>(GET_Y_LPARAM(lparam));
-            pressed_ = Hit(x, y);
-            if (!pressed_ || !Enabled(pressed_)) { pressed_ = 0; return 0; }
-            focus_ = pressed_; SetFocus(hwnd_); SetCapture(hwnd_);
-            if (pressed_ == kAvailable) { const int command = RowCommand(false, x, y); if (command) available_selection_ = command; }
+            pointer_x_ = x; pointer_y_ = y;
+            UpdateHover(x, y);
+            keyboard_cues_ = false;
+            pressed_ = hover_;
+            if (!pressed_ || !Enabled(pressed_)) {
+                pressed_ = 0; InvalidateRect(hwnd_, nullptr, FALSE); return 0;
+            }
+            if (pressed_ != kClose) focus_ = pressed_;
+            SetFocus(hwnd_); SetCapture(hwnd_);
+            if (pressed_ == kAvailable || pressed_ == kCurrent) {
+                const auto thumb = ScrollbarThumb(pressed_ == kCurrent);
+                if (ContainsRect(thumb, x, y)) {
+                    scrollbar_drag_ = pressed_;
+                    scrollbar_grab_ = y - thumb.top;
+                    InvalidateRect(hwnd_, nullptr, FALSE); return 0;
+                }
+                pressed_command_ = hover_command_;
+            }
+            if (pressed_ == kAvailable && pressed_command_) available_selection_ = pressed_command_;
             if (pressed_ == kCurrent) {
-                const int command = RowCommand(true, x, y);
+                const int command = pressed_command_;
                 if (command) {
                     current_selection_ = command; drag_command_ = command; drag_start_ = {static_cast<LONG>(x), static_cast<LONG>(y)};
                     SetTimer(hwnd_, kDragTimer, 60, nullptr);
@@ -488,12 +582,17 @@ private:
             const float x = static_cast<float>(GET_X_LPARAM(lparam)), y = static_cast<float>(GET_Y_LPARAM(lparam));
             const int pressed = pressed_; const bool was_dragging = dragging_;
             if (was_dragging && ContainsRect(current_, x, y)) model_.Move(drag_command_, drop_before_);
+            if (scrollbar_drag_) DragScrollbar(y);
             CancelDrag();
-            if (!was_dragging && pressed && pressed != kAvailable && pressed != kCurrent && pressed == Hit(x, y)) Invoke(pressed);
+            pointer_x_ = x; pointer_y_ = y;
+            UpdateHover(x, y);
+            if (!was_dragging && pressed && pressed != kAvailable && pressed != kCurrent && pressed == hover_) Invoke(pressed);
             if (hwnd_) InvalidateRect(hwnd_, nullptr, FALSE); return 0;
         }
         case WM_TIMER:
-            if (wparam == kScrollTimer) { TickScroll(); return 0; }
+            if (wparam == kFrameTimer) {
+                KillTimer(hwnd_, kFrameTimer); TickFrame(); return 0;
+            }
             if (wparam == kDragTimer && dragging_) {
                 POINT point{}; GetCursorPos(&point); ScreenToClient(hwnd_, &point);
                 UpdateDrag(static_cast<float>(point.x), static_cast<float>(point.y), true);
@@ -518,17 +617,32 @@ private:
                 info.available_scroll = available_scroll_; info.current_scroll = current_scroll_;
                 info.available_scrolling = available_motion_.Pending(); info.current_scrolling = current_motion_.Pending();
                 info.motion_enabled = motion_enabled_;
+                info.available_thumb = ScrollbarThumb(false); info.current_thumb = ScrollbarThumb(true);
+                if (auto motion = control_motion_.find(kAvailable); motion != control_motion_.end())
+                    info.available_focus_opacity = motion->second.focus.value;
+                if (auto motion = control_motion_.find(IDOK); motion != control_motion_.end())
+                    info.primary_hover_opacity = motion->second.hover.value;
+                if (auto motion = control_motion_.find(kClose); motion != control_motion_.end())
+                    info.close_hover_opacity = motion->second.hover.value;
+                info.interaction_pending = interaction_pending_;
                 info.order = model_.Order();
-                for (size_t i = 0; i < rows_.size(); ++i) {
-                    const auto bounds = RowRect(false, i);
-                    if (bounds.bottom > available_.top && bounds.top < available_.bottom)
-                        info.available_rows.push_back({rows_[i].action ? rows_[i].action->command : 0, bounds, !rows_[i].action});
-                }
-                for (size_t i = 0; i < model_.Order().size(); ++i) {
-                    const auto bounds = RowRect(true, i);
-                    if (bounds.bottom > current_.top && bounds.top < current_.bottom)
-                        info.current_rows.push_back({model_.Order()[i], bounds, false});
-                }
+                const auto inspect_list = [&](bool current, auto& output) {
+                    const auto viewport = current ? current_ : available_;
+                    const auto& row_motion = current ? current_row_motion_ : available_row_motion_;
+                    const size_t count = current ? model_.Order().size() : rows_.size();
+                    for (size_t i = 0; i < count; ++i) {
+                        const auto bounds = RowRect(current, i);
+                        if (bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) continue;
+                        const int command = current ? model_.Order()[i] : rows_[i].action ? rows_[i].action->command : 0;
+                        auto& row = output.emplace_back(command, bounds, command == 0);
+                        if (auto motion = row_motion.find(command); motion != row_motion.end()) {
+                            row.hover_opacity = motion->second.hover.value;
+                            row.selection_opacity = motion->second.selection.value;
+                        }
+                    }
+                };
+                inspect_list(false, info.available_rows);
+                inspect_list(true, info.current_rows);
                 return TRUE;
             }
             return FALSE;
@@ -536,7 +650,7 @@ private:
             return lparam && Render(false) && compositor_.SaveSnapshot(reinterpret_cast<const wchar_t*>(lparam));
         case WM_ERASEBKGND: return 1;
         case WM_DESTROY:
-            done_ = true; StopScroll(); KillTimer(hwnd_, kDragTimer); compositor_.Shutdown();
+            done_ = true; StopMotion(); KillTimer(hwnd_, kDragTimer); compositor_.Shutdown();
             // A sent close can run inside GetMessage after the last animation callback is cancelled.
             PostThreadMessageW(GetCurrentThreadId(), WM_NULL, 0, 0);
             return 0;
@@ -559,12 +673,17 @@ private:
     ComPtr<ID2D1StrokeStyle> icon_stroke_;
     SmoothScroll available_motion_, current_motion_;
     EditFrameScheduler frame_scheduler_;
+    std::unordered_map<int, ControlMotion> control_motion_;
+    std::unordered_map<int, RowMotion> available_row_motion_, current_row_motion_;
+    uint64_t frame_now_ = 0;
     D2D1_COLOR_F accent_{};
     D2D1_RECT_F available_{}, current_{}, add_{}, remove_{}, up_{}, down_{}, restore_{}, primary_{}, cancel_{};
     float scale_ = 1.0f, available_scroll_ = 0, current_scroll_ = 0;
+    float pointer_x_ = 0.0f, pointer_y_ = 0.0f, scrollbar_grab_ = 0.0f;
     bool dark_ = false, backdrop_ = false, done_ = false, dragging_ = false, motion_enabled_ = true;
+    bool keyboard_cues_ = true, interaction_pending_ = false, snap_motion_ = false;
     int available_selection_ = 0, current_selection_ = 0, focus_ = kAvailable, hover_ = 0, hover_command_ = 0,
-        pressed_ = 0, drag_command_ = 0, drop_before_ = 0, drop_index_ = 0;
+        pressed_ = 0, pressed_command_ = 0, scrollbar_drag_ = 0, drag_command_ = 0, drop_before_ = 0, drop_index_ = 0;
     POINT drag_start_{};
 };
 } // namespace

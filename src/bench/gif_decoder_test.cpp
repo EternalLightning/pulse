@@ -104,8 +104,10 @@ int wmain() {
         std::vector<uint8_t> pixels;
         UINT w = 0, h = 0, stride = 0, sw = 0, sh = 0;
         uint32_t count = 0, delay = 0, loops = 0;
+        ipc::PreviewRequest request;
+        request.attrs = FILE_ATTRIBUTE_NORMAL;
         const auto decode = [&](uint32_t frame, UINT requested_cap = 512) {
-            return DecodeGifFrame(state, path.wstring(), FILE_ATTRIBUTE_NORMAL,
+            return state.BeginRequest(request, L".gif") && DecodeGifFrame(state, path.wstring(),
                 ipc::ClampPreviewPixelSize(requested_cap, true), frame, pixels,
                 w, h, stride, count, delay, loops, sw, sh);
         };
@@ -164,36 +166,47 @@ int wmain() {
               state.opened_decoders == before_replace + 1 &&
               PixelsEqual(pixels, {red, red, red, red, red, red}),
               "same path size and timestamp with replaced file identity invalidates GIF state");
-        state.Clear();
-        Check(state.encoded.capacity() == 0 && state.canvas.capacity() == 0 &&
-              state.saved.capacity() == 0 && !state.decoder && !state.stream && !state.factory,
-              "releasing GIF state returns encoded canvas and restore buffers with decoder resources");
+        const auto releases_on = [&](std::wstring_view extension, ipc::PreviewRequest next) {
+            return decode(2, 64) && !state.saved.empty() && !state.BeginRequest(next, extension) &&
+                state.encoded.capacity() == 0 && state.canvas.capacity() == 0 &&
+                state.saved.capacity() == 0 && !state.decoder && !state.stream && !state.factory;
+        };
+        Check(releases_on(L".txt", request), "non-GIF content releases all retained GIF buffers and decoder resources");
+        auto other = request;
+        other.kind = ipc::PreviewRequestKind::Properties;
+        Check(releases_on(L".gif", other), "properties request releases GIF state even for the same extension");
+        other = request;
+        other.attrs = FILE_ATTRIBUTE_DIRECTORY;
+        Check(releases_on(L".gif", other), "directory request with a GIF suffix releases GIF state");
+        other.attrs = FILE_ATTRIBUTE_OFFLINE;
+        other.kind = ipc::PreviewRequestKind::Thumbnail;
+        Check(releases_on(L".gif", other), "offline GIF thumbnail releases GIF state before cache-only fallback");
         const auto loop_fixture = root / L"loops.gif";
         Check(WriteFixture(loop_fixture, FixtureBytes(3, 2, 0, false, 513, true)) &&
-              DecodeGifFrame(state, loop_fixture.wstring(), FILE_ATTRIBUTE_NORMAL, 32, 0,
+              DecodeGifFrame(state, loop_fixture.wstring(), 32, 0,
                   pixels, w, h, stride, count, delay, loops, sw, sh) && loops == 513,
               "ANIMEXTS application metadata reads both finite loop count bytes");
         state.Clear();
         Check(WriteFixture(loop_fixture, FixtureBytes(3, 2, 0, false, 0)) &&
-              DecodeGifFrame(state, loop_fixture.wstring(), FILE_ATTRIBUTE_NORMAL, 32, 0,
+              DecodeGifFrame(state, loop_fixture.wstring(), 32, 0,
                   pixels, w, h, stride, count, delay, loops, sw, sh) && loops == 0,
               "zero GIF loop count remains infinite");
         state.Clear();
         const auto budget = root / L"canvas-budget.gif";
         Check(WriteFixture(budget, FixtureBytes(4096, 2048, 0, true)) &&
-              DecodeGifFrame(state, budget.wstring(), FILE_ATTRIBUTE_NORMAL, 32, 0,
+              DecodeGifFrame(state, budget.wstring(), 32, 0,
                   pixels, w, h, stride, count, delay, loops, sw, sh) &&
               state.canvas.size() == GifDecodeState::max_canvas_bytes && w == 32 && h == 16,
               "canvas at bounded memory limit still scales through production WIC path");
         state.Clear();
         Check(WriteFixture(budget, FixtureBytes(4097, 2048, 0, true)) &&
-              !DecodeGifFrame(state, budget.wstring(), FILE_ATTRIBUTE_NORMAL, 32, 0,
+              !DecodeGifFrame(state, budget.wstring(), 32, 0,
                   pixels, w, h, stride, count, delay, loops, sw, sh) &&
               state.canvas.empty() && state.saved.empty() && !state.decoder,
               "oversized original canvas fails before retained canvas allocation");
         Check(WriteFixture(budget, FixtureBytes()), "write encoded size budget fixture");
         std::filesystem::resize_file(budget, GifDecodeState::max_encoded_bytes + 1, error);
-        Check(!error && !DecodeGifFrame(state, budget.wstring(), FILE_ATTRIBUTE_NORMAL, 32, 0,
+        Check(!error && !DecodeGifFrame(state, budget.wstring(), 32, 0,
                   pixels, w, h, stride, count, delay, loops, sw, sh) &&
               state.encoded.empty() && state.canvas.empty() && !state.decoder,
               "oversized encoded input fails before retained decoder allocation");

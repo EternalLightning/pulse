@@ -42,6 +42,8 @@ public:
     // Restores only our disable transition; foreign/originally disabled owners stay untouched.
     // Activation delegates keyboard focus restoration to the owner's handlers.
     void RestoreBeforeDialogHide(HWND dialog) noexcept;
+    // After a foreground picker has granted activation back to this caller.
+    void RestoreForeground(HWND target) noexcept;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

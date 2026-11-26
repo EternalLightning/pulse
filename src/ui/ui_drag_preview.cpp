@@ -28,7 +28,7 @@ HBITMAP MainRenderer::CreateDragPreview(const PaneViewModel& pane, int index, co
     auto* factory = compositor_->DwriteFactory();
     if (!icon_only && (!format || !factory)) return nullptr;
     const auto name = icon_only ? std::wstring{} :
-        FitFileName(compositor_, factory, format, entry.name, 240 * scale_);
+        FitFileName(compositor_, factory, format, DisplayRowName(pane, entry), 240 * scale_);
     const float text_width = icon_only ? 0 : MeasureLayoutText(compositor_, factory, format, name);
     const auto size = D2D1::SizeU(
         static_cast<UINT32>(std::ceil(icon_only ? icon_size + 2 * padding : text_left + text_width + padding)),

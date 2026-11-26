@@ -29,6 +29,7 @@ struct NetworkIndexHooks {
     DWORD (WINAPI* universal_name)(LPCWSTR, DWORD, LPVOID, LPDWORD) = nullptr;
     std::wstring shard_base;
     std::wstring config_path;
+    void (*before_watch_wait)(const std::vector<HANDLE>& events) = nullptr;
 };
 void SetNetworkIndexHooks(const NetworkIndexHooks* hooks);
 struct NetworkIndexAccess;

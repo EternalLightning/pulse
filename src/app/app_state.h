@@ -69,6 +69,7 @@
 #include "unc_probe_scheduler.h"
 #include "../index/network_agent_client.h"
 #include "../index/content_search_client.h"
+#include "display_alias_search.h"
 #include "../ops/ops_manager.h"
 #include <windows.h>
 #include <atomic>
@@ -86,6 +87,7 @@
 
 namespace pulse {
 struct FolderSizesUiCache;
+struct PaneToolsState;
 
 constexpr UINT WM_WORKER_RESULT = WM_APP + 1;
 constexpr UINT WM_OPS_NOTIFY = WM_APP + 2;
@@ -242,8 +244,6 @@ struct AppState : AppCoreOwner {
     std::shared_ptr<WindowResultMailbox<app::DetailsAttributeResult>> details_attribute_mailbox;
     std::unordered_map<std::wstring, size_t> details_attribute_pending;
     uint64_t external_open_issued_sequence = 0;
-    uint64_t external_open_next_apply_sequence = 1;
-    std::unordered_map<uint64_t, app::ExternalOpenResult> external_open_pending;
     std::shared_ptr<WindowResultMailbox<std::vector<index::VolumeInfo>>> dup_volumes_mailbox;
     app::UiScheduleState ui_schedule;
     unsigned deferred_startup_step = 0;
@@ -270,6 +270,7 @@ struct AppState : AppCoreOwner {
     std::optional<PreviewDeleteIntent> previewDeleteIntent;
 
     app::WindowTabs window_tabs;
+    std::shared_ptr<PaneToolsState> pane_tools;
     app::Pane* pane = nullptr;          // focused leaf of the current layout tab
     app::Pane* targetPane = nullptr;    // Ctrl+D marked destination
     std::shared_ptr<HeaderDropQueryState> header_drop_query = std::make_shared<HeaderDropQueryState>();
@@ -370,10 +371,14 @@ struct AppState : AppCoreOwner {
     ULONGLONG dup_volume_cache_tick = 0;
     bool dup_volume_cache_pending = false;
     app::SavedSearchStore& savedSearches;
+    model::DisplayAliasSnapshot applied_display_aliases;
+    std::shared_ptr<app::DisplayAliasSearchMailbox> display_alias_search_mailbox;
     struct PendingIndexSearch {
         index::Query query;
         index::SearchResult local;
         index::SearchResult network;
+        std::vector<index::SupplementalFilenameHit> display_alias_hits;
+        std::shared_ptr<const app::DisplayAliasSearchRequest> display_alias_request;
         bool local_ready = false;
         bool network_ready = false;
     };
@@ -818,6 +823,13 @@ struct AppState : AppCoreOwner {
 
     // Right details panel (view-menu toggle, session-persisted).
     bool showDetailsPanel = false;
+    std::weak_ptr<ui::TerminalSurface> presentedTerminal;
+    bool showTerminalPanel = false;
+    bool terminalFocused = false;
+    bool terminalSelecting = false;
+    bool terminalClosePressed = false;
+    std::wstring terminalPressedLink;
+    WPARAM terminalSuppressedChar = 0;
     float detailsPanelWidth = 340.0f;
     bool detailsPanelResizing = false;
     float detailsScroll = 0.0f;
@@ -851,6 +863,9 @@ struct AppState : AppCoreOwner {
     bool marqueePending = false;
     bool marqueeActive = false;
     bool marqueeAdditive = false;
+    WPARAM marqueeButton = 0;
+    uint64_t marqueeTabIdentity = 0, marqueeViewGeneration = 0;
+    bool rightMarqueeCancelled = false;
     app::Pane* blankClickPane = nullptr;
     app::Tab* blankClickTab = nullptr;
     uint64_t blankClickGeneration = 0;

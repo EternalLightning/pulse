@@ -2,8 +2,10 @@
 #include "file_picker_places.h"
 
 #include "app_model.h"
+#include "file_picker_tabs.h"
 #include "network_locations.h"
 #include "session.h"
+#include "single_instance_coordinator.h"
 #include "../common/display_path.h"
 #include "../common/localization.h"
 #include "../common/path_utils.h"
@@ -52,9 +54,11 @@ ui::PickerPlaces LoadFilePickerPlaces(const std::function<bool()>& cancelled) {
     add_known(FOLDERID_Music, I::KnownFolderMusic, L"\xE8D6");
     add_known(FOLDERID_Videos, I::KnownFolderVideos, L"\xE714");
 
-    model::PlacesCatalog places;
+    const auto catalog = std::make_shared<model::PlacesCatalog>();
+    auto& places = *catalog;
     places.persist = false;
     places.Load();
+    result.catalog = catalog;
     for (const auto& pin : places.quick_access_paths) {
         auto directory = path::FriendlyPathText(pin);
         if (std::none_of(result.quick_access.begin(), result.quick_access.end(), [&](const auto& entry) {
@@ -80,6 +84,13 @@ ui::PickerPlaces LoadFilePickerPlaces(const std::function<bool()>& cancelled) {
         result.network.push_back({location.name, path::FriendlyPathText(fs::NormalizePath(location.path)), L"\xE968"});
     }
     return result;
+}
+
+ui::PickerPlaces LoadTakeoverPickerPlaces(const std::function<bool()>& cancelled) {
+    auto tabs = ReadPickerTabs(FindWindowW(SingleInstanceCoordinator::WindowClassName(), nullptr));
+    auto places = LoadFilePickerPlaces(cancelled);
+    places.open_tabs = std::move(tabs);
+    return places;
 }
 
 } // namespace pulse::app

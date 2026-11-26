@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "binary_transition.h"
 #include "file_picker_listing.h"
 #include "fluent_components.h"
 #include "smooth_scroll.h"
@@ -18,26 +19,27 @@ public:
     };
 
     ~FilePickerTree();
-    void Initialize(HWND window, bool show_hidden, bool pulse_folder, const PickerPlacesLoader& load_places);
+    void Initialize(HWND window, model::FileVisibility visibility, bool pulse_folder, const PickerPlacesLoader& load_places);
     void Layout(D2D1_RECT_F bounds, float scale, bool animate);
     void Navigate(std::wstring_view directory, bool animate);
     bool ApplyListing(UINT_PTR token, bool animate);
-    void Draw(Compositor& compositor, fluent::Painter& painter, const Theme& theme,
-              bool enabled, bool focused, bool high_contrast) const;
+    const std::shared_ptr<const model::PlacesCatalog>& Catalog() const { return catalog_; }
+    bool Draw(Compositor& compositor, fluent::Painter& painter, const Theme& theme,
+              bool enabled, bool focused, bool high_contrast,
+              std::optional<D2D1_POINT_2F> pointer, uint64_t now, bool animate);
     void Focus(bool animate);
     std::optional<Target> Key(WPARAM key, bool animate);
     void MouseDown(float x, float y, bool high_contrast);
-    void MouseMove(float x, float y, bool high_contrast);
+    void MouseMove(float y, bool high_contrast);
     std::optional<Target> MouseUp(float x, float y, bool animate);
-    void MouseLeave();
     void CancelPointer();
     void Scroll(float wheel_steps, UINT lines, bool animate);
     bool Tick(uint64_t now, bool animate);
     bool Pending() const { return scroll_.Pending(); }
-    void Stop() { scroll_.Reset(); CancelPointer(); }
+    void Stop() { scroll_.Reset(); scrollbar_hover_ = {}; ++draw_frame_; CancelPointer(); }
 
 private:
-    enum Group { OneDrive, QuickAccess, Devices, GroupCount };
+    enum Group { OneDrive, OpenTabs, QuickAccess, Devices, GroupCount };
 
     struct Node {
         std::wstring label;
@@ -46,14 +48,17 @@ private:
         Node* parent = nullptr;
         std::vector<std::unique_ptr<Node>> children;
         Listing listing;
+        BinaryTransition hover, disclosure;
+        uint64_t draw_frame = 0;
         float top = 0.0f;
         bool divider = false;
         bool pinned = false;
+        bool shortcut = false;
         bool expanded = false;
         bool loaded = false;
         bool failed = false;
 
-        bool Expandable() const { return !target.pulse_folder && !pinned && (!loaded || !children.empty()); }
+        bool Expandable() const { return !target.pulse_folder && !pinned && !shortcut && (!loaded || !children.empty()); }
     };
 
     Node& AddRoot(Group group, PickerPlace place);
@@ -78,19 +83,23 @@ private:
     std::vector<Node*> rows_;
     std::vector<Node*> pending_;
     Listing places_request_;
+    std::shared_ptr<const model::PlacesCatalog> catalog_;
     Node* computer_ = nullptr;
     Node* selected_ = nullptr;
     Node* cursor_ = nullptr;
-    Node* hover_ = nullptr;
     Node* pressed_ = nullptr;
     HWND window_ = nullptr;
     D2D1_RECT_F bounds_{};
     SmoothScroll scroll_;
+    BinaryTransition scrollbar_hover_;
+    uint64_t draw_frame_ = 0;
     std::wstring directory_;
     float scale_ = 1.0f, offset_ = 0.0f, drag_offset_ = 0.0f, content_height_ = 0.0f;
-    bool show_hidden_ = false, pulse_folder_ = false, navigated_ = false, reveal_ = false;
+    float last_draw_offset_ = 0.0f;
+    model::FileVisibility visibility_;
+    bool pulse_folder_ = false, navigated_ = false, reveal_ = false;
     bool pressed_disclosure_ = false;
-    bool hover_scrollbar_ = false, dragging_ = false;
+    bool dragging_ = false;
 };
 
 } // namespace pulse::ui

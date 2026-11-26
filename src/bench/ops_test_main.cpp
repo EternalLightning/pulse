@@ -1097,8 +1097,21 @@ void TestTransferControl(const std::wstring& srcDir, const std::wstring& dstDir)
         Check(!paused || (g_ops.Status().percent == paused_status.percent &&
             g_ops.Status().completed_items == paused_status.completed_items),
               L"Shell operation progress remains stable while paused");
+        if (paused) {
+            const auto folder = dstDir + L"\\created while copying";
+            const auto folder_id = g_ops.Submit(SimpleOp(ops::OpType::CreateFolder, {folder.c_str()}));
+            Check(WaitOpDone(previous, 4000) && std::filesystem::is_directory(folder) &&
+                g_ops.Status().task_id == paused_status.task_id && g_ops.Status().phase == ops::OpPhase::Paused,
+                L"a new folder completes while the large copy stays paused");
+            const auto completed_operations = g_ops.DrainCompletions();
+            Check(std::any_of(completed_operations.begin(), completed_operations.end(), [&](const auto& operation) {
+                return operation.task_id == folder_id && operation.type == ops::OpType::CreateFolder;
+            }), L"concurrent folder creation reports completion under its own task ID");
+            Check(g_ops.CanUndo(), L"concurrent folder creation records its undo identity");
+        }
+        const auto before_resume = g_ops.Status().completed_ops;
         g_ops.ResumeCurrent();
-        Check(WaitOpDone(previous), L"paused copy resumes and completes");
+        Check(WaitOpDone(before_resume), L"paused copy resumes and completes");
         const auto completed = g_ops.Status();
         if (!completed.last_error.empty()) wprintf(L"resume error: %s\n", completed.last_error.c_str());
         Check(completed.total_items == 1 && completed.completed_items == 1 &&
@@ -1485,6 +1498,66 @@ int RunOpsTests(int argc, wchar_t** argv) {
             setvbuf(stdout, nullptr, _IONBF, 0);
             return ops::RunUndoIdentityRegressions(SandboxRoot() + L"-undo-identity-" +
                 std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+        }
+        if (filter == L"extension-compression") {
+            setvbuf(stdout, nullptr, _IONBF, 0);
+            const auto root = SandboxRoot() + L"-extension-compression-" + std::to_wstring(GetCurrentProcessId());
+            const auto source = root + L"\\sample.bin", archive = root + L"\\sample.7z", folder = root + L"\\new folder";
+            std::error_code error;
+            std::filesystem::create_directories(root, error);
+            if (error || !MakePatternFile(source, 64ull * 1024 * 1024)) return 2;
+            const HWND owner = CreateWindowExW(WS_EX_NOACTIVATE, L"Static", L"Pulse compression test", WS_POPUP,
+                -20000, -20000, 400, 300, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+            if (!owner) return 2;
+            g_ops.SetUiWindow(owner);
+            std::mutex mutex;
+            std::optional<ops::ShellMenuItem> command;
+            g_ops.SetShellMenuCallback([&](uint32_t, std::vector<ops::ShellMenuItem> items, bool, std::vector<std::wstring>) {
+                const auto it = std::find_if(items.begin(), items.end(), [](const auto& item) {
+                    return item.enabled && !item.has_children && item.text.find(L"sample.7z") != std::wstring::npos;
+                });
+                if (it != items.end()) { std::lock_guard lock(mutex); command = *it; }
+            });
+            g_ops.Start({});
+            const auto wait = [](const auto& predicate, DWORD timeout) {
+                const auto end = GetTickCount64() + timeout;
+                do {
+                    if (predicate()) return true;
+                    MSG msg{};
+                    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+                    MsgWaitForMultipleObjects(0, nullptr, FALSE, 15, QS_ALLINPUT);
+                } while (GetTickCount64() < end);
+                return false;
+            };
+            const auto token = g_ops.QueryShellMenu({source}, owner, false, false);
+            const bool found = token && wait([&] { std::lock_guard lock(mutex); return command.has_value(); }, 8000);
+            if (found) {
+                ops::ShellMenuItem selected;
+                { std::lock_guard lock(mutex); selected = *command; }
+                g_ops.InvokeShellMenu(token, selected.id, selected.verb, selected.text);
+                const bool started = wait([&] { return std::filesystem::exists(archive); }, 6000);
+                Check(started && IsWindowEnabled(owner), L"7-Zip starts compressing through Pulse with its owner enabled");
+                g_ops.Submit(SimpleOp(ops::OpType::CreateFolder, {folder.c_str()}));
+                Check(wait([&] { return std::filesystem::is_directory(folder); }, 4000) && IsWindowEnabled(owner),
+                    L"a folder can be created after launching 7-Zip compression");
+                const auto archive_closed = [&] {
+                    const auto output = CreateFileW(archive.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                    if (output == INVALID_HANDLE_VALUE) return false;
+                    CloseHandle(output);
+                    return true;
+                };
+                if (started && !archive_closed())
+                    std::puts("[PASS] folder creation overlapped the external archive writer");
+                Check(wait(archive_closed, 8000) && std::filesystem::file_size(archive, error) > 0 && !error,
+                    L"7-Zip writes the test archive");
+            } else {
+                std::puts("[LIMIT] 7-Zip did not expose its quick 7z command to the fixture");
+                if (token) g_ops.CloseShellMenu(token);
+            }
+            g_ops.Stop();
+            DestroyWindow(owner);
+            return found ? (g_fail ? 1 : 0) : 2;
         }
         if (filter == L"transfer-control") {
             setvbuf(stdout, nullptr, _IONBF, 0);

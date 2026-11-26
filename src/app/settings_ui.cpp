@@ -4,6 +4,10 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "app_internal.h"
+#include "app_file_picker.h"
+#include "app_terminal.h"
+#include "../ui/typography.h"
+#include "../ops/terminal_process.h"
 #include "../common/localization.h"
 #include "about_info.h"
 #include "background_window_fit.h"
@@ -14,6 +18,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <cmath>
+#include <filesystem>
 
 namespace pulse {
 namespace {
@@ -61,9 +66,10 @@ constexpr SettingDestination destinations[]={
     {I::SettingsDefaultManager,8,0},{I::SettingsExplorerTakeover,8,0},
     {I::SettingsFileDialogBridge,8,0},{I::SettingsFileDialogTakeover,8,0},
     {I::SettingsLaunch,8,0},
-    {I::StartToTray,8,0},{I::SettingsKeepRunning,8,0},{I::ConfigurationLocation,8,0},
+    {I::SettingsKeepRunning,8,0},{I::ConfigurationLocation,8,0},
     {I::SettingsTransfer,8,0},{I::ExportSettingsTitle,8,0},{I::ImportSettingsTitle,8,0},
-    {I::SettingsStagingTray,9,0},{I::SettingsTextCompare,9,0},{I::SettingsChangeTracking,9,0},
+    {I::TerminalPanel,9,0},{I::SettingsTerminalShell,9,0},{I::TerminalFont,9,0},{I::TerminalFontSize,9,0},
+    {I::TerminalFollowDirectory,9,0},{I::SettingsStagingTray,9,0},{I::SettingsTextCompare,9,0},{I::SettingsChangeTracking,9,0},
     {I::SettingsChangeDays,9,0},
     {I::GlobalSearch,1,0},{I::GlobalSearchHotkey,10,0},{I::SearchPinyin,1,0},
     {I::ContentIndexManage,1,0},{I::IndexLocation,1,2},{I::LocalDrives,1,2},
@@ -181,6 +187,12 @@ bool HandleSettingsControl(AppState& s,const H& hit) {
     case H::SettingsSysCtx: HandleSystemContextAction(s,hit.index);break;
     case H::SettingsCtxPivot: OpenSettingsTab(s,hit.index);break;
     case H::SettingsToggle: {
+        if (hit.index == 39) {
+            auto preferences = s.appPrefs.terminal_display;
+            preferences.follow_directory = !preferences.follow_directory;
+            SetEmbeddedTerminalPreferences(s, preferences);
+            break;
+        }
         if(hit.index<ui::kSettingsMenuFixedHit) return false;
         if(hit.index<ui::kSettingsMenuRowHit) return true;
         const auto vm=BuildVm(s,false);
@@ -211,7 +223,70 @@ bool HandleSettingsControl(AppState& s,const H& hit) {
     case H::SettingsTheme: SetThemeMode(s,hit.index);break;
     case H::SettingsDropdown: {
         std::vector<ui::FluentMenuItem> items;
-        if(hit.index==2) {
+        if (hit.index == 4) {
+            auto preferences = s.appPrefs.terminal_display;
+            const auto fonts = ui::typography::MonospaceFamilies(s.compositor.DwriteFactory());
+            items.push_back(Item(1, I::TerminalFontDefault, preferences.font_family.empty()));
+            for (size_t i = 0; i < fonts.size(); ++i) {
+                auto& item = items.emplace_back();
+                item.command = static_cast<int>(i) + 2;
+                item.text = fonts[i];
+                item.checked = _wcsicmp(fonts[i].c_str(), preferences.font_family.c_str()) == 0;
+            }
+            const int command = Dropdown(s, hit.index, std::move(items));
+            if (command > 0 && static_cast<size_t>(command - 1) <= fonts.size()) {
+                preferences.font_family = command == 1 ? std::wstring{} : fonts[static_cast<size_t>(command - 2)];
+                SetEmbeddedTerminalPreferences(s, preferences);
+            }
+        } else if (hit.index == 5) {
+            using Display = model::TerminalPreferences;
+            auto preferences = s.appPrefs.terminal_display;
+            for (int size = Display::kMinSize; size <= Display::kMaxSize; ++size) {
+                auto& item = items.emplace_back();
+                item.command = size;
+                item.text = std::to_wstring(size) + L" pt";
+                item.checked = size == preferences.font_size;
+            }
+            const int command = Dropdown(s, hit.index, std::move(items));
+            if (command >= Display::kMinSize && command <= Display::kMaxSize) {
+                preferences.font_size = command;
+                SetEmbeddedTerminalPreferences(s, preferences);
+            }
+        } else if (hit.index == 3) {
+            const I shells[] = {I::TerminalWindowsPowerShell, I::TerminalCommandPrompt, I::TerminalPowerShell7};
+            for (int i = 0; i < 3; ++i)
+                items.push_back(Item(i + 1, shells[i], static_cast<int>(s.appPrefs.terminal_shell) == i));
+            items.push_back(Item(4, I::TerminalChoosePwsh));
+            const int command = Dropdown(s, hit.index, std::move(items));
+            if (command < 1 || command > 4) break;
+
+            auto path = s.appPrefs.terminal_pwsh_path;
+            if (command == 4) {
+                ui::FilePickerSpec picker;
+                picker.title = l10n::Get(I::TerminalPowerShell7);
+                picker.filters = {{L"pwsh.exe", L"pwsh.exe"}};
+                picker.filename = L"pwsh.exe";
+                if (!path.empty()) picker.initial_path = std::filesystem::path(path).parent_path().wstring();
+                if (!PickPulsePath(s, s.hwnd, std::move(picker), path, ops::IsPowerShell7)) break;
+            }
+            const auto shell = static_cast<ops::TerminalShell>(std::min(command - 1, 2));
+            const auto prior_shell = s.appPrefs.terminal_shell;
+            const auto prior_path = s.appPrefs.terminal_pwsh_path;
+            s.appPrefs.terminal_shell = shell;
+            s.appPrefs.terminal_pwsh_path = path;
+            if (!s.appPrefs.Save()) {
+                s.appPrefs.terminal_shell = prior_shell;
+                s.appPrefs.terminal_pwsh_path = prior_path;
+                s.settings.SetError(l10n::Get(I::SettingsSystemApplySaveError));
+                break;
+            }
+            s.settings.ClearError();
+            s.core.windows.ForEach([&](HWND hwnd, AppState& window) {
+                window.appPrefs.terminal_shell = shell;
+                window.appPrefs.terminal_pwsh_path = path;
+                InvalidateRect(hwnd, nullptr, FALSE);
+            });
+        } else if(hit.index==2) {
             const I labels[]={I::ExternalOpenReuse,I::ExternalOpenTab,I::ExternalOpenWindow};
             for(int i=0;i<3;++i) items.push_back(Item(i+1,labels[i],static_cast<int>(s.appPrefs.external_open_mode)==i));
             const int command=Dropdown(s,hit.index,std::move(items));

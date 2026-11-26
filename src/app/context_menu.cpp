@@ -5,6 +5,7 @@
 
 // context_menu.cpp — See context_menu.h.
 #include "context_menu.h"
+#include "../ui/file_view_menu.h"
 #include "app_model.h"
 #include "text_compare_selection.h"
 #include "../common/localization.h"
@@ -79,6 +80,7 @@ void OrganizeItemMenu(std::vector<ui::FluentMenuItem>& items) {
         case CmdOpenPath: return 12;
         case CmdOpenTerminal: return 13;
         case CmdBatchRename: return 20;
+        case CmdDisplayAlias: return 20;
         case CmdNewFolderWithSelection: return 23;
         case CmdUngroupFolder: return 24;
         case CmdCopyPath: return 21;
@@ -308,37 +310,9 @@ std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem, bool drive)
 }
 
 std::vector<ui::FluentMenuItem> BuildSortMenu(const BackgroundViewOptions& options) {
-    auto sort = Item(CmdNone, l10n::Get(l10n::StringId::SortBy).c_str(), L"\xE8CB",
-                     nullptr, options.can_sort);
-    struct SortRow { int command; ui::SortColumn column; l10n::StringId label; };
-    constexpr SortRow rows[] = {
-        { CmdSortName, ui::SortColumn::Name, l10n::StringId::ColumnName },
-        { CmdSortModified, ui::SortColumn::Mtime, l10n::StringId::ColumnModified },
-        { CmdSortType, ui::SortColumn::Type, l10n::StringId::ColumnType },
-        { CmdSortSize, ui::SortColumn::Size, l10n::StringId::ColumnSize },
-        { CmdSortPath, ui::SortColumn::Path, l10n::StringId::ColumnPath },
-    };
-    for (const auto& row : rows) {
-        if (row.column == ui::SortColumn::Path && !options.show_path) continue;
-        auto child = Item(row.command, l10n::Get(row.label).c_str(), L"", nullptr,
-                          options.can_sort && !(options.indexed_search &&
-                          (row.column == ui::SortColumn::Type || row.column == ui::SortColumn::Path)));
-        child.radio_group = true;
-        child.radio = options.can_sort && options.sort_column == row.column;
-        sort.children.push_back(std::move(child));
-    }
-    sort.children.back().separator_after = true;
-    for (bool ascending : { true, false }) {
-        auto child = Item(ascending ? CmdSortAscending : CmdSortDescending,
-            l10n::Get(ascending ? l10n::StringId::SortAscending
-                               : l10n::StringId::SortDescending).c_str(), L"", nullptr,
-            options.can_sort);
-        child.radio_group = true;
-        child.radio = options.can_sort &&
-            (options.sort_direction == ui::SortDirection::Asc) == ascending;
-        sort.children.push_back(std::move(child));
-    }
-    sort.children.back().separator_after = true;
+    auto items = ui::BuildFileSortChoices(options.sort_column, options.sort_direction, CmdSortName,
+                                          options.can_sort, options.show_path, options.indexed_search);
+    items.back().separator_after = true;
     struct FolderSortRow { int command; int value; l10n::StringId label; };
     constexpr FolderSortRow folder_rows[] = {
         { CmdFolderSortTop, 0, l10n::StringId::FolderSortTop },
@@ -349,9 +323,9 @@ std::vector<ui::FluentMenuItem> BuildSortMenu(const BackgroundViewOptions& optio
         auto child = Item(row.command, l10n::Get(row.label).c_str(), L"", nullptr, options.can_sort);
         child.radio_group = true;
         child.radio = options.can_sort && options.folder_sort == row.value;
-        sort.children.push_back(std::move(child));
+        items.push_back(std::move(child));
     }
-    return std::move(sort.children);
+    return items;
 }
 
 void AppendBackgroundViewCommands(std::vector<ui::FluentMenuItem>& items,
@@ -380,7 +354,15 @@ std::vector<ui::FluentMenuItem> BuildNewMenu() {
     return items;
 }
 
-std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset) {
+std::vector<ui::FluentMenuItem> BuildDirectorySyncMenu(const CommandContext& context) {
+    return {
+        BuildCommandMenuItem(CmdSyncLeftToRight, context),
+        BuildCommandMenuItem(CmdSyncRightToLeft, context),
+        BuildCommandMenuItem(CmdSyncNewerBothWays, context),
+    };
+}
+
+std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset, const CommandContext& context) {
     struct Row {
         int cmd;
         const wchar_t* shortcut;
@@ -402,56 +384,23 @@ std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset) {
         it.pictogram = row.pictogram;
         items.push_back(std::move(it));
     }
+    if (context.side_by_side) {
+        items.back().separator_after = true;
+        items.push_back(BuildCommandMenuItem(CmdLinkedBrowsing, context));
+        auto sync = BuildCommandMenuItem(CmdDirectorySync, context);
+        sync.children = BuildDirectorySyncMenu(context);
+        items.push_back(std::move(sync));
+    }
     return items;
 }
 
 std::vector<ui::FluentMenuItem> BuildGroupingMenu(ui::GroupMode mode,
                                                 ui::SortDirection direction, bool enabled) {
-    static constexpr l10n::StringId labels[] = {l10n::StringId::GroupAuto, l10n::StringId::GroupNone,
-        l10n::StringId::GroupDate, l10n::StringId::GroupType, l10n::StringId::GroupSize};
-    static constexpr ui::GroupMode modes[] = {ui::GroupMode::Auto, ui::GroupMode::None,
-        ui::GroupMode::DateModified, ui::GroupMode::Type, ui::GroupMode::Size};
-    std::vector<ui::FluentMenuItem> items;
-    for (int i = 0; i < 5; ++i) {
-        auto item = Item(CmdGroupAuto + i, l10n::Get(labels[i]).c_str(), L"", nullptr, enabled);
-        item.radio_group = true;
-        item.radio = modes[i] == mode;
-        items.push_back(std::move(item));
-    }
-    items.back().separator_after = true;
-    const bool can_order = enabled && mode != ui::GroupMode::Auto && mode != ui::GroupMode::None;
-    auto ascending = Item(CmdGroupAscending, l10n::Get(l10n::StringId::GroupAscending).c_str(), L"", nullptr, can_order);
-    ascending.radio_group = true;
-    ascending.radio = direction == ui::SortDirection::Asc;
-    items.push_back(std::move(ascending));
-    auto descending = Item(CmdGroupDescending, l10n::Get(l10n::StringId::GroupDescending).c_str(), L"", nullptr, can_order);
-    descending.radio_group = true;
-    descending.radio = direction == ui::SortDirection::Desc;
-    items.push_back(std::move(descending));
-    return items;
+    return ui::BuildFileGroupingChoices(mode, direction, CmdGroupAuto, CmdGroupAscending, CmdGroupDescending, enabled);
 }
 
 std::vector<ui::FluentMenuItem> BuildViewMenu(ui::ViewMode current_mode, bool details_panel) {
-    static constexpr l10n::StringId labels[] = {
-        l10n::StringId::ViewExtraLarge, l10n::StringId::ViewLarge,
-        l10n::StringId::MediumIcons, l10n::StringId::ViewSmall,
-        l10n::StringId::ViewList, l10n::StringId::ViewDetails,
-        l10n::StringId::ViewTiles, l10n::StringId::ViewContent,
-    };
-    static constexpr const wchar_t* glyphs[] = {
-        L"\xE7F4", L"\xE7F4", L"\xE7F4", L"\xECA5",
-        L"\xEA37", L"\xE8A5", L"\xECA5", L"\xE8FD"
-    };
-    std::vector<ui::FluentMenuItem> items;
-    items.reserve(9);
-    for (int i = 0; i < 8; ++i) {
-        auto row = Item(CmdViewBase + i, l10n::Get(labels[i]).c_str(), glyphs[i]);
-        if (i == 0) row.glyph_scale = 1.16f;
-        else if (i == 1) row.glyph_scale = 1.0f;
-        else if (i == 2) row.glyph_scale = 0.82f;
-        row.radio = ui::ViewModeIndex(current_mode) == i;
-        items.push_back(std::move(row));
-    }
+    auto items = ui::BuildFileViewChoices(current_mode, CmdViewBase);
     items.back().separator_after = true;
     auto panel = Item(CmdDetailsPanel, l10n::Get(l10n::StringId::DetailsPane).c_str(), L"\xE700");
     panel.checked = details_panel;
@@ -536,7 +485,8 @@ std::vector<ui::FluentMenuItem> BuildCommandPalette(const std::wstring& query,
                                                     bool project_only,
                                                     size_t total,
                                                     const std::wstring& current_path,
-                                                    const CommandContext& context) {
+                                                    const CommandContext& context,
+                                                    const model::DisplayAliasSnapshot& aliases) {
     std::vector<ui::FluentMenuItem> items;
     const OmnibarQuery parsed = ParseOmnibarQuery(query, project_only);
     const std::wstring& needle = parsed.needle;
@@ -557,7 +507,8 @@ std::vector<ui::FluentMenuItem> BuildCommandPalette(const std::wstring& query,
         for (size_t i = 0; i < hits.size() && i < 48; ++i) {
             items.push_back(Item(CmdIndexBase + static_cast<int>(i),
                 hits[i].name.c_str(), hits[i].is_dir ? kGlyphFolder : kGlyphNewFile));
-            items.back().text = hits[i].name;
+            const auto alias = model::FindDisplayAlias(aliases, hits[i].path);
+            if (!alias.empty()) items.back().text = alias;
             items.back().shortcut = DisplayPath(hits[i].path);
             items.back().shortcut_inline = true;
             const std::wstring n = fs::NormalizePath(hits[i].path);

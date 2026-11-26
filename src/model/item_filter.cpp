@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "item_filter.h"
+#include "places.h"
 #include <algorithm>
 #include <cwctype>
 
@@ -195,18 +196,35 @@ CompiledItemFilter CompileItemFilter(std::wstring_view text, const ItemFilterTag
     return result;
 }
 
+CompiledItemFilter CompileCatalogItemFilter(std::wstring_view text, const PlacesCatalog* places) {
+    return CompileItemFilter(text, [places](std::wstring_view needle, bool fuzzy) {
+        std::vector<int> matches;
+        if (places) for (size_t id = 0; id < places->tags.size(); ++id) {
+            if (ItemFilterTagNameMatches(places->tags[id].name, static_cast<int>(id), needle, fuzzy))
+                matches.push_back(static_cast<int>(id));
+        }
+        return matches;
+    });
+}
+
 bool CompiledItemFilter::Matches(const fs::DirEntry& entry, const std::wstring& full_path,
-                                  const ItemFilterTagLookup& lookup) const {
+                                  const ItemFilterTagLookup& lookup, std::wstring_view display_alias) const {
     if (!Valid()) return false;
     const auto* chars = entry.name.data();
     const auto length = static_cast<uint32_t>(entry.name.size());
-    if (!(wildcard ? index::WildcardFolded(chars, length, name) : index::ContainsFolded(chars, length, name)))
+    const auto matches = [this](std::wstring_view value) {
+        const auto size = static_cast<uint32_t>(value.size());
+        return wildcard ? index::WildcardFolded(value.data(), size, name)
+                        : index::ContainsFolded(value.data(), size, name);
+    };
+    if (!matches(entry.name) && (display_alias.empty() || !matches(display_alias)))
         return false;
     const uint64_t modified = (static_cast<uint64_t>(entry.mtime.dwHighDateTime) << 32) |
         entry.mtime.dwLowDateTime;
     for (const auto& term : metadata) {
         const bool name_matches = term.name_in_path ? index::MatchPath(full_path, term) :
-            index::MatchName(chars, length, term);
+            (index::MatchName(chars, length, term) || (!display_alias.empty() &&
+             index::MatchName(display_alias.data(), static_cast<uint32_t>(display_alias.size()), term)));
         if (!index::MatchNameAndType(name_matches, entry.is_dir, term) ||
             (index::MatchExt(chars, length, term) == term.ext_not) ||
             (index::MatchSize(entry.size, term) == term.size_not) ||

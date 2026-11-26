@@ -43,7 +43,9 @@ FilePickerTree::Node& FilePickerTree::AddRoot(Group group, PickerPlace place) {
 }
 
 void FilePickerTree::ApplyPlaces(PickerPlaces places) {
+    catalog_ = std::move(places.catalog);
     for (auto& place : places.onedrive) AddRoot(OneDrive, std::move(place));
+    for (auto& place : places.open_tabs) AddRoot(OpenTabs, std::move(place)).shortcut = true;
     for (auto& place : places.quick_access) AddRoot(QuickAccess, std::move(place)).pinned = true;
     if (pulse_folder_) {
         AddRoot(QuickAccess, {l10n::Get(l10n::StringId::PickerPulseFolder), {}, L"\xE8B7"}).target.pulse_folder = true;
@@ -51,9 +53,10 @@ void FilePickerTree::ApplyPlaces(PickerPlaces places) {
     for (auto& place : places.network) AddRoot(Devices, std::move(place));
 }
 
-void FilePickerTree::Initialize(HWND window, bool show_hidden, bool pulse_folder, const PickerPlacesLoader& load_places) {
+void FilePickerTree::Initialize(HWND window, model::FileVisibility visibility, bool pulse_folder,
+                                const PickerPlacesLoader& load_places) {
     window_ = window;
-    show_hidden_ = show_hidden;
+    visibility_ = visibility;
     pulse_folder_ = pulse_folder;
     computer_ = &AddRoot(Devices, {l10n::Get(l10n::StringId::ThisPc), {}, L"\xE977"});
     computer_->expanded = true;
@@ -90,7 +93,7 @@ void FilePickerTree::Fetch(Node& node) {
     request->window = window_;
     request->directory = node.target.directory;
     request->mode = PickerMode::Folder;
-    request->show_hidden = show_hidden_;
+    request->visibility = visibility_;
     node.failed = !SubmitPickerListing(request);
     if (node.failed) return;
     node.listing = std::move(request);
@@ -116,9 +119,9 @@ bool FilePickerTree::ApplyListing(UINT_PTR token, bool animate) {
             node->target.directory = std::move(request->directory);
             const auto& directory = node->target.directory;
             const auto prefix = directory.empty() || directory.back() == L'\\' ? directory : directory + L'\\';
-            for (auto& entry : request->entries) {
+            for (const int index : request->projection.indices) {
                 auto child = std::make_unique<Node>();
-                child->label = std::move(entry.name);
+                child->label = (*request->base)[static_cast<size_t>(index)].name;
                 child->target.directory = prefix + child->label;
                 child->parent = node;
                 child->glyph = node == computer_ ? L"\xEDA2" : L"\xE8B7";
@@ -140,7 +143,8 @@ void FilePickerTree::SyncPath(bool animate) {
     for (const auto& group : roots_) for (const auto& root : group) {
         const auto& target = root->target.directory;
         if (target.size() > node->target.directory.size() &&
-            (!root->pinned || target.size() == directory_.size()) && IsWithin(directory_, target)) node = root.get();
+            ((!root->pinned && !root->shortcut) || target.size() == directory_.size()) &&
+            IsWithin(directory_, target)) node = root.get();
     }
     while (node && node->target.directory.size() != directory_.size()) {
         node->expanded = true;
@@ -169,6 +173,7 @@ void FilePickerTree::AppendRows(Node& node) {
 
 void FilePickerTree::RebuildRows(bool animate) {
     rows_.clear();
+    last_draw_offset_ = -1.0f;
     content_height_ = 0.0f;
     for (const auto& group : roots_) {
         if (group.empty()) continue;
@@ -223,16 +228,24 @@ D2D1_RECT_F FilePickerTree::DisclosureBounds(const Node& node, size_t row) const
 
 fluent::ScrollbarSpec FilePickerTree::Scrollbar() const {
     return {bounds_, offset_, Viewport(), content_height_ * scale_,
-        hover_scrollbar_ || dragging_ ? 1.0f : 0.0f, 1.0f, true};
+        scrollbar_hover_.value, 1.0f, true};
 }
 
-void FilePickerTree::Draw(Compositor& compositor, fluent::Painter& painter, const Theme& theme,
-                          bool enabled, bool focused, bool high_contrast) const {
+bool FilePickerTree::Draw(Compositor& compositor, fluent::Painter& painter, const Theme& theme,
+                          bool enabled, bool focused, bool high_contrast,
+                          std::optional<D2D1_POINT_2F> pointer, uint64_t now, bool animate) {
+    const auto* hovered = enabled && pointer && !dragging_ ? Hit(pointer->x, pointer->y) : nullptr;
+    scrollbar_hover_.TickHover(Maximum() > 0 && enabled &&
+        (dragging_ || (pointer && OnScrollbar(pointer->x, pointer->y))), now, animate);
+    bool pending = scrollbar_hover_.Pending();
+    const bool steady = last_draw_offset_ == offset_;
+    last_draw_offset_ = offset_;
+    const auto previous_frame = draw_frame_++;
     auto* dc = compositor.Dc();
     dc->PushAxisAlignedClip(bounds_, D2D1_ANTIALIAS_MODE_ALIASED);
     for (size_t row = FirstRowEndingAfter(bounds_.top); row < rows_.size(); ++row) {
         auto rect = RowBounds(row);
-        const auto& node = *rows_[row];
+        auto& node = *rows_[row];
         if (node.divider) {
             const float y = std::round(rect.top - kGroupGapDip * scale_ * 0.5f);
             painter.FillRoundedRect(D2D1::RectF(rect.left + 9.0f * scale_, y,
@@ -248,9 +261,14 @@ void FilePickerTree::Draw(Compositor& compositor, fluent::Painter& painter, cons
         item.trailing_reserve = node.pinned ? 20.0f * scale_ : 0.0f;
         item.state.enabled = enabled;
         item.state.selected = &node == selected_;
-        item.state.hovered = &node == hover_;
+        item.state.hovered = &node == hovered;
         item.state.pressed = &node == pressed_ && !pressed_disclosure_;
         item.state.keyboard_focus = focused && &node == cursor_;
+        const bool was_visible = previous_frame != 0 && node.draw_frame == previous_frame;
+        node.draw_frame = draw_frame_;
+        node.hover.TickHover(item.state.hovered, now, animate && steady && was_visible);
+        item.state.hover_progress = node.hover.value;
+        pending |= node.hover.Pending();
         painter.DrawSidebarItem(item);
         if (item.state.keyboard_focus) painter.DrawFocusRing(rect, theme.radius_flyout * scale_);
         if (node.pinned) {
@@ -260,14 +278,22 @@ void FilePickerTree::Draw(Compositor& compositor, fluent::Painter& painter, cons
                 rect.right - 8.0f * scale_, rect.bottom - 8.0f * scale_), color);
         }
         if (node.Expandable()) {
-            const auto glyph = node.expanded ? L"\xE70D" : L"\xE76C";
+            node.disclosure.Tick(node.expanded, now, animate && was_visible, 180.0f);
+            pending |= node.disclosure.Pending();
             auto color = !enabled || node.listing ? theme.text_disabled : node.failed ? theme.danger : theme.text_secondary;
-            painter.DrawGlyph(glyph, D2D1::RectF(disclosure.left + 4 * scale_, disclosure.top + 7 * scale_,
-                disclosure.right - 4 * scale_, disclosure.bottom - 7 * scale_), color);
+            const auto glyph = D2D1::RectF(disclosure.left + 4 * scale_, disclosure.top + 7 * scale_,
+                disclosure.right - 4 * scale_, disclosure.bottom - 7 * scale_);
+            D2D1_MATRIX_3X2_F transform;
+            dc->GetTransform(&transform);
+            dc->SetTransform(D2D1::Matrix3x2F::Rotation(node.disclosure.value * 90.0f,
+                D2D1::Point2F((glyph.left + glyph.right) * 0.5f, (glyph.top + glyph.bottom) * 0.5f)) * transform);
+            painter.DrawGlyph(L"\xE76C", glyph, color);
+            dc->SetTransform(transform);
         }
     }
     painter.DrawScrollbar(Scrollbar());
     dc->PopAxisAlignedClip();
+    return pending;
 }
 
 void FilePickerTree::Reveal(Node* node, bool animate) {
@@ -349,9 +375,7 @@ void FilePickerTree::MouseDown(float x, float y, bool high_contrast) {
     }
 }
 
-void FilePickerTree::MouseMove(float x, float y, bool high_contrast) {
-    hover_ = Hit(x, y);
-    hover_scrollbar_ = OnScrollbar(x, y);
+void FilePickerTree::MouseMove(float y, bool high_contrast) {
     if (dragging_) DragScrollbar(y, high_contrast);
 }
 
@@ -364,8 +388,6 @@ std::optional<FilePickerTree::Target> FilePickerTree::MouseUp(float x, float y, 
     if (disclosure) { Toggle(*node, animate); return {}; }
     return node->target;
 }
-
-void FilePickerTree::MouseLeave() { hover_ = nullptr; hover_scrollbar_ = false; }
 
 void FilePickerTree::CancelPointer() {
     pressed_ = nullptr;

@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "typography.h"
+#include "command_icons.h"
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
 #include "../common/localization.h"
@@ -108,8 +109,10 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
         for (int i = 0; i < lay.section_count; ++i) section(i, lay.section_title[i]);
         for (const auto &row : lay.category_rows) draw_card(row);
         const I languages[] = {I::LanguageSystem, I::LanguageZhCN, I::LanguageEnUS};
-        const auto dropdown = [&](D2D1_RECT_F r, D2D1_RECT_F c, I title, I desc, const std::wstring &value, int id) {
-            label(r, l10n::Get(title), l10n::Get(desc), id == 0 ? L"\xE790" : L"\xE8C1",
+        const auto dropdown = [&](D2D1_RECT_F r, D2D1_RECT_F c, I title, const std::wstring& desc, const std::wstring& value, int id) {
+            const auto* icon = id == 3 ? command_icons::kEmbeddedTerminalGlyph :
+                id >= 4 ? L"\xE8D2" : id == 0 ? L"\xE790" : L"\xE8C1";
+            label(r, l10n::Get(title), desc, icon,
                   c.left < r.left + 100 * scale_ ? r.right - 16 * scale_ : c.left - 12 * scale_);
             fluent::ButtonSpec control{};
             control.bounds = c;
@@ -289,7 +292,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             const I blurs[] = {I::WallpaperBlurOff, I::WallpaperBlurLight, I::WallpaperBlurStrong};
             segmented(lay.wallpaper_blur_card, lay.wallpaper_blur_row, blurs, levels, vm.wallpaper_blur,
                       H::SettingsWallpaperBlur, I::SettingsWallpaperBlur, l10n::Get(I::SettingsWallpaperBlurDesc));
-            dropdown(lay.language_card, lay.language_choice, I::SettingsLanguage, I::SettingsLanguageDesc,
+            dropdown(lay.language_card, lay.language_choice, I::SettingsLanguage, l10n::Get(I::SettingsLanguageDesc),
                      l10n::Get(languages[vm.settings_language]), 1);
             const I text_render[] = {I::TextRenderAuto, I::TextRenderSharp, I::TextRenderSmooth};
             const int text_render_values[] = {0, 1, 2};
@@ -334,7 +337,7 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
 
             const I external_modes[] = {I::ExternalOpenReuse, I::ExternalOpenTab, I::ExternalOpenWindow};
             dropdown(lay.external_open_card, lay.external_open_choice, I::SettingsExternalOpen,
-                     I::SettingsExternalOpenDesc,
+                     l10n::Get(I::SettingsExternalOpenDesc),
                      l10n::Get(external_modes[std::clamp(vm.settings_external_open_mode, 0, 2)]), 2);
             toggle(lay.pinned_names_row, I::PinnedNames, I::PinnedNamesDesc, L"\xE718", vm.show_pinned_tab_names, 6);
             toggle(lay.last_tab_row, I::CloseLastTabWindow, I::CloseLastTabWindowDesc, L"\xE8BB",
@@ -373,7 +376,6 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
             }
             toggle(lay.startup_row[0], I::SettingsLaunch, I::SettingsLaunchDesc, L"\xE7E8",
                    vm.settings_launch_on_startup, 1);
-            toggle(lay.startup_tray_row, I::StartToTray, I::StartToTrayDesc, L"\xE73F", vm.settings_start_to_tray, 31);
             toggle(lay.startup_row[1], I::SettingsKeepRunning, I::SettingsKeepRunningDesc, L"\xE737",
                    vm.settings_keep_running, 2);
 
@@ -416,6 +418,17 @@ void MainRenderer::DrawSettingsCore(const WindowViewModel& vm, const D2D1_RECT_F
                                         lay.footer.right - lay.footer.left, theme.text_secondary);
             dc->PopAxisAlignedClip();
         } else if (vm.settings_page == 9) {
+            const I shells[] = {I::TerminalWindowsPowerShell, I::TerminalCommandPrompt, I::TerminalPowerShell7};
+            dropdown(lay.terminal_shell_card, lay.terminal_shell_choice, I::SettingsTerminalShell,
+                     l10n::Get(I::SettingsTerminalShellDesc),
+                     l10n::Get(shells[std::clamp(vm.settings_terminal_shell, 0, 2)]), 3);
+            const auto& terminal = vm.settings_terminal_display;
+            dropdown(lay.terminal_font_card, lay.terminal_font_choice, I::TerminalFont, {},
+                terminal.font_family.empty() ? l10n::Get(I::TerminalFontDefault) : terminal.font_family, 4);
+            dropdown(lay.terminal_size_card, lay.terminal_size_choice, I::TerminalFontSize, {},
+                std::to_wstring(terminal.font_size) + L" pt", 5);
+            toggle(lay.terminal_follow_row, I::TerminalFollowDirectory, I::TerminalFollowDirectoryDesc,
+                L"\xE8B7", terminal.follow_directory, 39);
             toggle(lay.staging_tray_row, I::SettingsStagingTray, I::SettingsStagingTrayDesc, L"\xE7B8",
                    vm.staging_tray_enabled, 36);
             toggle(lay.text_compare_row, I::SettingsTextCompare, I::SettingsTextCompareDesc, L"\xE8A5",

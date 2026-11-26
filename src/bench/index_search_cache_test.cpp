@@ -36,7 +36,7 @@ struct EngineTestAccess {
     static bool Cached(const Engine& e, const Query& q, size_t total) {
         return e.cache_epoch_ == e.filter_epoch_ && e.cache_raw_ == q.needle &&
             e.cache_path_prefix_ == q.path_prefix && e.cache_folders_only_ == q.folders_only &&
-            e.cache_set_.universe == e.LiveCount() && e.cache_set_.total == total;
+            e.cache_set_ && e.cache_set_->universe == e.LiveCount() && e.cache_set_->total == total;
     }
     static bool Same(const SearchResult& a, const SearchResult& b) {
         if (a.total != b.total || a.hits.size() != b.hits.size() || a.incomplete != b.incomplete) return false;
@@ -221,7 +221,7 @@ struct EngineTestAccess {
         const auto first = e.Search(q, nullptr, 0, [&](const auto&) { ++calls; return true; },
             [&] { ++probes; return calls == 3; });
         const auto cold_us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - begin).count();
-        Check(first.total == 3 && first.incomplete && calls == 3 && probes == 4 && e.cache_set_.dense && Cached(e, q, 70000),
+        Check(first.total == 3 && first.incomplete && calls == 3 && probes == 4 && Cached(e, q, 70000) && e.cache_set_->dense,
             "dense 70000-candidate response stops after three checks and retains all raw candidates");
         calls = probes = 0;
         const auto warm_begin = std::chrono::steady_clock::now();
@@ -248,23 +248,26 @@ struct EngineTestAccess {
         std::thread concurrent;
         bool query_completed = false;
         SearchResult nested;
+        const auto narrow = QueryFor(L"item-beta");
         size_t calls = 0;
         SearchDiagnostics diagnostics;
         const auto result = e.Search(q, nullptr, 0, [&](const auto&) {
             if (++calls == 1) {
-                concurrent = std::thread([&] { nested = e.Search(q); SetEvent(completed); });
+                concurrent = std::thread([&] { nested = e.Search(narrow); SetEvent(completed); });
                 query_completed = WaitForSingleObject(completed, 2000) == WAIT_OBJECT_0;
             }
             return true;
         }, {}, &diagnostics);
         if (concurrent.joinable()) concurrent.join();
-        Check(query_completed && nested.total == 5, "another query completes while authorization is in progress");
+        Check(query_completed && nested.total == 1 && Cached(e, narrow, 1) && calls == 5,
+            "a narrower query replaces the cache while the in-flight query authorizes its original five candidates");
         Check(result.total == 5 && !result.incomplete && diagnostics.raw_candidates == 5 &&
             diagnostics.examined == 5 && diagnostics.authorized == 5 &&
             !diagnostics.cache_hit && diagnostics.authorize_us > 0 && diagnostics.total_us >= diagnostics.authorize_us,
             "response diagnostics separate full candidate authorization from cache and total time");
         std::cout << "[METRIC] concurrent_authorization_us=" << diagnostics.authorize_us
             << " index_wait_us=" << diagnostics.index_wait_us << " total_us=" << diagnostics.total_us << '\n';
+        e.Search(q);
         const auto cached = e.Search(q, nullptr, 0, [](const auto& path) { return path.starts_with(L"C:\\A\\"); }, {}, &diagnostics);
         Check(cached.total == 2 && diagnostics.cache_hit && diagnostics.raw_candidates == 5 &&
             diagnostics.examined == 5 && diagnostics.authorized == 2,

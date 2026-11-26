@@ -31,13 +31,13 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(output);
     AppPrefs prefs;
     prefs.persist = false;
-    prefs.start_to_tray = prefs.close_last_tab_window = true;
+    prefs.launch_on_startup = prefs.close_last_tab_window = true;
     AppPrefs loaded;
     loaded.persist = false;
-    check(loaded.FromJson(prefs.ToJson()) && loaded.start_to_tray && loaded.close_last_tab_window,
-        "startup tray and last-tab options round trip without real preferences");
-    check(loaded.FromJson(L"{}") && !loaded.start_to_tray && !loaded.close_last_tab_window,
-        "legacy preferences default both new options off");
+    check(loaded.FromJson(prefs.ToJson()) && loaded.launch_on_startup && loaded.close_last_tab_window,
+        "sign-in startup and last-tab options round trip without real preferences");
+    check(loaded.FromJson(L"{}") && !loaded.launch_on_startup && !loaded.close_last_tab_window,
+        "legacy preferences leave sign-in startup and last-tab closing off");
     bool close_last = false;
     int close_requests = 0, layout_changes = 0;
     TabController::Callbacks callbacks;

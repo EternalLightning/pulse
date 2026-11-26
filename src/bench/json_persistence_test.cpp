@@ -11,25 +11,74 @@
 #include "../common/json_utils.h"
 #include "../common/user_storage.h"
 #include "../common/utf8_file.h"
+#include <array>
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <string_view>
+#include <thread>
 #include "places_tag_loading_cases.h"
 
-static int RunPreferencesLoadProtectionChecks() {
+static void CheckDeferredFolderPreferences(const std::filesystem::path& root, const auto& check) {
     using namespace pulse;
-    int failures = 0;
-    const auto check = [&](bool passed, const char* name) {
-        std::cout << (passed ? "[PASS] " : "[FAIL] ") << name << '\n';
-        failures += !passed;
+    app::AppPrefs prefs;
+    const auto app_file = (root / L"app.json").wstring();
+    const std::wstring folder = LR"(C:\fixture)";
+    const auto persisted_preferences = [&] {
+        app::AppPrefs saved;
+        std::wstring json;
+        if (ReadUtf8File(app_file, json)) saved.FromJson(json);
+        return saved;
     };
-    const auto parent = std::filesystem::absolute(L"bench_data");
-    const auto root = parent / (L"preferences-load-" + std::to_wstring(GetCurrentProcessId()) +
-        L"-" + std::to_wstring(GetTickCount64()));
+    prefs.folder_views.Set(folder, ui::ViewMode::Tiles);
+    prefs.ScheduleSave(1000);
+    const auto due = prefs.SaveDeadline();
+    prefs.SaveIfDue(1001);
+    check(due > 1001 && GetFileAttributesW(app_file.c_str()) == INVALID_FILE_ATTRIBUTES,
+        "folder view changes are deferred without writing preferences on the input path");
+    const app::FolderSortPrefs sort{model::SortColumn::Size, model::SortDirection::Desc};
+    const app::FolderGroupPrefs group{ui::GroupMode::Size, model::SortDirection::Asc};
+    const std::array<float, 4> columns{160.f, 260.f, 380.f, 540.f};
+    const auto layout = model::DefaultDetailsColumns();
+    prefs.folder_views.Set(folder, ui::ViewMode::List);
+    prefs.folder_views.SetSort(folder, sort.column, sort.direction);
+    prefs.folder_views.SetGroup(folder, group.mode, group.direction);
+    prefs.folder_views.SetColumns(folder, columns);
+    prefs.folder_views.SetColumnLayout(folder, layout);
+    prefs.ScheduleSave(1002);
+    check(prefs.SaveDeadline() == due, "rapid folder changes share one bounded save deadline");
+    prefs.SaveIfDue(due);
+    const auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    auto saved = persisted_preferences();
+    while (saved.folder_views.Find(folder) != ui::ViewMode::List &&
+            std::chrono::steady_clock::now() < timeout) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        saved = persisted_preferences();
+    }
+    check(saved.folder_views.Find(folder) == ui::ViewMode::List &&
+        saved.folder_views.FindSort(folder) == sort && saved.folder_views.FindGroup(folder) == group &&
+        saved.folder_views.FindColumns(folder) == columns && saved.folder_views.FindColumnLayout(folder) == layout &&
+        prefs.SaveDeadline() == 0,
+        "the background writer commits the latest folder view, sort, grouping and columns");
+    prefs.folder_views.Set(folder, ui::ViewMode::Tiles);
+    prefs.ScheduleSave(2000);
+    prefs.SaveIfDue(prefs.SaveDeadline());
+    prefs.folder_views.Set(folder, ui::ViewMode::Details);
+    prefs.ScheduleSave(3000);
+    prefs.row_height = 38;
+    check(prefs.Save() && prefs.SaveDeadline() == 0, "an immediate preferences save cancels the redundant deadline");
+    saved = persisted_preferences();
+    check(saved.folder_views.Find(folder) == ui::ViewMode::Details && saved.row_height == 38,
+        "the immediate save commits current general preferences and supersedes older folder snapshots");
+    prefs.persist = false;
+    prefs.ScheduleSave(4000);
+    check(prefs.SaveDeadline() == 0, "isolated preferences do not schedule a background save");
+    prefs.persist = true;
+}
+
+static void CheckPreferencesLoadProtection(const std::filesystem::path& root, const auto& check) {
+    using namespace pulse;
     std::error_code error;
-    std::filesystem::create_directories(root, error);
-    if (error) return 2;
-    storage::OverrideDefaultRootForTesting(root.wstring());
     const auto check_file = [&](auto& prefs, const wchar_t* filename, const std::wstring& valid) {
         const auto path = (root / filename).wstring();
         const auto load = [&] {
@@ -72,6 +121,21 @@ static int RunPreferencesLoadProtectionChecks() {
     };
     app::AppPrefs prefs;
     check_file(prefs, L"app.json", LR"({"row_height":42})");
+    check(prefs.FromJson(LR"({"version":5,"toolbar_order":[186,2,3,4,6,5750,5,7,306]})") &&
+        std::ranges::equal(prefs.toolbar_order, ui::kDefaultToolbarOrder),
+        "existing default toolbar exposes the embedded terminal");
+    check(prefs.FromJson(LR"({"version":6,"toolbar_order":[186,2,3,4,6,5750,5,7,306]})") &&
+        std::ranges::find(prefs.toolbar_order, 5800) == prefs.toolbar_order.end(),
+        "explicitly removing the terminal remains saved");
+    prefs.terminal_shell = ops::TerminalShell::PowerShell7;
+    prefs.terminal_pwsh_path = LR"(C:\Custom PowerShell\pwsh.exe)";
+    app::AppPrefs shell_prefs;
+    check(shell_prefs.FromJson(prefs.ToJson()) && shell_prefs.terminal_shell == prefs.terminal_shell &&
+        shell_prefs.terminal_pwsh_path == prefs.terminal_pwsh_path,
+        "PowerShell 7 selection and executable round trip");
+    check(shell_prefs.FromJson(LR"({"terminal_shell":9})") &&
+        shell_prefs.terminal_shell == ops::TerminalShell::WindowsPowerShell && shell_prefs.terminal_pwsh_path.empty(),
+        "legacy or invalid terminal settings use Windows PowerShell");
     app::ContextMenuPrefs menus;
     check_file(menus, L"context_menu.json", LR"({"categories":{"software":false}})");
 
@@ -118,14 +182,32 @@ static int RunPreferencesLoadProtectionChecks() {
     check(!error && WriteUtf8FileAtomic(legacy, L"{damaged") &&
         !app::LoadSessionPreferences(loaded, &saves_enabled) && !saves_enabled,
         "unreadable legacy window preferences do not authorize saving fallback defaults");
+}
+
+static int RunAppPreferenceChecks(bool deferred) {
+    using namespace pulse;
+    int failures = 0;
+    const auto check = [&](bool passed, const char* name) {
+        std::cout << (passed ? "[PASS] " : "[FAIL] ") << name << '\n';
+        failures += !passed;
+    };
+    const auto parent = std::filesystem::absolute(L"bench_data");
+    const auto root = parent / (L"preferences-load-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    if (error) return 2;
+    storage::OverrideDefaultRootForTesting(root.wstring());
+    if (deferred) CheckDeferredFolderPreferences(root, check);
+    else CheckPreferencesLoadProtection(root, check);
     storage::OverrideDefaultRootForTesting(L"");
     const auto actual = std::filesystem::weakly_canonical(root, error);
     const auto expected_parent = std::filesystem::weakly_canonical(parent, error);
     if (!error && actual.parent_path() == expected_parent &&
         actual.filename().wstring().starts_with(L"preferences-load-"))
         std::filesystem::remove_all(actual, error);
-    else check(false, "load protection fixture cleanup remains inside bench_data");
-    check(!error, "load protection fixture cleaned without user preferences");
+    else check(false, "preferences fixture cleanup remains inside bench_data");
+    check(!error, "preferences fixture cleaned without user preferences");
     return failures ? 1 : 0;
 }
 
@@ -151,7 +233,8 @@ static int RunSessionPreferencesChecks() {
     check(WriteUtf8FileAtomic((root / L"session.json").wstring(), legacy_json),
         "write an isolated legacy session with a completed rename in undo history");
     app::WindowSessionSnapshot preferences;
-    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 1,
+    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 1 &&
+        preferences.terminal_panel_width == static_cast<int>(ui::kTerminalWidthDip),
         "preferences migrate legacy settings without restoring navigation");
     const auto migrated_json = app::SessionPreferencesToJson(preferences);
     const json::Document migrated(migrated_json);
@@ -162,6 +245,7 @@ static int RunSessionPreferencesChecks() {
     check(ReadUtf8File((root / L"session.json").wstring(), original_session),
         "capture the complete legacy session before saving preferences");
     preferences.sidebar_hidden = 2;
+    preferences.terminal_panel_width = 610;
     check(app::SaveSessionPreferences(preferences), "save preferences into their separate file");
     std::wstring saved_session, saved_preferences;
     check(ReadUtf8File((root / L"session.json").wstring(), saved_session) && saved_session == original_session &&
@@ -172,7 +256,8 @@ static int RunSessionPreferencesChecks() {
         "the preference schema contains no navigation state");
     check(!doc.Find(L"undo"), "saved preferences contain no undo history");
     check(!doc.Find(L"tray"), "saved preferences contain no staging tray");
-    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2,
+    check(app::LoadSessionPreferences(preferences) && preferences.sidebar_hidden == 2 &&
+        preferences.terminal_panel_width == 610,
         "the new preference file takes precedence over legacy values");
     auto legacy_preferences = saved_preferences;
     legacy_preferences.insert(legacy_preferences.find(L'{') + 1, legacy_undo + legacy_tray);
@@ -193,8 +278,10 @@ static int RunSessionPreferencesChecks() {
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--deferred-app-preferences")
+        return RunAppPreferenceChecks(true);
     if (argc == 2 && std::string_view(argv[1]) == "--preferences-load-protection")
-        return RunPreferencesLoadProtectionChecks();
+        return RunAppPreferenceChecks(false);
     if (argc == 2 && std::string_view(argv[1]) == "--session-preferences")
         return RunSessionPreferencesChecks();
     if (argc == 2 && std::string_view(argv[1]) == "--places-tags-load")

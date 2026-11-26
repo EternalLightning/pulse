@@ -1323,37 +1323,38 @@ SearchResult Engine::Search(const Query& q, const std::atomic<uint32_t>* latest,
     }
     const size_t cap = q.limit;
 
-    MatchSet matches;
     const bool same_scope = cache_path_prefix_ == prefix &&
         cache_folders_only_ == q.folders_only;
-    const bool exact_cached_page = cache_epoch_ == filter_epoch_ && same_scope &&
-        cache_raw_ == q.needle && cache_set_.universe == LiveCount();
-    if (exact_cached_page) {
-        matches = cache_set_;
-    } else if (cache_epoch_ == filter_epoch_ && same_scope &&
-               QueryCanNarrow(cache_raw_, q.needle) && cache_set_.universe == LiveCount()) {
-        NarrowMatchesLocked(cq, prefix_node, q.folders_only, use_attrs, cache_set_, matches,
-                            latest, expected);
-    } else {
-        CollectMatchesLocked(cq, prefix_node, q.folders_only, use_attrs, matches, latest, expected);
-    }
-    if (latest && latest->load() != expected) return out;
+    const bool can_reuse_cache = cache_set_ && cache_epoch_ == filter_epoch_ && same_scope &&
+        cache_set_->universe == LiveCount();
+    const bool exact_cached_page = can_reuse_cache && cache_raw_ == q.needle;
     if (!exact_cached_page) {
+        auto collected = std::make_shared<MatchSet>();
+        if (can_reuse_cache && QueryCanNarrow(cache_raw_, q.needle)) {
+            NarrowMatchesLocked(cq, prefix_node, q.folders_only, use_attrs, *cache_set_, *collected,
+                                latest, expected);
+        } else {
+            CollectMatchesLocked(cq, prefix_node, q.folders_only, use_attrs, *collected, latest, expected);
+        }
+        if (latest && latest->load() != expected) return out;
         cache_raw_ = q.needle;
         cache_path_prefix_ = prefix;
         cache_folders_only_ = q.folders_only;
-        cache_set_ = matches;
+        cache_set_ = std::move(collected);
         cache_epoch_ = filter_epoch_;
     }
+    const auto raw_matches = cache_set_;
     query_guard.unlock();
+    if (latest && latest->load() != expected) return out;
     if (diagnostics) {
         diagnostics->match_us = now_us() - match_began;
-        diagnostics->raw_candidates = matches.total;
+        diagnostics->raw_candidates = raw_matches->total;
         diagnostics->cache_hit = exact_cached_page;
     }
+    MatchSet visible;
     if (authorize) {
-        MatchSet visible; visible.Begin(LiveCount());
-        matches.ForEachWhile([&](int32_t id) {
+        visible.Begin(LiveCount());
+        raw_matches->ForEachWhile([&](int32_t id) {
             if (latest && latest->load() != expected) return false;
             if (should_stop && should_stop()) { out.incomplete = true; return false; }
             const auto path_began = now_us();
@@ -1371,9 +1372,9 @@ SearchResult Engine::Search(const Query& q, const std::atomic<uint32_t>* latest,
             if (allowed) visible.Add(id);
             return true;
         });
-        matches = std::move(visible);
     }
     if (latest && latest->load() != expected) return out;
+    const auto& matches = authorize ? visible : *raw_matches;
     out.total = matches.total;
     if (cap == 0 || matches.total == 0) return out;
 

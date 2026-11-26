@@ -15,7 +15,6 @@
 #include "dialog_keyboard.h"
 #include "dialog_style.h"
 #include "../common/localization.h"
-#include "../ipc/shell_interaction_client.h"
 
 #include <commctrl.h>
 #include <windowsx.h>
@@ -36,10 +35,6 @@ constexpr float kDlgH = 516.0f;
 
 D2D1_RECT_F Rect(float scale, float x, float y, float width, float height) {
     return pulse::ui::DipRect(scale, x, y, width, height);
-}
-
-bool PickFolderPath(HWND owner, std::wstring& path) {
-    return ipc::PickShellPath(owner, true, l10n::Get(l10n::StringId::AdvSearchBrowse), path);
 }
 
 std::wstring NameHowLabel(model::NameMatchHow how) {
@@ -108,7 +103,9 @@ std::wstring ModeLabel(index::ContentMatchMode mode) {
 class AdvancedSearchWindow {
 public:
     AdvancedSearchDialogResult Show(HWND owner, model::AdvancedSearchSpec spec,
-                                    bool dark, D2D1_COLOR_F accent) {
+                                    bool dark, D2D1_COLOR_F accent,
+                                    const std::function<bool(HWND, std::wstring&)>& pick_folder) {
+        pick_folder_ = pick_folder;
         owner_ = owner;
         spec_ = std::move(spec);
         dark_ = dark;
@@ -219,7 +216,7 @@ private:
         else if (id == 2 || id == 3) Complete(false);
         else if (id == 7) {
             std::wstring folder;
-            if (PickFolderPath(hwnd_, folder)) {
+            if (pick_folder_ && pick_folder_(hwnd_, folder)) {
                 spec_.custom_folder = folder;
                 spec_.location = model::LocationScope::CustomFolder;
                 SyncFromEdits();
@@ -454,7 +451,7 @@ private:
             } else if (id == 6) {
                 if (value == static_cast<int>(model::LocationScope::CustomFolder)) {
                     std::wstring folder;
-                    if (!PickFolderPath(hwnd_, folder)) return;
+                    if (!pick_folder_ || !pick_folder_(hwnd_, folder)) return;
                     spec_.custom_folder = folder;
                 }
                 spec_.location = static_cast<model::LocationScope>(value);
@@ -755,6 +752,7 @@ private:
     fluent::Painter painter_;
     model::AdvancedSearchSpec spec_;
     AdvancedSearchDialogResult result_;
+    std::function<bool(HWND, std::wstring&)> pick_folder_;
     std::wstring preview_;
     bool dark_ = true;
     bool backdrop_ = false;
@@ -770,9 +768,10 @@ private:
 } // namespace
 
 AdvancedSearchDialogResult ShowAdvancedSearchDialog(HWND owner, model::AdvancedSearchSpec spec,
-                                                    bool dark, D2D1_COLOR_F accent) {
+                                                    bool dark, D2D1_COLOR_F accent,
+                                                    const std::function<bool(HWND, std::wstring&)>& pick_folder) {
     AdvancedSearchWindow window;
-    return window.Show(owner, std::move(spec), dark, accent);
+    return window.Show(owner, std::move(spec), dark, accent, pick_folder);
 }
 
 } // namespace pulse::ui

@@ -98,7 +98,9 @@ public:
                        FolderSortMode folders = FolderSortMode::FoldersFirst);
 
     // Tasks must own their inputs; they cannot retain the pool or UI objects.
-    bool EnqueueIo(std::function<void()> task, std::function<void()> completion = {});
+    enum class IoLane { Provider, Local };
+    bool EnqueueIo(std::function<void()> task, std::function<void()> completion = {},
+                   IoLane lane = IoLane::Provider);
 
     // Every request attempt advances this, including rejected submissions.
     // Read on the UI thread, which also issues Refresh/LoadPaths requests.

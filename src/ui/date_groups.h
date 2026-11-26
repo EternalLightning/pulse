@@ -5,15 +5,25 @@
 
 #pragma once
 #include "../fs/fs_snapshot.h"
-#include "../ui/view_layout.h"
+#include "view_layout.h"
 #include "../model/sort_types.h"
 #include <vector>
 
-namespace pulse::app {
+namespace pulse::ui {
 
-// Buckets follow local calendar days; the caller caches this for each snapshot.
-std::vector<ui::DateGroup> BuildDateGroups(const fs::SnapshotPtr& snapshot,
-    const std::vector<int>* visible_indices, const SYSTEMTIME& today);
+struct FileGrouping {
+    GroupMode mode = GroupMode::None;
+    model::SortDirection direction = model::SortDirection::Asc;
+    bool operator==(const FileGrouping&) const = default;
+};
+
+constexpr FileGrouping ResolveFileGrouping(ViewMode view, GroupMode group, model::SortColumn sort,
+    model::SortDirection sort_direction, model::SortDirection group_direction) noexcept {
+    if (view != ViewMode::Details || group == GroupMode::None) return {};
+    if (group == GroupMode::Auto)
+        return sort == model::SortColumn::Mtime ? FileGrouping{GroupMode::DateModified, sort_direction} : FileGrouping{};
+    return {group, group_direction};
+}
 
 struct GroupedView {
     std::vector<int> indices;
@@ -27,4 +37,4 @@ GroupedView BuildGroupedView(const fs::SnapshotPtr& snapshot,
     const std::vector<int>* visible_indices, ui::GroupMode mode,
     model::SortDirection direction, const SYSTEMTIME& today);
 
-} // namespace pulse::app
+} // namespace pulse::ui

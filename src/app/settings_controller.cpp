@@ -503,17 +503,6 @@ void SettingsController::ToggleUi(int index) {
             error_.clear();
             Apply(SettingsEffect::StagingTray);
         }
-    } else if (index == 31) {
-        const bool previous = prefs_->start_to_tray;
-        if (prefs_->launch_on_startup && !prefs_->ApplyLaunchOnStartup(true)) {
-            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
-            return;
-        }
-        prefs_->start_to_tray = !previous;
-        if (!prefs_->Save()) {
-            prefs_->start_to_tray = previous;
-            error_ = l10n::Get(l10n::StringId::SettingsSystemApplySaveError);
-        } else error_.clear();
     } else if (index == 32) {
         const bool previous = prefs_->close_last_tab_window;
         prefs_->close_last_tab_window = !previous;

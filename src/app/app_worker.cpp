@@ -65,6 +65,7 @@ struct WorkerPool::State {
     std::deque<WorkItem> queue;
     struct IoTask { std::function<void()> run; std::function<void()> complete; };
     std::queue<IoTask> io_queue;
+    std::queue<IoTask> local_io_queue;
     std::atomic<bool> running{false};
     std::shared_ptr<Budget> budget;
     unsigned live = 0;
@@ -193,6 +194,7 @@ void WorkerPool::Stop() {
         std::lock_guard lock(state->mutex);
         state->queue = {};
         state->io_queue = {};
+        state->local_io_queue = {};
         state->current_gen.clear();
         state->directories.clear();
     }
@@ -345,12 +347,13 @@ uint64_t WorkerPool::LoadPaths(const std::wstring& view_path,
     return gen;
 }
 
-bool WorkerPool::EnqueueIo(std::function<void()> task, std::function<void()> completion) {
+bool WorkerPool::EnqueueIo(std::function<void()> task, std::function<void()> completion, IoLane lane) {
     const auto state = state_;
     if (!task || !state) return false;
     std::lock_guard<std::mutex> lock(state->mutex);
-    if (!state->running || state->io_queue.size() >= 128) return false;
-    state->io_queue.push({std::move(task), std::move(completion)});
+    auto& queue = lane == IoLane::Local ? state->local_io_queue : state->io_queue;
+    if (!state->running || queue.size() >= 128) return false;
+    queue.push({std::move(task), std::move(completion)});
     state->cv.notify_all();
     return true;
 }
@@ -593,9 +596,9 @@ void WorkerPool::WorkerThread(std::shared_ptr<State> state, bool local_owner) {
                     return !local_owner || !queued.provider_request;
                 });
             };
+            auto& io_queue = local_owner ? state->local_io_queue : state->io_queue;
             state->cv.wait(lock, [&] {
-                return request() != state->queue.end() ||
-                    (!local_owner && !state->io_queue.empty()) || !state->running;
+                return request() != state->queue.end() || !io_queue.empty() || !state->running;
             });
             if (!state->running) return;
             const auto queued = request();
@@ -603,8 +606,8 @@ void WorkerPool::WorkerThread(std::shared_ptr<State> state, bool local_owner) {
                 item = std::move(*queued);
                 state->queue.erase(queued);
             } else {
-                io_task = std::move(state->io_queue.front());
-                state->io_queue.pop();
+                io_task = std::move(io_queue.front());
+                io_queue.pop();
             }
         }
         if (io_task.run) {

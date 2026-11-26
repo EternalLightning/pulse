@@ -4,7 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../app/app_model.h"
-#include "../app/date_groups.h"
+#include "../ui/date_groups.h"
 #include "../app/entry_sort.h"
 #include "../app/folder_view_prefs.h"
 #include "../common/json_utils.h"
@@ -61,7 +61,7 @@ std::shared_ptr<const std::vector<pulse::fs::DirEntry>> Entries(pulse::ui::SortC
     return entries;
 }
 
-bool SourceSortPreserved(const pulse::app::GroupedView& view) {
+bool SourceSortPreserved(const pulse::ui::GroupedView& view) {
     for (const auto& group : view.groups) {
         const auto first = view.indices.begin() + group.first;
         if (!std::is_sorted(first, first + group.count)) return false;
@@ -81,8 +81,8 @@ int main() {
             const auto snapshot = Entries(sort, sort_direction);
             bool independent = true;
             for (const auto mode : {ui::GroupMode::DateModified, ui::GroupMode::Type, ui::GroupMode::Size}) {
-                const auto asc = app::BuildGroupedView(snapshot, nullptr, mode, ui::SortDirection::Asc, today);
-                const auto desc = app::BuildGroupedView(snapshot, nullptr, mode, ui::SortDirection::Desc, today);
+                const auto asc = ui::BuildGroupedView(snapshot, nullptr, mode, ui::SortDirection::Asc, today);
+                const auto desc = ui::BuildGroupedView(snapshot, nullptr, mode, ui::SortDirection::Desc, today);
                 independent &= asc.indices.size() == snapshot->size() && asc.groups.size() > 1 &&
                     SourceSortPreserved(asc) && SourceSortPreserved(desc) && asc.groups.size() == desc.groups.size();
                 for (size_t i = 0; i < asc.groups.size(); ++i) {
@@ -99,14 +99,14 @@ int main() {
 
     const auto snapshot = Entries(ui::SortColumn::Name, ui::SortDirection::Asc);
     const std::vector<int> visible{1, 2, 3, 4};
-    const auto filtered = app::BuildGroupedView(snapshot, &visible, ui::GroupMode::Type, ui::SortDirection::Asc, today);
+    const auto filtered = ui::BuildGroupedView(snapshot, &visible, ui::GroupMode::Type, ui::SortDirection::Asc, today);
     bool mapping = filtered.indices == std::vector<int>({2, 4, 1, 3});
     for (size_t i = 0; i < filtered.indices.size(); ++i)
         mapping &= filtered.source_to_view[static_cast<size_t>(filtered.indices[i])] == static_cast<int>(i);
     mapping &= filtered.source_to_view[0] == -1 && filtered.source_to_view[5] == -1;
     Check(mapping, "filtered group order maps view rows and immutable source indices both ways");
     const std::vector<int> invalid{-1, 999, 2};
-    const auto sanitized = app::BuildGroupedView(snapshot, &invalid, ui::GroupMode::Size, ui::SortDirection::Asc, today);
+    const auto sanitized = ui::BuildGroupedView(snapshot, &invalid, ui::GroupMode::Size, ui::SortDirection::Asc, today);
     Check(sanitized.indices == std::vector<int>({2}) && sanitized.groups[0].first == 0,
         "invalid source indices cannot create sparse group headers");
 

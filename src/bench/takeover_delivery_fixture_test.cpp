@@ -4,6 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../app/app_internal.h"
+#include "../app/app_runtime.h"
 #include "../app/explorer_window_takeover.h"
 #include "../app/shell_selection.h"
 #include "../common/user_storage.h"
@@ -11,6 +12,7 @@
 #include <shlobj.h>
 #include <cstdio>
 #include <filesystem>
+#include <future>
 #include <map>
 #include <set>
 #include <utility>
@@ -198,20 +200,35 @@ int main() {
     HANDLE created = CreateFileW(routed_file.c_str(), GENERIC_WRITE, 0, nullptr,
         CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (created != INVALID_HANDLE_VALUE) CloseHandle(created);
+    s.appPrefs.show_hidden_files = true;
+    s.appPrefs.show_protected_os_files = true;
     s.appPrefs.external_open_mode = app::ExternalOpenMode::Tab;
+    const auto tabs_before_routed = s.window_tabs.items.size();
+    std::promise<void> release_providers;
+    const auto provider_gate = release_providers.get_future().share();
+    bool gates_accepted = true;
+    for (unsigned i = 0; i < 4; ++i)
+        gates_accepted = s.worker.EnqueueIo([provider_gate] { provider_gate.wait(); }) && gates_accepted;
+    Check(gates_accepted, "hold every provider worker with isolated test work");
+    active.insert(14); requests.push_back({14, L"pulse:expired-fixture-open", {}, 0});
+    s.systemIntegration.Tick(s);
     active.insert(13); requests.push_back({13, routed.wstring(), {routed_file.wstring()}, 0});
     s.systemIntegration.Tick(s);
-    const auto routed_deadline = GetTickCount64() + 8000;
-    while (!answers.contains(13) && GetTickCount64() < routed_deadline) {
+    auto pump_delivery = [&] {
         MSG message{};
         while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
-            if (message.hwnd == s.hwnd && message.message == WM_EXTERNAL_OPEN_READY)
+            if (message.hwnd == s.hwnd && message.message == WM_EXTERNAL_OPEN_READY) {
                 ApplyExternalOpenResults(s, message.wParam);
-            else if (message.hwnd == s.hwnd && message.message == WM_WORKER_RESULT)
+                PrepareViewState(s);
+            } else if (message.hwnd == s.hwnd && message.message == WM_WORKER_RESULT)
                 ProcessPendingResults(s);
             else { TranslateMessage(&message); DispatchMessageW(&message); }
         }
         s.systemIntegration.Tick(s);
+    };
+    const auto routed_deadline = GetTickCount64() + 8000;
+    while (!answers.contains(13) && GetTickCount64() < routed_deadline) {
+        pump_delivery();
         Sleep(10);
     }
     tab = ActiveTab(s);
@@ -220,7 +237,18 @@ int main() {
         static_cast<unsigned long long>(tab->pending_generation), tab->EntryCount());
     Check(answers.contains(13) && answers[13] && tab->SelectedCount() == 1 &&
         app::SameShellPath(app::ShellEntryPath(*tab, tab->selected_index), routed_file.wstring()),
-        "production route and directory enumeration acknowledge the visible selected file");
+        "first paint with non-default visibility settings preserves the routed selection and successful ACK");
+    Check(!answers.contains(14) && s.systemIntegration.IsExternalOpenActive(14),
+        "the newer local selection is acknowledged while the earlier provider request remains unresolved");
+    active.erase(14);
+    release_providers.set_value();
+    const auto expired_deadline = GetTickCount64() + 3000;
+    while (!answers.contains(14) && GetTickCount64() < expired_deadline) {
+        pump_delivery();
+        Sleep(10);
+    }
+    Check(answers.contains(14) && !answers[14] && s.window_tabs.items.size() == tabs_before_routed + 1,
+        "a late result for the inactive provider request leaves the newer destination intact");
     s.external_open_mailbox->Close();
     s.worker.Stop();
     s.systemIntegration.Stop();

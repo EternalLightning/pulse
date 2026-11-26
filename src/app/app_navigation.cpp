@@ -6,6 +6,8 @@
 #include "archive_navigation.h"
 #include "app_network_access.h"
 #include "app_network_locations.h"
+#include "app_pane_tools.h"
+#include "app_terminal.h"
 #include "../ops/archive.h"
 // app_navigation.cpp — extracted from app_main.cpp.
 #include "app_internal.h"
@@ -13,6 +15,7 @@
 #include "../fs/shell_namespace.h"
 #include "../index/live_filename_search.h"
 #include "app_column_view.h"
+#include "path_aliases_ui.h"
 #include "../ui/lumatext_renderer.h"
 #include "../ui/fluent_menu.h"
 #include "../ui/drag_drop.h"
@@ -326,6 +329,14 @@ void DispatchIndexSearch(AppState& s, const index::Query& query, uint32_t id) {
     pending.local_ready = unc_search;
     pending.network_ready = !unc_search && s.networkIndex.Roots().empty();
     if (!s.appPrefs.search_pinyin) pending.query.needle = L"nopinyin: " + pending.query.needle;
+    if (const auto aliases = s.places.display_aliases) {
+        if (!s.display_alias_search_mailbox) {
+            s.display_alias_search_mailbox = std::make_shared<app::DisplayAliasSearchMailbox>(
+                s.hwnd, WM_DISPLAY_ALIAS_SEARCH);
+        }
+        pending.display_alias_request = app::QueueDisplayAliasSearch(s.worker, aliases,
+            provider_query, id, s.display_alias_search_mailbox);
+    }
     s.pendingIndexSearches.emplace(id, std::move(pending));
     if (!unc_search) s.index.SearchAsync(provider_query, id);
     s.networkIndex.SearchAsync(provider_query, id);
@@ -762,6 +773,23 @@ void DeliverIndexSearchResult(AppState& s, uint32_t id,
     });
 }
 
+namespace {
+void DeliverReadyIndexSearch(AppState& s, uint32_t id) {
+    const auto found = s.pendingIndexSearches.find(id);
+    if (found == s.pendingIndexSearches.end()) return;
+    const auto& pending = found->second;
+    const bool providers_ready = pending.local_ready && pending.network_ready;
+    // Alias metadata can supply useful results while the filename index starts.
+    if (!providers_ready && pending.display_alias_hits.empty()) return;
+    auto merged = index::MergeSearchResults(pending.query, pending.local, pending.network,
+        pending.display_alias_hits);
+    if (pending.display_alias_request && !merged.total && !merged.scanning && !merged.error) return;
+    if (providers_ready && !pending.query.subscribe && !merged.scanning && !pending.display_alias_request)
+        s.pendingIndexSearches.erase(found);
+    DeliverIndexSearchResult(s, id, std::move(merged));
+}
+}
+
 void AcceptIndexProviderResult(AppState& s, uint32_t id,
                                       index::SearchResult&& result, bool network) {
     auto found = s.pendingIndexSearches.find(id);
@@ -774,10 +802,15 @@ void AcceptIndexProviderResult(AppState& s, uint32_t id,
         pending.local = std::move(result);
         pending.local_ready = true;
     }
-    if (!pending.local_ready || !pending.network_ready) return;
-    index::SearchResult merged = index::MergeSearchResults(pending.query, pending.local, pending.network);
-    if (!pending.query.subscribe && !merged.scanning) s.pendingIndexSearches.erase(found);
-    DeliverIndexSearchResult(s, id, std::move(merged));
+    DeliverReadyIndexSearch(s, id);
+}
+
+void AcceptDisplayAliasSearchResult(AppState& s, app::DisplayAliasSearchResult result) {
+    const auto found = s.pendingIndexSearches.find(result.generation);
+    if (found == s.pendingIndexSearches.end()) return;
+    found->second.display_alias_hits = std::move(result.hits);
+    found->second.display_alias_request.reset();
+    DeliverReadyIndexSearch(s, result.generation);
 }
 
 void MaybePrefetchSearchPage(AppState& s) {
@@ -991,7 +1024,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     const auto retained_path = reason == PathLoadReason::SearchInput ? tab.snapshot_path : std::wstring{};
     CancelNetworkAuthenticationForTab(s, tab);
     if (reason != PathLoadReason::NetworkRetry) tab.pending_network_pin.clear();
-    if (reason == PathLoadReason::Navigate && !s.shot.active &&
+    if ((reason == PathLoadReason::Navigate || reason == PathLoadReason::LinkedPane) && !s.shot.active &&
         !tab.snapshot_path.empty() && tab.snapshot_path == tab.current_path) RememberFolderColumns(s, tab);
     CancelUnsharedListing(s, tab);
     tab.ClearEntryRenameHints();
@@ -1028,6 +1061,9 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         tab.downloads_auto_sort = false;
     }
     tab.current_path = normalized;
+    ResetInvalidPaneTools(s);
+    if (reason == PathLoadReason::Navigate || reason == PathLoadReason::SearchInput)
+        SynchronizePaneNavigation(s, tab);
     tab.listing_failed = false;
     if (const auto git = s.gitRoots.find(normalized); git != s.gitRoots.end())
         tab.git_root = git->second;
@@ -1122,9 +1158,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     tab.virtual_title.clear();
     tab.ClearBanner();
     if (!s.shot.active) {
-        const auto sort = s.appPrefs.folder_views.FindSort(normalized).value_or(
-            app::FolderSortPrefs{downloads ? ui::SortColumn::Mtime : ui::SortColumn::Name,
-                                 downloads ? ui::SortDirection::Desc : ui::SortDirection::Asc});
+        const auto sort = s.appPrefs.folder_views.FindSort(normalized).value_or(app::DefaultFolderSort(downloads));
         tab.sort_column = sort.column;
         tab.sort_direction = sort.direction;
         const auto group = s.appPrefs.folder_views.FindGroup(normalized).value_or(app::FolderGroupPrefs{});
@@ -1917,6 +1951,14 @@ void ApplyLayoutPreset(AppState& s, app::LayoutPreset preset) {
     for (size_t i = 0; i < n; ++i) used.push_back(Panes(s)[i].get());
     Root(s) = app::MakePresetTree(preset, used);
     LayoutOf(s) = preset;
+    s.hitTestVmValid = false;
+    s.splitterNodes.clear();
+    if (s.splitterDragging) {
+        s.splitterDragging = false;
+        s.splitterDragIndex = -1;
+        if (GetCapture() == s.hwnd) ReleaseCapture();
+    }
+    ResetInvalidPaneTools(s);
     bool focusOk = false;
     for (app::Pane* p : used) if (p == s.pane) focusOk = true;
     if (!focusOk && !used.empty()) FocusPane(s, used[0]);
@@ -1974,7 +2016,7 @@ void SortBy(AppState& s, ui::SortColumn col) {
 void RememberFolderColumns(AppState& s, const app::Tab& tab) {
     const bool widths = s.appPrefs.folder_views.SetColumns(tab.current_path, tab.details_column_dividers);
     const bool layout = s.appPrefs.folder_views.SetColumnLayout(tab.current_path, tab.details_columns);
-    if (widths || layout) s.appPrefs.Save();
+    if (widths || layout) s.appPrefs.ScheduleSave(GetTickCount64());
 }
 
 void SetGroup(AppState& s, ui::GroupMode mode, ui::SortDirection direction) {
@@ -1982,7 +2024,8 @@ void SetGroup(AppState& s, ui::GroupMode mode, ui::SortDirection direction) {
     if (!tab || tab->current_path.empty() || fs::IsVirtualPath(tab->current_path) ||
         static_cast<unsigned>(mode) > static_cast<unsigned>(ui::GroupMode::Size) ||
         (direction != ui::SortDirection::Asc && direction != ui::SortDirection::Desc)) return;
-    if (s.appPrefs.folder_views.SetGroup(tab->current_path, mode, direction)) s.appPrefs.Save();
+    if (s.appPrefs.folder_views.SetGroup(tab->current_path, mode, direction))
+        s.appPrefs.ScheduleSave(GetTickCount64());
     if (tab->group_mode == mode && tab->group_direction == direction) return;
     tab->group_mode = mode;
     tab->group_direction = direction;
@@ -2008,7 +2051,7 @@ void SetSort(AppState& s, ui::SortColumn col, ui::SortDirection direction) {
     const bool was_relevance = tab->search_relevance;
     tab->search_relevance = false;
     if (s.appPrefs.folder_views.SetSort(tab->current_path, col, direction))
-        s.appPrefs.Save();
+        s.appPrefs.ScheduleSave(GetTickCount64());
     if (!was_relevance && tab->sort_column == col && tab->sort_direction == direction) return;
     tab->sort_column = col;
     tab->sort_direction = direction;
@@ -2252,7 +2295,7 @@ void ResetLastTabToHome(AppState& s) {
     NewTab(s, app::MakeHomePath());
     // Window close also retires a pinned singleton; ordinary tab close still protects pins.
     s.window_tabs.items.front()->pinned = false;
-    s.window_tabs.CloseTab(0);
+    s.window_tabs.CloseTab(0, false);
     s.window_tabs.tab_groups.clear();
     BindCurrentLayout(s);
     s.hitTestVmValid = false;
@@ -2275,6 +2318,9 @@ void CloseLayoutTab(AppState& s, size_t idx) {
     if (s.window_tabs.items[idx]->pinned) return;
     CancelNetworkAuthentication(s);
     if (s.window_tabs.items.size() == 1) {
+        const auto* closing = s.window_tabs.items.front().get();
+        if (!ConfirmEndEmbeddedTerminal(s, *closing) || s.window_tabs.items.size() != 1 ||
+            s.window_tabs.items.front().get() != closing) return;
         // Closing a tab retires its navigation even when WM_CLOSE only hides the window.
         ResetLastTabToHome(s);
         if (s.appPrefs.close_last_tab_window) PostMessageW(s.hwnd, WM_CLOSE, 0, 0);
@@ -2282,7 +2328,7 @@ void CloseLayoutTab(AppState& s, size_t idx) {
     }
     CaptureTabStripLayout(s);
     RememberLayoutFocus(s);
-    s.window_tabs.CloseTab(idx);
+    if (!s.window_tabs.CloseTab(idx)) return;
     s.hitTestVmValid = false;
     BindCurrentLayout(s);
     RevalidateVisibleFolders(s);

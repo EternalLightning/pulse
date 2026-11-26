@@ -35,7 +35,8 @@ int main(int argc, char** argv) {
     s.isolatedTest = s.safeMode = true;
     s.core.shared_preferences_loaded = true;
     s.appPrefs.persist = s.places.persist = s.ctxMenuPrefs.persist = s.searchHistory.persist = false;
-    s.open_path = (root / L"files").wstring();
+    s.initial_external_open_target = ResolvedOpenTarget{
+        .folder = fs::NormalizePath((root / L"files").wstring())};
     const bool status_only = argc == 2 && std::string_view(argv[1]) == "--status-changes-only";
     const bool cloud_idle = argc == 2 && std::string_view(argv[1]) == "--cloud-idle-only";
     if (status_only || cloud_idle) {
