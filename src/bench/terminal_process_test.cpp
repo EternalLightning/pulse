@@ -84,7 +84,10 @@ int main() {
         } else {
             passed &= Check(false, "create a destination terminal window");
         }
-        terminal.Write("exit\r");
+        passed &= Check(!terminal.HasChildProcesses() &&
+            terminal.Write("$null = Start-Job { Start-Sleep -Seconds 8 }; [Console]::WriteLine('PULSE_' + 'JOB')\r") &&
+            WaitFor("PULSE_JOB") && terminal.HasChildProcesses(),
+            "a PowerShell background job remains detectable after the shell accepts another command");
         terminal.Stop();
         passed &= Check(RemoveDirectoryW(folder.c_str()) != FALSE, "clean up the isolated terminal directory");
     } else {
@@ -94,9 +97,13 @@ int main() {
     terminal.Stop();
     output.clear();
     status = TerminalProcess::Status::Starting;
-    passed &= Check(terminal.Start(window, L"C:\\", L"", {80, 25}, true, TerminalShell::CommandPrompt) &&
-        terminal.Write("echo PULSE_CMD:%CD%\r") && WaitFor("PULSE_CMD:C:\\"),
-        "cmd starts in the current pane directory and accepts input");
+    const bool cmd_started = terminal.Start(window, L"C:\\", L"PulseCmdFixture:", {80, 25}, true,
+        TerminalShell::CommandPrompt);
+    passed &= Check(cmd_started && WaitFor("PulseCmdFixture:"), "cmd reports its first idle prompt");
+    output.clear();
+    passed &= Check(cmd_started && terminal.Write("echo PULSE_CMD:%CD%\r") &&
+        WaitFor("PULSE_CMD:C:\\") && WaitFor("PulseCmdFixture:"),
+        "cmd runs in the current pane directory and reports the next prompt");
     terminal.Stop();
 
     const auto pwsh = pulse::ops::FindPowerShell7();

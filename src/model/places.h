@@ -18,6 +18,7 @@
 #include <vector>
 #include <condition_variable>
 #include <mutex>
+#include <memory>
 #include <optional>
 #include <thread>
 #include <windows.h>
@@ -134,6 +135,9 @@ public:
     bool PathHasTag(const std::wstring& path, int tag_index) const;
     std::vector<int> TagsForPath(const std::wstring& path) const;
     const std::vector<int>* TagIndicesForPath(const std::wstring& path) const;
+    using TagIndex = std::unordered_map<std::wstring, std::vector<int>>;
+    const std::shared_ptr<const TagIndex>& TagIndexSnapshot() const { return tag_index_; }
+    static const std::vector<int>* TagIndicesForPath(const TagIndex& index, const std::wstring& path);
     const ColorTag* FindTag(const TagId& id) const;
     int FindTagIndex(const TagId& id) const;
     TagId ResolveTagRef(const std::wstring& ref) const;
@@ -219,7 +223,7 @@ private:
     void StopPlacesWriter();
     void MarkPlacesDirty() const;
 
-    std::unordered_map<std::wstring, std::vector<int>> tag_index_;
+    std::shared_ptr<const TagIndex> tag_index_;
     std::unordered_set<std::wstring> starred_index_;
     mutable std::atomic<ULONGLONG> places_save_due_{0};
     uint64_t tag_revision_ = 1;

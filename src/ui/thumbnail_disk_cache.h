@@ -46,7 +46,10 @@ public:
     static constexpr uint32_t kMinDecodeMs = 30;
     static ThumbnailDiskCache& Shared();
 
-    bool Load(const ThumbnailStoreKey& key, StoredThumbnail& out);
+    // A source identity already checked by the worker can serve as the before-read check.
+    bool Load(const ThumbnailStoreKey& key, StoredThumbnail& out,
+              const ThumbnailFileIdentity* verified = nullptr);
+    // Recheck even a supplied source identity after encoding and before committing.
     void Save(const ThumbnailStoreKey& key, uint32_t decode_ms, const StoredThumbnail& thumb,
               const ThumbnailFileIdentity* expected = nullptr);
     // Deletes every entry (Settings). Entries being written meanwhile survive.

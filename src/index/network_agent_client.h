@@ -15,6 +15,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <optional>
 
 namespace pulse::index {
 
@@ -42,6 +43,13 @@ public:
 
 private:
     friend struct SearchClientRoutingTestPeer;
+    using RootSnapshot = std::vector<NetworkRootInfo>;
+    using RootReader = std::optional<RootSnapshot> (*)(NetworkAgentClient&);
+    class RootStatus;
+    static RootStatus& SharedRootStatus();
+    static void RefreshRootsSoon();
+    void Start(HWND notify, UINT status_msg, UINT search_msg, RootReader read_roots);
+    bool StartTransport();
     bool EnsureAgent();
     bool OpenPipe(HANDLE& pipe);
     bool Request(uint32_t type, uint32_t id, const std::vector<uint8_t>& payload,
@@ -51,16 +59,18 @@ private:
                               const std::vector<uint8_t>& payload, DWORD error);
     void PublishResult(uint32_t id, SearchResult result);
     void SearchLoop();
-    void RefreshRoots();
+    std::optional<RootSnapshot> ReadRoots();
+    void PublishRoots(const std::shared_ptr<const RootSnapshot>& roots);
     static std::wstring ExePath();
 
     HWND notify_ = nullptr;
     UINT status_msg_ = 0;
     UINT search_msg_ = 0;
+    bool status_subscribed_ = false;
     std::atomic<bool> running_{false};
     std::atomic<uint32_t> latest_search_id_{0};
     mutable std::mutex mu_;
-    std::vector<NetworkRootInfo> roots_;
+    std::shared_ptr<const RootSnapshot> roots_;
     uint32_t result_id_ = 0;
     SearchResult result_;
     struct Reply { HWND window; UINT message; };
@@ -69,9 +79,6 @@ private:
     std::mutex request_mu_;
     std::mutex pipe_mu_;
     HANDLE active_pipe_ = INVALID_HANDLE_VALUE;
-    std::mutex status_mu_;
-    std::condition_variable status_cv_;
-    std::thread status_thread_;
     std::mutex search_mu_;
     std::condition_variable search_cv_;
     Query pending_query_;

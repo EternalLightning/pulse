@@ -24,14 +24,13 @@ struct SaveAccessResult {
     std::optional<SaveObjectIdentity> probe_identity;
     std::optional<SaveConfirmationSnapshot> confirmation;
 };
-// Worker-only restricted experiment, not native parity. Existing snapshots must
-// have been confirmed by the caller. New targets are briefly created/deleted.
+// Worker-only. Existing snapshots must have been confirmed by the caller.
+// Fixed volumes with handle-path support use the guarded write probe.
 // No retries and no path-based deletion. Failure/cleanup evidence must be kept.
 // Observer is a deterministic testing seam; exceptions become failures. Never
 // call UI or reenter this model from an observer. No callback occurs in DllMain.
 // Shared by target and every retained ancestor metadata check.
-DWORD ValidateSaveAccessAttributes(DWORD attributes, bool require_unencrypted) noexcept;
 using SaveAccessObserver = std::function<void(SaveAccessStage)>;
-SaveAccessResult ValidateLocalSaveAccessV1(const SaveConfirmationSnapshot& confirmed,
+SaveAccessResult ValidateSaveAccess(const SaveConfirmationSnapshot& confirmed,
     const std::function<bool()>& cancelled = {}, const SaveAccessObserver& observer = {}, bool require_unencrypted = false) noexcept;
 }

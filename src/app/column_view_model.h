@@ -19,6 +19,7 @@ namespace pulse::ui { struct ColumnStripView; }
 namespace pulse::app {
 
 struct Tab;
+struct ColumnRowsProjection;
 
 struct ColumnStripColumn {
     std::wstring path;                 // normalized folder path
@@ -31,6 +32,8 @@ struct ColumnStripColumn {
     ui::SortColumn rows_sort_column = ui::SortColumn::Name;
     ui::SortDirection rows_sort_direction = ui::SortDirection::Asc;
     FolderSortMode rows_folder_sort = FolderSortMode::FoldersFirst;
+    std::shared_ptr<ColumnRowsProjection> pending_rows;
+    std::wstring rows_highlight_name;
     std::wstring highlight_name;       // entry on the navigation path, if any
     int highlight_row = -1;
     uint64_t generation = 0;           // worker generation still awaited (0 = none)

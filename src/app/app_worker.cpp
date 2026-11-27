@@ -463,7 +463,10 @@ WorkResult WorkerPool::Process(const std::shared_ptr<State>& state, const WorkIt
         }
     } else if (fs::IsRecycleViewPath(item.path)) {
         try {
-            fs::EnumerateRecycleBin(*entries, &res.recycle_info);
+            if (!fs::EnumerateRecycleBin(*entries, res.recycle_info, cancelled)) {
+                res.cancelled = true;
+                return res;
+            }
         } catch (...) {
             res.cancelled = cancelled();
             res.error = true;

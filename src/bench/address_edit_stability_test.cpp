@@ -108,6 +108,40 @@ int main(int argc, char** argv) {
     type(L"abc",true);
     check(read_query()==L"3d3sabc","mouse placement at text end preserves following typing order");
     RemoveWindowSubclass(s.hwndAddressEdit,Observe,98);
+
+    s.places.persist = false;
+    const auto origin = fs::NormalizePath(L"C:\\pulse-address-edit-fixture");
+    NavigateTo(s, origin);
+    SwitchAddressSearchMode(s, false);
+    SetWindowTextW(s.hwndAddressEdit, L"a");
+    SubmitAddressSearch(s, true);
+    const auto generation = static_cast<uint32_t>(tab->pending_generation);
+    check(IsAddressSearchResults(tab) && s.pendingIndexSearches.contains(generation),
+        "fixture submits a filename search before clearing");
+    const HWND edit = s.hwndAddressEdit;
+    SendMessageW(edit, EM_SETSEL, 1, 1);
+    SendMessageW(edit, WM_CHAR, VK_BACK, 0);
+    QueueAddressSearch(s);
+    TickAddressSearchDeadlines(s, s.addressLiveDue);
+    Render(s);
+    check(tab->current_path == origin && read_query().empty() && s.hwndAddressEdit == edit &&
+        s.addressSearching && GetFocus() == edit && IsWindowVisible(edit),
+        "Backspace to empty restores the folder and keeps the same search edit focused");
+    check(!s.pendingIndexSearches.contains(generation), "clearing cancels the pending filename search");
+    type(L"b", true);
+    check(read_query() == L"b" && IsAddressSearchResults(tab) && GetFocus() == edit,
+        "typing again starts a new filename search in the same focused edit");
+    SendMessageW(edit, WM_KEYDOWN, VK_ESCAPE, 0);
+    check(!s.addressSearching && tab->current_path == origin && GetFocus() == s.hwnd,
+        "Escape restores the folder and releases search focus");
+
+    ShowAddressSearch(s);
+    const auto outside = MAKELPARAM(1, s.compositor.Height() - 1);
+    HandleLButtonDown(&s, s.hwnd, WM_LBUTTONDOWN, MK_LBUTTON, outside);
+    HandleLButtonUp(&s, s.hwnd, WM_LBUTTONUP, 0, outside);
+    check(!s.addressSearching && GetFocus() == s.hwnd,
+        "clicking outside the search bar releases search focus");
+
     s.addressIgnoreKillFocus=true;DestroyWindow(s.hwndAddressEdit);s.hwndAddressEdit=nullptr;
     s.renderer.SetCompositor(nullptr);s.compositor.Shutdown();DestroyWindow(s.hwnd);s.hwnd=nullptr;
     std::cout<<"failures="<<failures<<std::endl;OleUninitialize();return failures ? 1:0;

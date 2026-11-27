@@ -6,6 +6,7 @@
 // lan_discovery.cpp - see lan_discovery.h. The property keys of Function
 // Discovery are defined in this translation unit only (initguid).
 #include "lan_discovery.h"
+#include "server_address.h"
 
 #include <windows.h>
 #include <initguid.h>
@@ -17,6 +18,7 @@
 #include <wrl/implements.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cwctype>
@@ -101,16 +103,19 @@ DnsApi LoadDnsApi() {
 }
 
 struct MdnsAnswers;
+enum class BrowseKind { Smb, DeviceInfo, WebDav, WebDavs };
+constexpr std::array kBrowseNames{L"_smb._tcp.local", L"_device-info._tcp.local",
+    L"_webdav._tcp.local", L"_webdavs._tcp.local"};
 struct BrowseContext {
     MdnsAnswers* answers = nullptr;
-    bool device_info = false;
+    BrowseKind kind = BrowseKind::Smb;
 };
 
 // What the answers said, keyed for joining at the end. Shared with the
 // browse callbacks (thread pool) through a heap block that outlives a slow
 // cancellation (see Finish); the callback contexts live in it too.
 struct MdnsAnswers {
-    BrowseContext contexts[2];
+    BrowseContext contexts[kBrowseNames.size()];
     std::mutex mutex;
     std::condition_variable done_cv;
     int finished = 0;                           // browses that reported their end
@@ -119,12 +124,43 @@ struct MdnsAnswers {
     std::map<std::wstring, std::wstring> instance_model;  // _device-info TXT model=
     std::map<std::wstring, std::wstring> host_ip;         // "ds920.local" -> IPv4
     std::vector<std::wstring> smb_instances;              // lower-case keys, in arrival order
+    struct WebDavService {
+        std::wstring name, host, path;
+        WORD port = 0;
+        bool tls = false;
+    };
+    std::map<std::wstring, WebDavService> webdav;
     DnsRecordListFreeFn free_list = nullptr;
 };
 
 void Record(MdnsAnswers& a, const BrowseContext& ctx, const DNS_RECORDW* r) {
     if (!r->pName) return;
     const std::wstring owner = TrimDot(r->pName);
+    if (ctx.kind == BrowseKind::WebDav || ctx.kind == BrowseKind::WebDavs) {
+        const bool tls = ctx.kind == BrowseKind::WebDavs;
+        const auto suffix = tls ? L"._webdavs._tcp.local" : L"._webdav._tcp.local";
+        if (r->wType == DNS_TYPE_PTR && r->Data.PTR.pNameHost) {
+            const auto target = TrimDot(r->Data.PTR.pNameHost);
+            const auto key = Lower(target);
+            if (key.ends_with(suffix)) {
+                auto& service = a.webdav[key];
+                service.name = MdnsInstanceName(target);
+                service.tls = tls;
+            }
+        } else if (const auto key = Lower(owner); key.ends_with(suffix)) {
+            auto& service = a.webdav[key];
+            if (r->wType == DNS_TYPE_SRV && r->Data.SRV.pNameTarget) {
+                service.host = TrimDot(r->Data.SRV.pNameTarget);
+                service.port = r->Data.SRV.wPort;
+            } else if (r->wType == DNS_TYPE_TEXT) {
+                std::vector<std::wstring> txt;
+                for (DWORD i = 0; i < r->Data.TXT.dwStringCount; ++i)
+                    if (r->Data.TXT.pStringArray[i]) txt.emplace_back(r->Data.TXT.pStringArray[i]);
+                service.path = TxtValue(txt, L"path");
+            }
+        }
+        return;
+    }
     switch (r->wType) {
     case DNS_TYPE_PTR: {
         if (!r->Data.PTR.pNameHost) break;
@@ -133,7 +169,7 @@ void Record(MdnsAnswers& a, const BrowseContext& ctx, const DNS_RECORDW* r) {
         if (name.empty()) break;
         const std::wstring key = Lower(name);
         a.instance_name.emplace(key, name);
-        if (!ctx.device_info && std::find(a.smb_instances.begin(), a.smb_instances.end(), key) == a.smb_instances.end())
+        if (ctx.kind == BrowseKind::Smb && std::find(a.smb_instances.begin(), a.smb_instances.end(), key) == a.smb_instances.end())
             a.smb_instances.push_back(key);
         break;
     }
@@ -145,7 +181,7 @@ void Record(MdnsAnswers& a, const BrowseContext& ctx, const DNS_RECORDW* r) {
         a.host_ip[Lower(owner)] = Ipv4Text(r->Data.A.IpAddress);
         break;
     case DNS_TYPE_TEXT: {
-        if (!ctx.device_info) break;
+        if (ctx.kind != BrowseKind::DeviceInfo) break;
         std::vector<std::wstring> txt;
         for (DWORD i = 0; i < r->Data.TXT.dwStringCount; ++i)
             if (r->Data.TXT.pStringArray[i]) txt.emplace_back(r->Data.TXT.pStringArray[i]);
@@ -176,7 +212,7 @@ struct MdnsBrowse {
     // Heap blocks owned here; leaked on purpose when the system never reports
     // the end of a cancelled browse, so a late callback has memory to touch.
     MdnsAnswers* answers = nullptr;
-    BrowseCancel cancels[2]{};
+    BrowseCancel cancels[kBrowseNames.size()]{};
     int started = 0;
 
     bool Start() {
@@ -184,10 +220,9 @@ struct MdnsBrowse {
         if (!api.Ready()) return false;
         answers = new MdnsAnswers;
         answers->free_list = api.free_list;
-        static const wchar_t* const kQueries[2] = {L"_smb._tcp.local", L"_device-info._tcp.local"};
-        for (int i = 0; i < 2; ++i) {
-            answers->contexts[i] = BrowseContext{answers, i == 1};
-            BrowseRequest request{1, 0, kQueries[i], &OnBrowse, &answers->contexts[i]};
+        for (size_t i = 0; i < kBrowseNames.size(); ++i) {
+            answers->contexts[i] = BrowseContext{answers, static_cast<BrowseKind>(i)};
+            BrowseRequest request{1, 0, kBrowseNames[i], &OnBrowse, &answers->contexts[i]};
             if (api.browse(&request, &cancels[i]) == kRequestPending) started |= 1 << i;
         }
         return started != 0;
@@ -197,7 +232,7 @@ struct MdnsBrowse {
     void Finish(std::vector<LanDevice>& out) {
         if (!answers) return;
         int expected = 0;
-        for (int i = 0; i < 2; ++i) {
+        for (size_t i = 0; i < kBrowseNames.size(); ++i) {
             if (!(started & (1 << i))) continue;
             ++expected;
             api.cancel(&cancels[i]);
@@ -216,6 +251,22 @@ struct MdnsBrowse {
                 if (!device.host.empty())
                     if (auto it = answers->host_ip.find(Lower(device.host)); it != answers->host_ip.end()) device.ip = it->second;
                 if (device.host.empty() && device.ip.empty()) continue;  // nothing to open
+                MergeLanDevice(out, device);
+            }
+            for (const auto& [key, service] : answers->webdav) {
+                (void)key;
+                if (service.name.empty() || service.host.empty() || !service.port ||
+                    service.host.find_first_of(L"/\\:@?#%") != std::wstring::npos) continue;
+                const std::wstring uri = (service.tls ? L"https://" : L"http://") + service.host +
+                    L":" + std::to_wstring(service.port) +
+                    (service.path.starts_with(L"/") ? service.path : L"/" + service.path);
+                const auto address = ParseServerAddress(uri);
+                if (address.kind != ServerAddressKind::WebDav) continue;
+                LanDevice device;
+                device.name = service.name + L" (WebDAV)";
+                device.host = service.host;
+                device.sources = kLanSourceMdns;
+                device.service_unc = address.unc;
                 MergeLanDevice(out, device);
             }
         }

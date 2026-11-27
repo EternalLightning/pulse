@@ -16,6 +16,7 @@
 #include "context_menu_prefs.h"
 #include "command_catalog.h"
 #include "../index/index_types.h"
+#include <optional>
 #include <string>
 
 namespace pulse::app {
@@ -138,6 +139,9 @@ enum MenuCmd : int {
     CmdDisplayAlias = 5750,
     CmdTerminalPanel = 5800,
     CmdOpenShortcutLocation = 5801,
+    CmdPasteShortcut = 5802,
+    CmdExpandFileGroups = 5803,
+    CmdCollapseFileGroups = 5804,
     // Explorer integration (优化.md §7): registry static verbs bound to the
     // current selection (+index into the StaticVerb list) and pulse_shell
     // IContextMenu session items (+host menu id, up to 0x7FFF).
@@ -192,7 +196,8 @@ std::vector<ShellMenuEntry> ApplyExplorerPrefs(const ContextMenuPrefs& prefs,
 
 // Context menu for empty list space (creation / paste / terminal / undo).
 std::vector<ui::FluentMenuItem> BuildBackgroundMenu(bool can_paste, bool can_undo,
-                                                    const std::wstring& undo_label);
+                                                    const std::wstring& undo_label,
+                                                    bool can_paste_shortcut = false);
 std::vector<ui::FluentMenuItem> BuildHomeBackgroundMenu();
 struct BackgroundViewOptions {
     ui::ViewMode view_mode = ui::ViewMode::Details;
@@ -200,6 +205,7 @@ struct BackgroundViewOptions {
     ui::SortDirection sort_direction = ui::SortDirection::Asc;
     ui::GroupMode group_mode = ui::GroupMode::Auto;
     ui::SortDirection group_direction = ui::SortDirection::Desc;
+    std::optional<bool> file_groups_collapsed;
     int folder_sort = 0; // 0 folders first, 1 follow direction, 2 mixed
     bool details_panel = false;
     bool can_sort = true;
@@ -228,7 +234,8 @@ std::vector<ui::FluentMenuItem> BuildDirectorySyncMenu(const CommandContext& con
 std::vector<ui::FluentMenuItem> BuildViewMenu(ui::ViewMode current_mode,
                                               bool details_panel = false);
 std::vector<ui::FluentMenuItem> BuildGroupingMenu(ui::GroupMode mode,
-                                                ui::SortDirection direction, bool enabled);
+                                                ui::SortDirection direction, bool enabled,
+                                                std::optional<bool> collapsed = std::nullopt);
 
 // Ctrl+K / address omnibar: verbs + index hits + recent folders at the end.
 struct OmnibarQuery {

@@ -202,6 +202,7 @@ LockedItemChoice ShowLockedItemDialog(HWND owner, const ops::OpStatus& status,
 bool ShowRenameLockedDialog(HWND owner, const ops::OpStatus& status, bool dark,
     D2D1_COLOR_F accent, std::function<bool()> still_valid);
 
+ConfirmDialogSpec BuildDeleteConfirmationSpec(const ops::DeleteConfirmation& confirmation);
 bool ShowConfirmDialog(HWND owner, const ConfirmDialogSpec& spec, bool dark,
                        D2D1_COLOR_F accent);
 

@@ -114,7 +114,7 @@ int ExpectedRoundedArtwork(ui::command_icons::Icon icon) {
     case I::Details: return IDR_FILES_LAYOUT_DETAILS_SVG;
     case I::Grid: case I::Applications: return IDR_FILES_LAYOUT_GRID_SVG;
     case I::List: return IDR_FILES_LAYOUT_LIST_SVG;
-    case I::Columns: case I::LayoutThree: return IDR_FILES_LAYOUT_COLUMNS_SVG;
+    case I::Columns: return IDR_FILES_LAYOUT_COLUMNS_SVG;
     case I::Content: return IDR_FILES_LAYOUT_CONTENT_SVG;
     case I::Split: return IDR_FILES_PANE_VERTICAL_SVG;
     case I::LayoutStacked: return IDR_FILES_PANE_HORIZONTAL_SVG;
@@ -176,6 +176,7 @@ Pixels ExpectedIcon(ui::Compositor& compositor, const Pixels& actual,
     // Preserve the production viewport and world coordinates: hardware AA can change on a translated small target.
     // Brush selection is independent of VM state and the UI path.
     ui::fluent::Painter painter(&compositor);
+    painter.SetScale(scale);
     painter.BeginFrame(theme);
     bool drawn;
     if (artwork_resource) {
@@ -288,7 +289,8 @@ bool SaveOverview(ui::Compositor& compositor, const std::filesystem::path& path,
     const int height = heading + static_cast<int>((tiles.size() + columns - 1) / columns) * row_height;
     compositor.Resize(width, height);
     auto* dc = compositor.Dc(); dc->BeginDraw(); dc->Clear(theme.bg);
-    ui::fluent::Painter painter(&compositor); painter.SetScale(scale); painter.BeginFrame(theme);
+    ui::fluent::Painter painter(&compositor);
+    painter.SetScale(scale); painter.BeginFrame(theme);
     const auto caption = std::wstring(L"实际工具栏图标 / ") + (theme.text.r > 0.9f ? L"深色 " : L"浅色 ") +
         std::to_wstring(static_cast<int>(scale * 100)) + L"% / 原始像素 1:1";
     painter.DrawText(caption, D2D1::RectF(12 * scale, 0, static_cast<float>(width), static_cast<float>(heading)),
@@ -393,7 +395,7 @@ int main(int argc, char** argv) {
                 ok &= condition;
             };
             require(model.Add(id) && model.Order() == std::vector<int>{id}, "model Add/order");
-            const auto icon = ui::toolbar_icons::Resolve(descriptor.glyph, descriptor.pictogram, id);
+            const auto icon = ui::toolbar_icons::Resolve(descriptor.glyph, descriptor.pictogram);
             const int rounded = artwork.outline ? 0 : ExpectedRoundedArtwork(icon);
             const bool center_divider = rounded == IDR_FILES_PANE_VERTICAL_SVG || rounded == IDR_FILES_PANE_HORIZONTAL_SVG ||
                 rounded == IDR_FLUENT_BOOK_OPEN_SVG || rounded == IDR_FLUENT_TABLE_SIMPLE_SVG;

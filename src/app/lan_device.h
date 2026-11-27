@@ -25,6 +25,7 @@ struct LanDevice {
     std::wstring ip;     // IPv4 when known
     std::wstring model;  // "DS920+" from _device-info / WSD, may be empty
     uint8_t sources = 0;
+    std::wstring service_unc;  // Explicit WebDAV endpoint from DNS-SD.
 };
 
 // "DS920._smb._tcp.local" -> "DS920"; DNS-SD escapes (\032, \.) are decoded.
@@ -35,7 +36,7 @@ std::wstring TxtValue(const std::vector<std::wstring>& txt, std::wstring_view ke
 // (case-insensitive, ".local" ignored) is one device. Returns true when the
 // list changed.
 bool MergeLanDevice(std::vector<LanDevice>& list, const LanDevice& device);
-// \\host for opening: the host name when known, else the IP.
+// Explicit service path, otherwise \\host or the IP.
 std::wstring LanDeviceUnc(const LanDevice& device);
 
 // What a device row looks like (DirEntry::net_kind): NAS brands and model

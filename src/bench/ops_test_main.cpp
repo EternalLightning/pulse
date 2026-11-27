@@ -61,8 +61,10 @@ struct TransferIntegrationProbe {
         if (manager.open_mailbox_) manager.open_mailbox_->before_execute = std::move(gate);
     }
     static void ShellOperation(OpsManager& manager, const OpRequest& request, bool stopped = false) {
+        if (!stopped) manager.StartShellClient();
         manager.stopping_.store(stopped);
         manager.RunShellOp(request, 1);
+        if (!stopped) manager.ReleaseShellClients({});
     }
     static void TransferCancelled(OpsManager& manager, const OpRequest& request) {
         manager.stopping_.store(true);
@@ -496,8 +498,10 @@ int RunOperationResourceRegressions() {
         auto request = SimpleOp(ops::OpType::BatchRename, {source.c_str()}, nullptr, L"target.txt");
         ops::TransferIntegrationProbe::ShellOperation(manager, request);
         const auto status = manager.Status();
+        wprintf(L"[DIAG] batch conflict phase=%d hr=0x%08lX path=%ls\n",
+            static_cast<int>(status.phase), static_cast<unsigned long>(status.failure_hr), status.failed_path.c_str());
         Check(status.phase == ops::OpPhase::Failed &&
-            status.failure_hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) && status.failed_path == source &&
+            status.failure_hr == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS) && status.failed_path == target &&
             Exists(source) && Exists(target), L"batch conflict preserves source and reports HRESULT plus failure path");
         request.new_name = L"invalid|name";
         ops::TransferIntegrationProbe::ShellOperation(manager, request);
@@ -560,6 +564,8 @@ int RunOperationResourceRegressions() {
     });
     const auto missing_parent = root + L"\\missing\\child";
     auto status = RunOp(SimpleOp(ops::OpType::CreateFolder, {missing_parent.c_str()}));
+    wprintf(L"[DIAG] missing parent phase=%d hr=0x%08lX path=%ls\n",
+        static_cast<int>(status.phase), static_cast<unsigned long>(status.failure_hr), status.failed_path.c_str());
     Check(status.phase == ops::OpPhase::Failed && status.failure_hr == HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND) &&
         status.failed_path == missing_parent, L"create response preserves non-permission machine failure");
     HANDLE locked = CreateFileW(source.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);

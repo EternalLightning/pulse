@@ -8,6 +8,7 @@
 #include "animation_clock.h"
 #include "preview_footer_layout.h"
 #include "ui_renderer_internal.h"
+#include "command_icons.h"
 #include "../common/localization.h"
 #include "tab_shape.h"
 #include "typography.h"
@@ -463,8 +464,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
             DrawIconText(hit.star.left, hit.star.top, 22.0f * s, 22.0f * s,
                          d.starred ? L"\xE735" : L"\xE734", L"*",
                          d.starred ? theme.accent_ink : theme.text_secondary, 1.0f);
-            DrawIconText(hit.rename.left, hit.rename.top, 22.0f * s, 22.0f * s,
-                         L"\xE8AC", L"ren", theme.text_secondary, 0.72f);
+            painter_.DrawGlyph(L"\xE8AC", hit.rename, theme.text_secondary, false, 16.0f);
         }
         std::wstring shown = d.name;
         if (d.multi_count > 1) {
@@ -492,7 +492,7 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
     // Button row: 打开 / 在新标签打开 / 复制路径 / 更多 (icon over label).
     if (d.multi_count <= 1) {
         auto rowButton = [&](const D2D1_RECT_F& rc, const wchar_t* glyph,
-                             const wchar_t* fallback, const wchar_t* label, bool hovered,
+                             const wchar_t* label, bool hovered,
                              bool primary) {
             if (primary) {
                 MakeBrush(dc, hovered ? theme.accent_hover : theme.accent, brAccent_);
@@ -511,9 +511,8 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
             const D2D1_COLOR_F fg = primary
                 ? (IsHighContrast() ? theme.accent_text : AutoAccentText(hovered ? theme.accent_hover : theme.accent))
                 : theme.text;
-            DrawIconText(rc.left, rc.top + 5.0f * s, rc.right - rc.left, 18.0f * s,
-                         glyph, fallback, primary ? fg
-                                                  : theme.text_secondary, 1.0f);
+            const auto icon_bounds = D2D1::RectF(rc.left, rc.top + 5.0f * s, rc.right, rc.top + 23.0f * s);
+            painter_.DrawGlyph(glyph, icon_bounds, primary ? fg : theme.text_secondary);
             IDWriteTextFormat* fmt = compositor_->SmallFormat();
             if (!fmt) return;
             // Draw through a private text layout so the shared format is never
@@ -538,13 +537,13 @@ void MainRenderer::DrawDetailsPanel(const WindowViewModel& vm, const D2D1_RECT_F
                                    tl.get(), brText_.get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
             }
         };
-        rowButton(hit.open, L"\xE8B7", L"O", pulse::l10n::Get(kDetailsButtonLabels[0]).c_str(),
+        rowButton(hit.open, L"\xE8B7", pulse::l10n::Get(kDetailsButtonLabels[0]).c_str(),
                   IsHovered(vm, HitTestResult::DetailsOpen), true);
-        rowButton(hit.new_tab, L"\xE8A7", L"\x2197", pulse::l10n::Get(kDetailsButtonLabels[1]).c_str(),
+        rowButton(hit.new_tab, L"\xE8A7", pulse::l10n::Get(kDetailsButtonLabels[1]).c_str(),
                   IsHovered(vm, HitTestResult::DetailsNewTab), false);
-        rowButton(hit.copy_path, L"\xE8C8", L"C", pulse::l10n::Get(kDetailsButtonLabels[2]).c_str(),
+        rowButton(hit.copy_path, command_icons::kCopyPathGlyph, pulse::l10n::Get(kDetailsButtonLabels[2]).c_str(),
                   IsHovered(vm, HitTestResult::DetailsCopyPath), false);
-        rowButton(hit.more, L"\xE712", L"...", pulse::l10n::Get(kDetailsButtonLabels[3]).c_str(),
+        rowButton(hit.more, L"\xE712", pulse::l10n::Get(kDetailsButtonLabels[3]).c_str(),
                   IsHovered(vm, HitTestResult::DetailsMore), false);
         y += 48.0f * s + 4.0f * s;
     }

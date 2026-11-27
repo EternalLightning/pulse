@@ -32,6 +32,7 @@ private:
         std::array<ui::HomeCardView, model::kHomeQuickAccessItemCount> quick_access_cards;
         std::vector<ui::HomeCardView> visible_quick_access_cards;
         std::unordered_map<std::wstring, std::pair<uint64_t, uint64_t>> drive_capacity;
+        DWORD drives_without_media = 0;
         std::unordered_map<std::wstring, std::wstring> label_updates;
         uint64_t generation = 0;
         model::HomeQuickAccessPrefs quick_access;

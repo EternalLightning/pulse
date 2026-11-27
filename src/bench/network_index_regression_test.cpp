@@ -5,6 +5,7 @@
 
 #include "../index/network_index.h"
 #include "../index/search_result_merge.h"
+#include "../common/localization.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -25,6 +26,9 @@ struct NetworkIndexAccess {
         return index.LoadConfiguration(configured);
     }
     static void Build(NetworkIndex& index, const std::wstring& path) {
+        auto& root = index.roots_[0];
+        root.full_requested = false;
+        root.full_due = NetworkIndex::Clock::time_point::max();
         index.BuildRoot(path, index.generation_);
     }
     static const void* Shard(const NetworkIndex& index) { return index.roots_[0].shard.get(); }
@@ -32,6 +36,7 @@ struct NetworkIndexAccess {
         std::lock_guard lock(index.mu_);
         NetworkIndex::RootState root;
         root.info.path = path; root.info.building = building;
+        root.full_requested = false;
         index.roots_.push_back(std::move(root));
     }
     static void Quality(NetworkIndex& index, bool online, bool building, bool failed) {
@@ -50,9 +55,42 @@ struct NetworkIndexAccess {
         return true;
     }
     static bool WakeWatch(NetworkIndex& index) { return SetEvent(index.watch_wake_event_) != FALSE; }
-    static size_t DirtyRoots(NetworkIndex& index) {
+    static void ClearRequestedScans(NetworkIndex& index) {
         std::lock_guard lock(index.mu_);
-        return index.dirty_roots_.size();
+        for (auto& root : index.roots_) {
+            root.full_requested = false;
+            root.full_due = NetworkIndex::Clock::time_point::max();
+        }
+    }
+    static size_t ChangedRoots(NetworkIndex& index) {
+        std::lock_guard lock(index.mu_);
+        return std::count_if(index.roots_.begin(), index.roots_.end(),
+            [](const auto& root) { return !root.changed_paths.empty(); });
+    }
+    static void Queue(NetworkIndex& index, const std::wstring& root,
+                      std::initializer_list<NetworkIndex::ChangedPaths::value_type> paths, bool gap = false) {
+        index.QueueWatchChanges(root, NetworkIndex::ChangedPaths(paths), gap, true);
+    }
+    static auto Pending(NetworkIndex& index) {
+        std::lock_guard lock(index.mu_);
+        const auto& root = index.roots_[0];
+        return std::tuple(root.changed_paths.size(), root.batch_due, root.full_due, root.full_requested);
+    }
+    static auto RetryDelay(NetworkIndex& index) { return index.roots_[0].retry_delay; }
+    static void StartCrawling(NetworkIndex& index) {
+        index.crawl_thread_ = std::thread([&index] { index.CrawlLoop(); });
+    }
+    static bool WaitForUpdate(NetworkIndex& index, const void* previous) {
+        const ULONGLONG deadline = GetTickCount64() + 3000;
+        do {
+            {
+                std::lock_guard lock(index.mu_);
+                const auto& root = index.roots_[0];
+                if (!root.info.building && root.shard.get() != previous && root.info.error.empty()) return true;
+            }
+            Sleep(5);
+        } while (GetTickCount64() < deadline);
+        return false;
     }
     static SearchResult Search(NetworkIndex& index, const std::wstring& prefix) {
         Query query; query.path_prefix = prefix; query.limit = 100;
@@ -201,15 +239,16 @@ int RunNetworkWatchRegressionTests() {
         Check(started && WaitForSingleObject(watches_armed, 3000) == WAIT_OBJECT_0,
             L"arm both isolated directory watches before mutating the roots");
         if (started) {
+            NetworkIndexAccess::ClearRequestedScans(index);
             Check(NetworkIndexAccess::WakeWatch(index) &&
                 std::filesystem::create_directory(first / L"new-one") &&
                 std::filesystem::create_directory(second / L"new-two"),
                 L"signal the configuration wake and mutate both watched directories");
             const ULONGLONG deadline = GetTickCount64() + 4000;
-            while (NetworkIndexAccess::DirtyRoots(index) < 2 && GetTickCount64() < deadline) Sleep(5);
+            while (NetworkIndexAccess::ChangedRoots(index) < 2 && GetTickCount64() < deadline) Sleep(5);
             Check(simultaneous_watch_result == WAIT_OBJECT_0,
                 L"both real directory completions are ready alongside the configuration wake");
-            Check(NetworkIndexAccess::DirtyRoots(index) == 2,
+            Check(NetworkIndexAccess::ChangedRoots(index) == 2,
                 L"simultaneous directory completions queue both roots for reconciliation");
             const auto roots = index.Roots();
             Check(roots[0].watching && roots[1].watching,
@@ -293,7 +332,8 @@ int RunNetworkIndexRegressionTests() {
             Check(NetworkIndexAccess::Shard(index) == original && info.indexed_items == 3 &&
                   !info.building && info.progress == 0 && !info.error.empty() &&
                   info.online == (mode != Scan::RootDenied) &&
-                  (mode == Scan::RootDenied || info.state.find(L"同步失败") != std::wstring::npos) &&
+                  (mode == Scan::RootDenied ||
+                   info.state == pulse::l10n::Get(pulse::l10n::StringId::NetworkIndexSyncFailedPreserved)) &&
                   Read(old_path) == original_bytes &&
                   !std::filesystem::exists(hooks.shard_base + (slot_zero ? L"-1.bin" : L"-0.bin")),
                   mode == Scan::ChildDenied ? L"child access denied retains old shard and disk bytes" :

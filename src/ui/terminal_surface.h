@@ -28,7 +28,8 @@ public:
     void SetOwner(HWND window) { process_.SetOwner(window); }
     UINT_PTR NotificationId() const { return process_.NotificationId(); }
     bool HasForegroundTask() const {
-        return status_ == ops::TerminalProcess::Status::Running && (command_pending_ || alternate_screen_);
+        return status_ == ops::TerminalProcess::Status::Running &&
+            (command_pending_ || alternate_screen_ || process_.HasChildProcesses());
     }
     bool Ended() const { return status_ == ops::TerminalProcess::Status::Exited ||
         status_ == ops::TerminalProcess::Status::Failed ||
@@ -80,6 +81,7 @@ private:
     bool prompt_ready_ = false;
     bool awaiting_prompt_ = false;
     bool command_pending_ = false;
+    bool powershell_ = true;
     bool alternate_screen_ = false;
     bool cursor_visible_ = true;
     bool cursor_blinks_ = true;

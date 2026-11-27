@@ -20,6 +20,8 @@ std::wstring Key(std::wstring_view text) {
 }
 
 bool SameDevice(const LanDevice& a, const LanDevice& b) {
+    if (!a.service_unc.empty() || !b.service_unc.empty())
+        return !a.service_unc.empty() && Key(a.service_unc) == Key(b.service_unc);
     if (!a.ip.empty() && !b.ip.empty()) return a.ip == b.ip;
     const std::wstring ah = Key(a.host.empty() ? a.name : a.host);
     const std::wstring bh = Key(b.host.empty() ? b.name : b.host);
@@ -88,6 +90,7 @@ bool MergeLanDevice(std::vector<LanDevice>& list, const LanDevice& device) {
 }
 
 std::wstring LanDeviceUnc(const LanDevice& device) {
+    if (!device.service_unc.empty()) return device.service_unc;
     for (const auto& host : {device.host, device.ip}) {
         if (host.empty()) continue;
         const auto parsed = ParseServerAddress(L"\\\\" + host);

@@ -26,7 +26,9 @@
 if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
 ```
 
-脚本配置 Ninja / Release、`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`、`PULSE_WITH_SELFTEST=OFF`，以并行度 4 构建 `pulse` 及其五个生产依赖，得到六个程序：
+脚本使用 Ninja / Release、`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded`、`PULSE_WITH_SELFTEST=OFF`，以并行度 8 构建 `pulse` 及其生产依赖。相同目录中的生产配置和编译对象会被复用，由 Ninja 更新受影响的产物。首次构建、切换生产配置或显式传入 `/clean` 时会重新配置。`build-dev` 与 `build-release` 分别维护自己的缓存，开发构建完成后，首次打包仍需编译 Release 中过期的对象。
+
+`Pulse.exe` 的 Release 链接使用增量 LTCG，并在构建目录内保存链接时优化的中间结果。保留同一构建目录，后续小改动可以复用这些结果。
 
 | CMake 目标 | 交付文件 | 用途 |
 | --- | --- | --- |
@@ -84,7 +86,7 @@ pwsh -NoProfile -File .\scripts\package_portable.ps1 -BuildDir build-release
 if ($LASTEXITCODE -ne 0) { throw 'Portable packaging failed' }
 ```
 
-安装脚本会调用一次生产构建，再检查六个 EXE 的 FileVersion、ProductVersion、OriginalFilename 和主程序内嵌自测标记；随后扫描运行库依赖，最后调用 Inno Setup。
+安装脚本会增量更新生产构建，再检查生产程序和 DLL 的 FileVersion、ProductVersion、OriginalFilename 和主程序内嵌自测标记。随后扫描运行库依赖，并用 Inno Setup 的 LZMA2 normal 级别生成安装包。即使 Ninja 没有重编 C++，后面的校验和压缩也会运行。
 
 若刚完成同一份源码的构建，可改用：
 

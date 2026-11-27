@@ -28,6 +28,7 @@ struct ClipboardAvailabilityResult {
     bool clipboard_available = false;
     bool tray_available = false;
     bool shell_available = false;
+    bool copied_paths_available = false;
 };
 
 inline ClipboardAvailabilityResult ProbeClipboardAvailability(
@@ -51,6 +52,7 @@ inline ClipboardAvailabilityResult ProbeClipboardAvailability(
         shell_fallback = !paths_read || clipboard.paths.empty();
         result.clipboard_available = !shell_fallback && clipboard.sequence == request.sequence &&
             valid_paths(clipboard.paths);
+        result.copied_paths_available = result.clipboard_available && !clipboard.cut;
     }
     // Virtual files have no paths to validate. Their formats and clipboard
     // sequence are captured by the UI pump; tray paths still get worker checks.
@@ -87,7 +89,7 @@ public:
         inputs_.shell_format = shell_format;
         inputs_.tray_present = tray_present; inputs_.tray_paths = std::move(tray_paths);
         inputs_.generation = mailbox_->generation.fetch_add(1) + 1;
-        clipboard_available_ = tray_available_ = shell_available_ = false;
+        clipboard_available_ = tray_available_ = shell_available_ = copied_paths_available_ = false;
         pending_ = false; next_probe_ = 0;
         return previously_available;
     }
@@ -116,13 +118,13 @@ public:
         clipboard_available_ = result->clipboard_available;
         tray_available_ = result->tray_available;
         shell_available_ = result->shell_available;
+        copied_paths_available_ = result->copied_paths_available;
         return previous != Available();
     }
 
     std::optional<ClipboardAvailabilityRequest> BeginRefresh(uint64_t now) {
         if (!initialized_ || pending_ || now < next_probe_ ||
-            (!inputs_.file_format && !inputs_.shell_format) ||
-            (inputs_.tray_present && inputs_.tray_paths.empty() && !inputs_.shell_format)) return {};
+            (!inputs_.file_format && !inputs_.shell_format)) return {};
         pending_ = true;
         next_probe_ = now + 1000;
         return inputs_;
@@ -137,6 +139,10 @@ public:
             (!inputs_.tray_present || tray_available_ || shell_available_);
     }
 
+    bool CopiedPathsAvailable(uint32_t sequence) const noexcept {
+        return sequence == inputs_.sequence && copied_paths_available_;
+    }
+
     std::shared_ptr<Mailbox> mailbox() const { return mailbox_; }
 
 private:
@@ -149,6 +155,7 @@ private:
     bool clipboard_available_ = false;
     bool tray_available_ = false;
     bool shell_available_ = false;
+    bool copied_paths_available_ = false;
 };
 
 } // namespace pulse::app

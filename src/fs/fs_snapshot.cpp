@@ -6,6 +6,8 @@
 // fs_snapshot.cpp
 #include "fs_snapshot.h"
 #include "fs_enum.h"
+#include <algorithm>
+#include <iterator>
 
 namespace pulse::fs {
 
@@ -44,30 +46,68 @@ SnapshotStore::SnapshotStore(size_t capacity, size_t byte_capacity)
     : capacity_((std::max<size_t>)(1, capacity)), byte_capacity_(byte_capacity) {
 }
 
-size_t SnapshotStore::SnapshotBytes(const SnapshotPtr& snapshot) {
+size_t SnapshotStore::SnapshotBytes(const SnapshotPtr& snapshot) const {
     if (!snapshot) return 0;
     size_t bytes = sizeof(std::vector<DirEntry>) + snapshot->capacity() * sizeof(DirEntry);
+    if (byte_capacity_ && bytes > byte_capacity_) return bytes;
+    // Inline strings are already included in the vector's DirEntry storage.
+    const auto heap_bytes = [inline_capacity = std::wstring{}.capacity()](const std::wstring& value) {
+        return value.capacity() > inline_capacity ? (value.capacity() + 1) * sizeof(wchar_t) : 0;
+    };
     for (const auto& entry : *snapshot) {
-        bytes += entry.name.capacity() * sizeof(wchar_t);
-        bytes += entry.full_path.capacity() * sizeof(wchar_t);
-        bytes += entry.link_target.capacity() * sizeof(wchar_t);
+        bytes += heap_bytes(entry.name) + heap_bytes(entry.full_path) + heap_bytes(entry.shell_id) +
+                 heap_bytes(entry.recycle_path) + heap_bytes(entry.change_type_text) +
+                 heap_bytes(entry.change_old_path) + heap_bytes(entry.link_target);
+        if (byte_capacity_ && bytes > byte_capacity_) break;
     }
     return bytes;
 }
 
-void SnapshotStore::EvictToBudget(const std::wstring* protected_key) {
-    while (byte_capacity_ && resident_bytes_ > byte_capacity_ && !lru_.empty()) {
-        auto oldest = std::prev(lru_.end());
-        if (protected_key && *oldest == *protected_key) {
-            if (oldest == lru_.begin()) break;
-            --oldest;
+SnapshotStore::Entry& SnapshotStore::InsertEntry(const std::wstring& key) {
+    lru_.push_front(key);
+    try {
+        auto& entry = map_.try_emplace(key).first->second;
+        entry.lru_it = lru_.begin();
+        return entry;
+    } catch (...) {
+        lru_.pop_front();
+        throw;
+    }
+}
+
+void SnapshotStore::StoreSnapshot(Entry& entry, SnapshotPtr&& snapshot, size_t bytes) {
+    resident_bytes_ -= entry.bytes;
+    if (byte_capacity_ && bytes > byte_capacity_) {
+        entry.snapshot.reset();
+        entry.bytes = 0;
+    } else {
+        entry.snapshot = std::move(snapshot);
+        entry.bytes = bytes;
+        resident_bytes_ += bytes;
+    }
+    entry.dirty = false;
+    lru_.splice(lru_.begin(), lru_, entry.lru_it);
+    EvictToBudget();
+}
+
+void SnapshotStore::Evict(EntryMap::iterator it) {
+    resident_bytes_ -= it->second.bytes;
+    lru_.erase(it->second.lru_it);
+    map_.erase(it);
+}
+
+void SnapshotStore::EvictToBudget() {
+    while (map_.size() > capacity_) Evict(map_.find(lru_.back()));
+
+    auto next = lru_.end();
+    while (byte_capacity_ && resident_bytes_ > byte_capacity_) {
+        const auto oldest = std::prev(next);
+        const auto it = map_.find(*oldest);
+        if (it->second.bytes == 0) {
+            next = oldest;
+        } else {
+            Evict(it);
         }
-        auto it = map_.find(*oldest);
-        if (it != map_.end()) {
-            resident_bytes_ -= (std::min)(resident_bytes_, it->second.bytes);
-            map_.erase(it);
-        }
-        lru_.erase(oldest);
     }
 }
 
@@ -90,22 +130,8 @@ SnapshotPtr SnapshotStore::GetOrStart(const std::wstring& path, uint64_t& out_ge
         return nullptr;
     }
 
-    // Evict if needed.
-    while (map_.size() >= capacity_ && !lru_.empty()) {
-        const std::wstring& oldest = lru_.back();
-        auto old = map_.find(oldest);
-        if (old != map_.end())
-            resident_bytes_ -= (std::min)(resident_bytes_, old->second.bytes);
-        map_.erase(oldest);
-        lru_.pop_back();
-    }
-
-    Entry e;
-    e.generation = 0;
-    e.dirty = false;
-    lru_.push_front(key);
-    e.lru_it = lru_.begin();
-    map_[key] = std::move(e);
+    InsertEntry(key).dirty = false;
+    EvictToBudget();
     out_generation = 0;
     return nullptr;
 }
@@ -138,38 +164,12 @@ void SnapshotStore::Update(const std::wstring& path, uint64_t generation,
     // Snapshots are immutable; count large directories before taking the UI-facing lock.
     const size_t bytes = SnapshotBytes(snapshot);
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = map_.find(key);
-    if (it == map_.end()) {
-        while (map_.size() >= capacity_ && !lru_.empty()) {
-            auto old = map_.find(lru_.back());
-            if (old != map_.end())
-                resident_bytes_ -= (std::min)(resident_bytes_, old->second.bytes);
-            map_.erase(lru_.back());
-            lru_.pop_back();
-        }
-        Entry e;
-        e.generation = generation;
-        e.dirty = false;
-        e.snapshot = std::move(snapshot);
-        e.identity = identity;
-        e.bytes = bytes;
-        resident_bytes_ += e.bytes;
-        lru_.push_front(key);
-        e.lru_it = lru_.begin();
-        map_[key] = std::move(e);
-        EvictToBudget(&key);
-        return;
-    }
-    if (generation < it->second.generation && it->second.snapshot) return;
-    resident_bytes_ -= (std::min)(resident_bytes_, it->second.bytes);
-    it->second.snapshot = std::move(snapshot);
-    it->second.identity = identity;
-    it->second.bytes = bytes;
-    resident_bytes_ += it->second.bytes;
-    it->second.generation = generation;
-    it->second.dirty = false;
-    lru_.splice(lru_.begin(), lru_, it->second.lru_it);
-    EvictToBudget(&key);
+    const auto it = map_.find(key);
+    if (it != map_.end() && generation < it->second.generation) return;
+    Entry& entry = it == map_.end() ? InsertEntry(key) : it->second;
+    entry.identity = identity;
+    entry.generation = generation;
+    StoreSnapshot(entry, std::move(snapshot), bytes);
 }
 
 uint64_t SnapshotStore::Put(const std::wstring& path, SnapshotPtr snapshot) {
@@ -177,35 +177,10 @@ uint64_t SnapshotStore::Put(const std::wstring& path, SnapshotPtr snapshot) {
     // Snapshots are immutable; count large directories before taking the UI-facing lock.
     const size_t bytes = SnapshotBytes(snapshot);
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = map_.find(key);
-    if (it == map_.end()) {
-        while (map_.size() >= capacity_ && !lru_.empty()) {
-            auto old = map_.find(lru_.back());
-            if (old != map_.end())
-                resident_bytes_ -= (std::min)(resident_bytes_, old->second.bytes);
-            map_.erase(lru_.back());
-            lru_.pop_back();
-        }
-        Entry e;
-        e.generation = 0;
-        e.dirty = false;
-        e.snapshot = std::move(snapshot);
-        e.bytes = bytes;
-        resident_bytes_ += e.bytes;
-        lru_.push_front(key);
-        e.lru_it = lru_.begin();
-        map_[key] = std::move(e);
-        EvictToBudget(&key);
-        return 0;
-    }
-    resident_bytes_ -= (std::min)(resident_bytes_, it->second.bytes);
-    it->second.snapshot = std::move(snapshot);
-    it->second.bytes = bytes;
-    resident_bytes_ += it->second.bytes;
-    it->second.dirty = false;
-    lru_.splice(lru_.begin(), lru_, it->second.lru_it);
-    EvictToBudget(&key);
-    return it->second.generation;
+    const auto it = map_.find(key);
+    Entry& entry = it == map_.end() ? InsertEntry(key) : it->second;
+    StoreSnapshot(entry, std::move(snapshot), bytes);
+    return entry.generation;
 }
 
 void SnapshotStore::MarkDirty(const std::wstring& path) {

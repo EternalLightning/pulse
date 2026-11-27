@@ -41,6 +41,7 @@
 #include "window_size_lock.h"
 #include "external_open.h"
 #include "clipboard_availability.h"
+#include "clipboard_paste_choice.h"
 #include "tag_discovery_cache.h"
 #include "places.h"
 #include "details_meta.h"
@@ -238,7 +239,7 @@ struct AppState : AppCoreOwner {
     std::shared_ptr<WindowResultMailbox<app::DeviceOperationResult>> device_operation_mailbox;
     std::shared_ptr<WindowResultMailbox<ShellVerbsResult>> shell_verbs_mailbox;
     std::shared_ptr<WindowResultMailbox<bool>> shell_registry_mailbox;
-    std::shared_ptr<WindowResultMailbox<bool>> clipboard_paste_mailbox;
+    std::shared_ptr<WindowResultMailbox<app::ClipboardPasteResult>> clipboard_paste_mailbox;
     std::shared_ptr<WindowResultMailbox<app::ShortcutDropResult>> shortcut_drop_mailbox;
     std::shared_ptr<WindowResultMailbox<app::ExternalOpenResult>> external_open_mailbox;
     std::shared_ptr<WindowResultMailbox<app::DetailsAttributeResult>> details_attribute_mailbox;
@@ -306,6 +307,7 @@ struct AppState : AppCoreOwner {
     std::shared_ptr<app::NetworkAccessState> network_access;
     std::shared_ptr<NetworkLocationLoad> network_locations;
     fs::RecycleBinInfo recycle_info;
+    uint64_t recycle_listing_generation = 0;
     // SHQueryRecycleBin and $I files lag IFileOperation; retry occupancy/list
     // after recycle mutations and ignore occupancy that still matches the
     // pre-mutation count while an optimistic update is showing.

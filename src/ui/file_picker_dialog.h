@@ -50,6 +50,9 @@ struct PickerPlace {
     std::wstring label;
     std::wstring directory;
     std::wstring glyph;
+    D2D1_COLOR_F icon_color{};
+    bool use_path_icon = false;
+    bool native_folder = false;
 };
 
 struct PickerPlaces {
@@ -58,6 +61,7 @@ struct PickerPlaces {
     std::vector<PickerPlace> quick_access;
     std::vector<PickerPlace> network;
     std::shared_ptr<const model::PlacesCatalog> catalog;
+    std::vector<PickerPlace> portable_devices;
 };
 
 using PickerPlacesLoader = std::function<PickerPlaces(const std::function<bool()>& cancelled)>;
@@ -108,6 +112,7 @@ struct FilePickerSpec {
     std::function<std::optional<bool>()> poll_folder_change;
     std::function<void(const FilePickerSnapshot&)> on_custom_button;
     std::function<void()> on_use_windows;
+    std::function<void(std::wstring)> on_open_native_folder;
     std::function<bool(HWND, bool accepted)> defer_hide;
     std::function<void()> on_foreground_close;
     std::function<std::wstring()> current_pulse_directory;

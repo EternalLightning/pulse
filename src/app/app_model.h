@@ -42,6 +42,8 @@ std::wstring NavigationReturnChildName(const std::wstring& from_path,
 enum class BannerType { None, Other, ContentIndex, SearchIncomplete, ContentScanRunning, Offline };
 
 struct ArchiveListing;
+struct PaneProjection;
+using SubmitViewProjection = std::function<bool(std::function<bool()>)>;
 
 struct Tab {
     uint64_t network_identity = NextNetworkIdentity();
@@ -78,6 +80,7 @@ struct Tab {
     ui::SortColumn sort_column = ui::SortColumn::Name;
     ui::SortDirection sort_direction = ui::SortDirection::Asc;
     ui::GroupMode group_mode = ui::GroupMode::Auto;
+    bool file_groups_collapsed = false;
     ui::SortDirection group_direction = ui::SortDirection::Desc;
     bool downloads_auto_sort = false;
     ui::SortColumn sort_before_downloads = ui::SortColumn::Name;
@@ -208,15 +211,9 @@ struct Tab {
     mutable const PlacesCatalog* view_cache_places = nullptr;
     mutable uint64_t view_cache_places_revision = 0;
     mutable model::DisplayAliasSnapshot view_cache_display_aliases;
-    mutable std::wstring view_cache_filter_text;
-    mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_filter_map;
-    mutable std::shared_ptr<const std::vector<ui::DateGroup>> view_date_groups;
-    mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_date_filter;
-    mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_group_order;
-    mutable std::shared_ptr<const ui::PaneViewModel::FilterMap> view_group_reverse;
-    mutable ui::GroupMode view_group_mode = ui::GroupMode::Auto;
-    mutable ui::SortDirection view_group_direction = ui::SortDirection::Desc;
-    mutable unsigned view_date_day = 0;
+    mutable std::shared_ptr<const PaneProjection> view_projection;
+    mutable std::shared_ptr<PaneProjection> pending_view_projection;
+    std::optional<std::pair<uint64_t, float>> projection_reveal_selection;
     mutable std::shared_ptr<const ui::PaneViewModel::TagDots> view_tag_dots;
     mutable std::shared_ptr<ui::RowPresentationCache> view_row_cache;
 
@@ -380,7 +377,11 @@ void ApplySplitRatio(SplitContainer& node, const D2D1_RECT_F& parent_bounds, flo
 void CollectSplitRatios(const SplitContainer& node, std::vector<float>& out);
 void ApplySplitRatios(SplitContainer& node, const std::vector<float>& ratios);
 void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane,
-                       const PlacesCatalog* places = nullptr);
+                       const PlacesCatalog* places = nullptr,
+                       const SubmitViewProjection& submit = {});
+bool PaneProjectionReady(const Tab& tab);
+void SyncPaneProjection(const Tab& tab, const PlacesCatalog* places,
+                        const SubmitViewProjection& submit, bool publish);
 
 // One window tab = one working layout (pane count, split ratios, each column).
 struct LayoutTab {
@@ -520,6 +521,7 @@ struct SidebarEntry {
     int count = 0;
     std::wstring path;
     bool is_drive = false;
+    bool drive_without_media = false;
     float used_ratio = 0.0f;
     bool expandable = false;
     // Built-in quick-access link (BuiltinQuickAccess), -1 for user entries.
@@ -588,6 +590,9 @@ struct SidebarModel {
 };
 
 SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle = nullptr);
+std::vector<SidebarEntry> BuildQuickAccessDefaults(const fs::RecycleBinInfo* recycle = nullptr);
+ui::SidebarGroup BuildQuickAccessGroup(const std::vector<SidebarEntry>& defaults, const model::PlacesCatalog* places,
+                                       uint32_t hidden_mask, const std::wstring& git_root = {});
 std::vector<SidebarEntry> BuildOneDriveEntries();
 
 // ---------------------------------------------------------------------------
@@ -602,7 +607,8 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
                                          bool starred_expanded = true,
                                          const std::vector<int>* sidebar_order = nullptr,
                                          uint32_t quick_access_hidden_mask = 0,
-                                         bool include_status = true);
+                                         bool include_status = true,
+                                         const SubmitViewProjection& submit = {});
 
 // Sanitizes a stored section order: keeps only known ids, appends the missing
 // ones, drops duplicates. Returns DefaultSidebarOrder() when nothing survives.

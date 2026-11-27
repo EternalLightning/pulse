@@ -795,22 +795,22 @@ void PlacesCatalog::SetNetworkStatus(const std::wstring& unc, fs::NetStatus stat
 
 bool PlacesCatalog::PathHasTag(const std::wstring& path, int tag_index) const {
     if (tag_index < 0 || tag_index >= static_cast<int>(tags.size())) return false;
-    const std::wstring n = TagKey(path);
-    const auto it = tag_index_.find(n);
-    return it != tag_index_.end() &&
-        std::find(it->second.begin(), it->second.end(), tag_index) != it->second.end();
+    const auto* indices = TagIndicesForPath(path);
+    return indices && std::find(indices->begin(), indices->end(), tag_index) != indices->end();
 }
 
 std::vector<int> PlacesCatalog::TagsForPath(const std::wstring& path) const {
-    const std::wstring n = TagKey(path);
-    const auto it = tag_index_.find(n);
-    return it == tag_index_.end() ? std::vector<int>{} : it->second;
+    const auto* indices = TagIndicesForPath(path);
+    return indices ? *indices : std::vector<int>{};
 }
 
 const std::vector<int>* PlacesCatalog::TagIndicesForPath(const std::wstring& path) const {
-    const std::wstring n = TagKey(path);
-    const auto it = tag_index_.find(n);
-    return it == tag_index_.end() ? nullptr : &it->second;
+    return tag_index_ ? TagIndicesForPath(*tag_index_, path) : nullptr;
+}
+
+const std::vector<int>* PlacesCatalog::TagIndicesForPath(const TagIndex& index, const std::wstring& path) {
+    const auto it = index.find(TagKey(path));
+    return it == index.end() ? nullptr : &it->second;
 }
 
 const ColorTag* PlacesCatalog::FindTag(const TagId& id) const {
@@ -898,7 +898,7 @@ TagSelectionState PlacesCatalog::GetSelectionState(
 }
 
 void PlacesCatalog::RebuildTagIndex() {
-    tag_index_.clear();
+    auto index = std::make_shared<TagIndex>();
     for (int i = 0; i < static_cast<int>(tags.size()); ++i) {
         if (tags[static_cast<size_t>(i)].id.empty()) {
             tags[static_cast<size_t>(i)].id = NewTagId();
@@ -909,9 +909,10 @@ void PlacesCatalog::RebuildTagIndex() {
         }
         for (const auto& path : tags[static_cast<size_t>(i)].paths) {
             const std::wstring n = TagKey(path);
-            if (!n.empty() && !fs::IsVirtualPath(n)) tag_index_[n].push_back(i);
+            if (!n.empty() && !fs::IsVirtualPath(n)) (*index)[n].push_back(i);
         }
     }
+    tag_index_ = std::move(index);
     ++tag_revision_;
 }
 

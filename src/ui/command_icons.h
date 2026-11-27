@@ -23,6 +23,15 @@ inline constexpr wchar_t kDisplayAliasGlyph[] = L"\xF300";
 inline constexpr wchar_t kLinkedBrowsingGlyph[] = L"\xF301";
 inline constexpr wchar_t kDirectorySyncGlyph[] = L"\xF302";
 inline constexpr wchar_t kEmbeddedTerminalGlyph[] = L"\xF303";
+inline constexpr wchar_t kPropertiesGlyph[] = L"\xF304";
+inline constexpr wchar_t kCopyPathGlyph[] = L"\xF305";
+inline constexpr wchar_t kNewItemGlyph[] = L"\xF306";
+inline constexpr wchar_t kDetailsViewGlyph[] = L"\xF307";
+inline constexpr wchar_t kContentViewGlyph[] = L"\xF308";
+inline constexpr wchar_t kColumnsViewGlyph[] = L"\xF309";
+inline constexpr wchar_t kAdvancedSearchGlyph[] = L"\xF30A";
+inline constexpr wchar_t kOperationCenterGlyph[] = L"\xF30B";
+inline constexpr wchar_t kCustomizeCommandsGlyph[] = L"\xF30C";
 
 enum class Icon {
     None, Add, Close, Minimize, Maximize, Restore, Back, Forward, Up,
@@ -34,7 +43,8 @@ enum class Icon {
     Palette, Sliders, Warning, Lock, OpenExternal, StarFilled, More,
     Undo, SelectAll, InvertSelection, Terminal, NewFolder, Library, Applications,
     LayoutSingle, LayoutStacked, LayoutThree, LayoutFour, Details, Content,
-    DisplayAlias, LinkedBrowsing, Sync, EmbeddedTerminal, Count
+    DisplayAlias, LinkedBrowsing, Sync, EmbeddedTerminal, NewItem, Properties, CopyPath,
+    AdvancedSearch, OperationCenter, CustomizeCommands, Group, Count
 };
 
 inline int WorkspaceSvg(Icon icon) noexcept {
@@ -62,9 +72,11 @@ inline Icon FromGlyph(std::wstring_view glyph) noexcept {
     case L'\xE76B': return Icon::ChevronLeft;
     case L'\xE70D': return Icon::ChevronDown;
     case L'\xE70E': return Icon::ChevronUp;
+    case L'\xE7A7': return Icon::Undo;
     case L'\xE72C': return Icon::Refresh;
     case L'\xE721': return Icon::Search;
     case L'\xE8B7': return Icon::Folder;
+    case L'\xE8F4': return Icon::NewFolder;
     case L'\xE838': return Icon::FolderOpen;
     case L'\xE7F4': return Icon::Desktop;
     case L'\xE977': return Icon::Computer;
@@ -87,9 +99,11 @@ inline Icon FromGlyph(std::wstring_view glyph) noexcept {
     case L'\xE77F': return Icon::Paste;
     case L'\xE8AC': return Icon::Rename;
     case L'\xE8CB': return Icon::Sort;
+    case L'\xF168': return Icon::Group;
     case L'\xE71C': return Icon::Filter;
     case L'\xE700': case L'\xE8FD': return Icon::List;
-    case L'\xE80A': return Icon::Grid;
+    case L'\xE80A': case L'\xECA5': return Icon::Grid;
+    case L'\xEA37': return Icon::List;
     case L'\xE8A9': return Icon::Grid;
     case L'\xE8A0': return Icon::Panel;
     case L'\xE89F': return Icon::PanelClose;
@@ -97,7 +111,11 @@ inline Icon FromGlyph(std::wstring_view glyph) noexcept {
     case L'\xE890': return Icon::Eye;
     case L'\xE946': return Icon::Info;
     case L'\xE80F': return Icon::Home;
-    case L'\xE8A1': return Icon::Tray;
+    case L'\xE8A1': case L'\xE9D9': return Icon::Tray;
+    case L'\xE8B3': return Icon::SelectAll;
+    case L'\xE7A1': return Icon::InvertSelection;
+    case L'\xE8F1': return Icon::Library;
+    case L'\xE71D': return Icon::Applications;
     case L'\xE718': case L'\xE840': case L'\xE841': return Icon::Pin;
     case L'\xE71B': return Icon::Link;
     case L'\xE756': return Icon::Terminal;
@@ -105,6 +123,15 @@ inline Icon FromGlyph(std::wstring_view glyph) noexcept {
     case kLinkedBrowsingGlyph[0]: return Icon::LinkedBrowsing;
     case kDirectorySyncGlyph[0]: return Icon::Sync;
     case kEmbeddedTerminalGlyph[0]: return Icon::EmbeddedTerminal;
+    case kPropertiesGlyph[0]: return Icon::Properties;
+    case kCopyPathGlyph[0]: return Icon::CopyPath;
+    case kNewItemGlyph[0]: return Icon::NewItem;
+    case kDetailsViewGlyph[0]: return Icon::Details;
+    case kContentViewGlyph[0]: return Icon::Content;
+    case kColumnsViewGlyph[0]: return Icon::Columns;
+    case kAdvancedSearchGlyph[0]: return Icon::AdvancedSearch;
+    case kOperationCenterGlyph[0]: return Icon::OperationCenter;
+    case kCustomizeCommandsGlyph[0]: return Icon::CustomizeCommands;
     case L'\xE790': return Icon::Palette;
     case L'\xE9E9': case L'\xE8A4': return Icon::Sliders;
     case L'\xE7BA': return Icon::Warning;
@@ -224,7 +251,7 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
     };
     switch (icon) {
     case Icon::More: circle(5.5f,12,1.6f); circle(12,12,1.6f); circle(18.5f,12,1.6f); break;
-    case Icon::Add: line(12,5,12,19); line(5,12,19,12); break;
+    case Icon::Add: case Icon::NewItem: line(12,5,12,19); line(5,12,19,12); break;
     case Icon::Close: line(6,6,18,18); line(18,6,6,18); break;
     case Icon::Minimize: line(5,12,19,12); break;
     case Icon::Maximize: box(5,5,19,19,1.5f); break;
@@ -243,7 +270,7 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
         begin(19.5f,15.5f); curve(18.2f,18.3f,15.7f,20,12.5f,20);
         curve(8.7f,20,6,18,4,15); end();
         path({{4,19.5f},{4,15},{8.5f,15}}); break;
-    case Icon::Search: circle(10.5f,10.5f,6.5f); line(16,16,21,21); break;
+    case Icon::Search: case Icon::AdvancedSearch: circle(10.5f,10.5f,6.5f); line(16,16,21,21); break;
     case Icon::Folder: folder(); break;
     case Icon::FolderOpen:
         begin(3,17); to(3,6); curve(3,4.9f,3.9f,4,5,4);
@@ -285,7 +312,7 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
         line(10,10,10.3f,17); line(14,10,13.7f,17); break;
     case Icon::Tag: case Icon::DisplayAlias:
         path({{3,4},{3,11},{12,21},{21,12},{11,3},{4,3},{3,4}}); circle(7.5f,7.5f,1.2f); break;
-    case Icon::Settings:
+    case Icon::Settings: case Icon::CustomizeCommands:
         path({{9.5f,3},{8.9f,5.3f},{6.9f,6.2f},{4.8f,5.5f},{2.8f,9},{4.4f,10.6f},
               {4.4f,13.4f},{2.8f,15},{4.8f,18.5f},{6.9f,17.8f},{8.9f,18.7f},{9.5f,21},
               {14.5f,21},{15.1f,18.7f},{17.1f,17.8f},{19.2f,18.5f},{21.2f,15},
@@ -316,6 +343,11 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
         to(9,20); to(3,21); end(true);
         line(13.5f,5.5f,18.5f,10.5f); line(4,15,9,20); line(13,20.5f,21,20.5f); break;
     case Icon::Sort: line(5,4,5,20); path({{2,17},{5,20},{8,17}}); line(11,5,21,5); line(11,11,18,11); line(11,17,15,17); break;
+    case Icon::Group:
+        path({{3,8},{12,3},{21,8},{12,13},{3,8}});
+        path({{3,12},{12,17},{21,12}});
+        path({{3,16},{12,21},{21,16}});
+        break;
     case Icon::Filter: path({{4,4.5f},{20,4.5f},{14,12},{14,18.5f},{10,20.5f},{10,12},{4,4.5f}}); break;
     case Icon::List: case Icon::Content:
         line(9,5,21,5); line(9,12,21,12); line(9,19,21,19); dot(4,5); dot(4,12); dot(4,19); break;
@@ -325,8 +357,10 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
     case Icon::Grid: case Icon::Applications:
         box(3,3,10,10,2.5f); box(14,3,21,10,2.5f); box(3,14,10,21,2.5f); box(14,14,21,21,2.5f); break;
     case Icon::Split: box(3,4,21,20,3); line(12,4,12,20); break;
-    case Icon::Columns: case Icon::LayoutThree:
+    case Icon::Columns:
         box(3,4,21,20,3); line(9,4,9,20); line(15,4,15,20); break;
+    case Icon::LayoutThree:
+        box(3,4,21,20,3); line(12,4,12,20); line(12,12,21,12); break;
     case Icon::Panel: case Icon::PanelClose:
         box(3,4,21,20,3); line(15,4,15,20);
         if (icon == Icon::PanelClose) path({{7,9},{10,12},{7,15}});
@@ -337,11 +371,12 @@ inline ID2D1PathGeometry* BuildGeometry(ID2D1Factory* factory, Icon icon,
         begin(2.5f,12); curve(5,8,8,6,12,6); curve(16,6,19,8,21.5f,12);
         curve(19,16,16,18,12,18); curve(8,18,5,16,2.5f,12); end(true);
         circle(12,12,2.75f); break;
-    case Icon::Info: circle(12,12,9); dot(12,7.5f,1); line(12,11,12,17); break;
+    case Icon::Info: case Icon::Properties: circle(12,12,9); dot(12,7.5f,1); line(12,11,12,17); break;
     case Icon::Home: path({{3,10},{12,3},{21,10}}); path({{5,9},{5,21},{10,21},{10,14},{14,14},{14,21},{19,21},{19,9}}); break;
-    case Icon::Tray: path({{3,14},{6,5},{18,5},{21,14},{21,20},{3,20},{3,14},{8,14},{10,17},{14,17},{16,14},{21,14}}); break;
+    case Icon::Tray: case Icon::OperationCenter:
+        path({{3,14},{6,5},{18,5},{21,14},{21,20},{3,20},{3,14},{8,14},{10,17},{14,17},{16,14},{21,14}}); break;
     case Icon::Pin: path({{8,3},{16,3},{15,9},{19,13},{19,15},{5,15},{5,13},{9,9},{8,3}}); line(12,15,12,22); break;
-    case Icon::Link:
+    case Icon::Link: case Icon::CopyPath:
         begin(9.5f,14.5f); curve(7.7f,12.7f,7.7f,10,9.5f,8.2f); to(13,4.7f);
         curve(14.8f,2.9f,17.7f,2.9f,19.5f,4.7f); curve(21.3f,6.5f,21.3f,9.2f,19.5f,11);
         to(17.5f,13); end();

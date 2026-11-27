@@ -8,8 +8,10 @@
 #include <windowsx.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
+#include <thread>
 
 namespace pulse::ui {
 
@@ -33,6 +35,9 @@ struct TerminalScrollbackTest {
         return {static_cast<LONG>(bounds.left + (col + 0.5f) * surface.cell_width_),
             static_cast<LONG>(bounds.top + (row + 0.5f) * surface.cell_height_)};
     }
+
+    static bool PromptSeen(const TerminalSurface& surface) { return !surface.last_prompt_.empty(); }
+    static bool HasChildProcess(const TerminalSurface& surface) { return surface.process_.HasChildProcesses(); }
 
     static bool RetainsViewportAtCapacity() {
         TerminalSurface surface;
@@ -73,7 +78,8 @@ bool Check(bool passed, const char* name) {
     return passed;
 }
 
-bool SelectionContainsInk(ui::Compositor& compositor, POINT first, POINT last) {
+template<class Read>
+bool ReadFramePixels(ui::Compositor& compositor, Read read) {
     if (!compositor.CaptureFrame()) return false;
     auto* frame = compositor.FrameCopy();
     const auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
@@ -83,18 +89,24 @@ bool SelectionContainsInk(ui::Compositor& compositor, POINT first, POINT last) {
         FAILED(pixels->CopyFromBitmap(nullptr, frame, nullptr))) return false;
     D2D1_MAPPED_RECT mapped{};
     if (FAILED(pixels->Map(D2D1_MAP_OPTIONS_READ, &mapped))) return false;
-    // The selected blank cell after the text gives the actual composited fill.
-    const auto* fill = mapped.bits + last.y * mapped.pitch + 4 * last.x;
-    int differing = 0;
-    for (int y = first.y - 5; y <= first.y + 5; ++y) {
-        for (int x = first.x; x < last.x - 8; ++x) {
-            const auto* pixel = mapped.bits + y * mapped.pitch + 4 * x;
-            if (std::abs(pixel[0] - fill[0]) + std::abs(pixel[1] - fill[1]) + std::abs(pixel[2] - fill[2]) > 70)
-                ++differing;
-        }
-    }
+    read(mapped);
     pixels->Unmap();
-    return differing > 20;
+    return true;
+}
+
+bool SelectionContainsInk(ui::Compositor& compositor, POINT first, POINT last) {
+    int differing = 0;
+    return ReadFramePixels(compositor, [&](const D2D1_MAPPED_RECT& mapped) {
+        // The selected blank cell after the text gives the actual composited fill.
+        const auto* fill = mapped.bits + last.y * mapped.pitch + 4 * last.x;
+        for (int y = first.y - 5; y <= first.y + 5; ++y) {
+            for (int x = first.x; x < last.x - 8; ++x) {
+                const auto* pixel = mapped.bits + y * mapped.pitch + 4 * x;
+                if (std::abs(pixel[0] - fill[0]) + std::abs(pixel[1] - fill[1]) + std::abs(pixel[2] - fill[2]) > 70)
+                    ++differing;
+            }
+        }
+    }) && differing > 20;
 }
 
 bool TerminalSelectionAndLinks(AppState& state, ui::TerminalSurface& surface, const D2D1_RECT_F& bounds,
@@ -130,6 +142,27 @@ bool TerminalSelectionAndLinks(AppState& state, ui::TerminalSurface& surface, co
         mouse(WM_LBUTTONDOWN, MK_LBUTTON | modifiers, down);
         mouse(WM_LBUTTONUP, modifiers, up);
     };
+    const auto capture_suffix = [&](std::vector<uint8_t>& pixels) {
+        const auto left = point(0, 8);
+        const auto right = point(0, 14);
+        return paint(dark) && ReadFramePixels(state.compositor, [&](const D2D1_MAPPED_RECT& mapped) {
+            for (int y = left.y - 5; y <= left.y + 5; ++y) {
+                const auto* line = mapped.bits + y * mapped.pitch;
+                pixels.insert(pixels.end(), line + 4 * left.x, line + 4 * right.x);
+            }
+        });
+    };
+    click(point(0, 4), point(0, 4), 0);
+    std::vector<uint8_t> initial;
+    bool stationary = capture_suffix(initial) && !initial.empty();
+    mouse(WM_LBUTTONDOWN, MK_LBUTTON, point(0, 4));
+    for (const int column : {5, 7, 2}) {
+        mouse(WM_MOUSEMOVE, MK_LBUTTON, point(0, column));
+        std::vector<uint8_t> frame;
+        stationary &= surface.HasSelection() && capture_suffix(frame) && initial == frame;
+    }
+    mouse(WM_LBUTTONUP, 0, point(0, 2));
+    pass &= Check(stationary, "dragging and reversing a partial selection leaves the text on the same pixels");
     Launch::Capture(state.ops);
     click(point(1, 6), point(2, 5), MK_CONTROL);
     pass &= Check(Launch::TakeLink(state.ops, L"https://sass-lang.com/d/color-functions") && surface.HasSelection(),
@@ -398,13 +431,37 @@ int main() {
     pass &= Check(layout.terminal && layout.terminal->NotificationId() &&
         layout.terminal->NotificationId() != original_id, "reopening after close starts a new session");
     state->window_tabs.before_close = [](app::LayoutTab& closing) { StopEmbeddedTerminal(closing); };
-    state->window_tabs.confirm_close = [](const app::LayoutTab&) { return false; };
+    state->window_tabs.confirm_close = [&](const app::LayoutTab& closing) { return ConfirmEndEmbeddedTerminal(*state, closing); };
     const auto other_terminal = other.terminal;
-    pass &= Check(!state->window_tabs.CloseTab(1) && other.terminal == other_terminal,
+    other_terminal->Start(state->hwnd, L"C:\\", true, ops::TerminalShell::CommandPrompt, {});
+    pass &= Check(WaitFor([&] { return ui::TerminalScrollbackTest::PromptSeen(*other_terminal); }, 3500) &&
+        !other_terminal->HasForegroundTask(), "idle cmd does not require confirmation");
+    other_terminal->Paste(L"powershell.exe -NoLogo -NoProfile -Command \"Start-Sleep -Seconds 20\"");
+    other_terminal->Character(L'\r', false);
+    const auto close_busy_tab = [&](bool confirm) {
+        std::atomic_bool finished = false;
+        bool prompted = false;
+        std::jthread input([&] {
+            WaitFor([&] {
+                if (finished) return true;
+                const HWND dialog = FindWindowW(L"PulseConfirmWindow", nullptr);
+                if (!dialog || GetWindow(dialog, GW_OWNER) != state->hwnd || !IsWindowVisible(dialog)) return false;
+                prompted = true;
+                if (confirm) PostMessageW(dialog, WM_KEYDOWN, VK_TAB, 1);
+                return PostMessageW(dialog, WM_KEYDOWN, VK_RETURN, 1) != FALSE;
+            }, 4500);
+        });
+        const bool closed = state->window_tabs.CloseTab(1);
+        finished = true;
+        input.join();
+        return prompted && closed == confirm;
+    };
+    pass &= Check(WaitFor([&] { return ui::TerminalScrollbackTest::HasChildProcess(*other_terminal); }, 5000) &&
+        other_terminal->HasForegroundTask() && close_busy_tab(false) && other.terminal == other_terminal &&
+        other_terminal->HasForegroundTask(),
         "canceling tab close preserves its terminal session");
-    state->window_tabs.confirm_close = {};
-    pass &= Check(state->window_tabs.CloseTab(1) && !other_terminal->NotificationId() && layout.terminal,
-        "closing the owning tab ends its hidden terminal and keeps the active session");
+    pass &= Check(state->window_tabs.items.size() == 2 && close_busy_tab(true) && !other_terminal->NotificationId() && layout.terminal,
+        "confirming tab close ends the busy hidden terminal and keeps the active session");
 
     vm.terminal = layout.terminal.get();
     state->renderer.SnapTerminalPanel();

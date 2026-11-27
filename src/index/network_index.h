@@ -9,11 +9,13 @@
 #include "index_query.h"
 #include "index_types.h"
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 #include <windows.h>
@@ -94,12 +96,23 @@ private:
     std::unordered_set<std::wstring> change_seed_owners_;
     void SeedChanges(const std::wstring& owner);
     void SeedPendingChanges();
-    void ObserveChanges(const std::wstring& root, const BYTE* data, DWORD bytes);
     struct Shard;
+    using Clock = std::chrono::steady_clock;
+    // The value records whether a name event occurred, beyond a metadata change.
+    using ChangedPaths = std::unordered_map<std::wstring, bool>;
     struct RootState {
         NetworkRootInfo info;
         std::shared_ptr<Shard> shard;
+        Clock::time_point full_due = Clock::now();
+        Clock::time_point batch_due{};
+        std::chrono::seconds retry_delay{};
+        bool full_requested = true;
+        ChangedPaths changed_paths;
     };
+    static void RequestFullScan(RootState& root, Clock::time_point when);
+    bool ObserveChanges(const std::wstring& root, const BYTE* data, DWORD bytes,
+                        ChangedPaths& paths);
+    void QueueWatchChanges(const std::wstring& path, ChangedPaths paths, bool gap, bool watching);
 
     bool LoadConfiguration(std::vector<std::wstring>& configured);
     std::wstring config_error_;
@@ -109,7 +122,7 @@ private:
     void CrawlLoop();
     void WatchLoop();
     void SearchLoop();
-    void BuildRoot(const std::wstring& path, uint64_t generation);
+    void BuildRoot(const std::wstring& path, uint64_t generation, const ChangedPaths& paths = {});
     void NotifyStatus() const;
     bool RootStillCurrent(const std::wstring& path, uint64_t generation) const;
 
@@ -122,7 +135,6 @@ private:
     std::condition_variable crawl_cv_;
     std::condition_variable search_cv_;
     std::vector<RootState> roots_;
-    std::unordered_set<std::wstring> dirty_roots_;
     uint64_t generation_ = 1;
     Query pending_query_;
     uint32_t pending_id_ = 0;

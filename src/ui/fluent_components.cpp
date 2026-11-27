@@ -585,22 +585,91 @@ void Painter::DrawWrappedCaption(std::wstring_view text, D2D1_POINT_2F origin, f
 }
 
 void Painter::DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
-                        const D2D1_COLOR_F& color) {
-    if (!compositor_) {
-        return;
-    }
-    DrawGlyphWithFormat(glyph, bounds, color, compositor_->IconFormat());
+                        const D2D1_COLOR_F& color, bool monochrome, float slot_dip) {
+    if (!compositor_ || glyph.empty()) return;
+    DrawGlyphWithFormat(glyph, bounds, color, compositor_->IconFormat(), monochrome, slot_dip);
 }
 
-bool Painter::DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color) {
-    if (!theme_) return false;
-    const auto disabled = theme_->text_disabled;
-    const bool monochrome = high_contrast_ ||
-        (color.r == disabled.r && color.g == disabled.g && color.b == disabled.b);
-    const int resource = monochrome ? IDR_FILES_RENAME_SVG :
-        dark_ ? IDR_FILES_RENAME_COLOR_DARK_SVG : IDR_FILES_RENAME_COLOR_SVG;
-    return DrawSvgResource(resource, command_icons::CenteredBounds(bounds, Px(20.0f)),
-                           monochrome ? &color : nullptr);
+namespace {
+int IconResource(command_icons::Icon icon) {
+    if (const int resource = command_icons::WorkspaceSvg(icon)) return resource;
+    using I = command_icons::Icon;
+    switch (icon) {
+    case I::Details: return IDR_FILES_LAYOUT_DETAILS_SVG;
+    case I::Grid: case I::Applications: return IDR_FILES_LAYOUT_GRID_SVG;
+    case I::List: return IDR_FILES_LAYOUT_LIST_SVG;
+    case I::Columns: return IDR_FILES_LAYOUT_COLUMNS_SVG;
+    case I::Content: return IDR_FILES_LAYOUT_CONTENT_SVG;
+    case I::Split: return IDR_FILES_PANE_VERTICAL_SVG;
+    case I::LayoutStacked: return IDR_FILES_PANE_HORIZONTAL_SVG;
+    case I::Panel: return IDR_FILES_PANEL_RIGHT_SVG;
+    case I::PanelClose: return IDR_FILES_PANEL_RIGHT_FILLED_SVG;
+    case I::SelectAll: return IDR_FILES_SELECT_ALL_SVG;
+    case I::InvertSelection: return IDR_FILES_SELECT_INVERT_SVG;
+    case I::File: return IDR_FILES_TOOLBAR_FILE_SVG;
+    case I::Folder: return IDR_FILES_TOOLBAR_FOLDER_SVG;
+    case I::NewFolder: return IDR_FILES_TOOLBAR_NEW_FOLDER_SVG;
+    case I::Terminal: return IDR_FILES_TOOLBAR_TERMINAL_SVG;
+    case I::Refresh: return IDR_FILES_TOOLBAR_REFRESH_SVG;
+    case I::Search: return IDR_FILES_TOOLBAR_SEARCH_SVG;
+    case I::Settings: return IDR_FILES_TOOLBAR_SETTINGS_SVG;
+    case I::Recycle: return IDR_FILES_TOOLBAR_RECYCLE_SVG;
+    case I::Pin: return IDR_FILES_TOOLBAR_PIN_SVG;
+    case I::Sort: return IDR_FILES_SORT_SVG;
+    case I::Group: return IDR_FILES_GROUP_SVG;
+    case I::Filter: return IDR_FILES_FILTER_SVG;
+    case I::Library: return IDR_FLUENT_BOOK_OPEN_SVG;
+    case I::Undo: return IDR_FLUENT_ARROW_UNDO_SVG;
+    case I::Link: return IDR_FLUENT_LINK_SVG;
+    case I::LayoutSingle: return IDR_FLUENT_SQUARE_SVG;
+    case I::LayoutFour: return IDR_FLUENT_TABLE_SIMPLE_SVG;
+    default: return 0;
+    }
+}
+}
+
+bool Painter::DrawCommandSvg(command_icons::Icon icon, const D2D1_RECT_F& bounds,
+                             const D2D1_COLOR_F& foreground, bool monochrome, float slot_dip) {
+    using I = command_icons::Icon;
+    struct Artwork {
+        I icon;
+        int outline, light, dark;
+        float inset;
+        float max_dip = 18.0f;
+    };
+    // SVGs that fill more of the canvas need a larger inset to match the neighboring icon ink.
+    constexpr Artwork artwork[] = {
+        {I::NewItem, IDR_FILES_NEW_SVG, IDR_FILES_NEW_COLOR_SVG, IDR_FILES_NEW_COLOR_DARK_SVG, 1},
+        {I::Cut, IDR_FILES_CUT_SVG, IDR_FILES_CUT_COLOR_SVG, IDR_FILES_CUT_COLOR_DARK_SVG, 0, 17},
+        {I::Copy, IDR_FILES_COPY_SVG, IDR_FILES_COPY_COLOR_SVG, IDR_FILES_COPY_COLOR_DARK_SVG, 0},
+        {I::Paste, IDR_FILES_PASTE_SVG, IDR_FILES_PASTE_COLOR_SVG, IDR_FILES_PASTE_COLOR_DARK_SVG, 0, 17},
+        {I::Rename, IDR_FILES_RENAME_SVG, IDR_FILES_RENAME_COLOR_SVG, IDR_FILES_RENAME_COLOR_DARK_SVG, 1},
+        {I::Delete, IDR_FILES_DELETE_SVG, IDR_FILES_DELETE_COLOR_SVG, IDR_FILES_DELETE_COLOR_DARK_SVG, 1},
+        {I::Properties, IDR_FILES_PROPERTIES_SVG, IDR_FILES_PROPERTIES_COLOR_SVG, IDR_FILES_PROPERTIES_COLOR_DARK_SVG, 1},
+        {I::CopyPath, IDR_FILES_COPY_PATH_SVG, 0, 0, 0},
+        {I::AdvancedSearch, IDR_FILES_TOOLBAR_ADVANCED_SEARCH_SVG, 0, 0, 0},
+        {I::OperationCenter, IDR_FILES_STATUS_CENTER_SVG, 0, 0, 0, 16},
+        {I::CustomizeCommands, IDR_TOOLBAR_CUSTOMIZE_SVG, 0, 0, 0, 16},
+    };
+    const auto* themed = std::find_if(std::begin(artwork), std::end(artwork),
+        [icon](const Artwork& item) { return item.icon == icon; });
+    const bool has_themed = themed != std::end(artwork);
+    const int resource = has_themed ? themed->outline : IconResource(icon);
+    if (!resource) return false;
+    const float art_dip = has_themed ? std::min(slot_dip - 2 * themed->inset, themed->max_dip) : slot_dip;
+    float size = std::round(std::min({art_dip * scale_, Width(bounds), Height(bounds)}));
+    if (size <= 0.0f) return true;
+    const bool center_line = icon == I::Split || icon == I::LayoutStacked || icon == I::LayoutFour || icon == I::Library;
+    if (center_line && size > 1.0f && std::fmod(size, 2.0f) == 0.0f) size -= 1.0f;
+    const float cx = (bounds.left + bounds.right) * 0.5f;
+    const float cy = (bounds.top + bounds.bottom) * 0.5f;
+    // The New icon's two plus strokes intersect on the canvas center.
+    const float left = icon == I::NewItem ? std::floor(cx) + 0.5f - size * 0.5f : std::round(cx - size * 0.5f);
+    const float top = icon == I::NewItem ? std::floor(cy) + 0.5f - size * 0.5f : std::round(cy - size * 0.5f);
+    const auto art = D2D1::RectF(left, top, left + size, top + size);
+    const int color_resource = has_themed && !high_contrast_ && !monochrome ? (dark_ ? themed->dark : themed->light) : 0;
+    if (color_resource && DrawSvgResource(color_resource, art)) return true;
+    return DrawSvgResource(resource, art, &foreground);
 }
 
 bool Painter::DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
@@ -645,15 +714,14 @@ bool Painter::DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
 }
 
 void Painter::DrawGlyphWithFormat(std::wstring_view glyph, const D2D1_RECT_F& bounds,
-                                  const D2D1_COLOR_F& color, IDWriteTextFormat* format) {
-    if (glyph == L"\xE8AC" && DrawRenameResource(bounds, color)) return;
+                                  const D2D1_COLOR_F& color, IDWriteTextFormat* format,
+                                  bool monochrome, float slot_dip) {
     const auto command = command_icons::FromGlyph(glyph);
     if (command != command_icons::Icon::None) {
         EnsureStrokeStyle();
         const float size = format ? (std::min)(Px(20.0f), format->GetFontSize() * 1.2f) : Px(18.0f);
-        const auto icon_bounds = command_icons::CenteredBounds(bounds, size);
-        if (const int resource = command_icons::WorkspaceSvg(command))
-            if (DrawSvgResource(resource, icon_bounds, &color)) return;
+        const auto icon_bounds = command_icons::CenteredBounds(bounds, std::max(size, Px(slot_dip)));
+        if (DrawCommandSvg(command, bounds, color, monochrome, slot_dip > 0.0f ? slot_dip : size / scale_)) return;
         if (command_icons::Draw(dc_, ScratchBrush(color), round_stroke_.get(), command, icon_bounds)) return;
     }
     DrawText(glyph, bounds, format, color, HorizontalAlignment::Center);
@@ -675,59 +743,26 @@ void Painter::DrawCheckMark(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color
     dc_->DrawLine(middle, last, brush, stroke, round_stroke_.get());
 }
 
+command_icons::Icon PaneLayoutIcon(MenuPictogram kind) {
+    using I = command_icons::Icon;
+    switch (kind) {
+    case MenuPictogram::LayoutSingle: return I::LayoutSingle;
+    case MenuPictogram::LayoutSideBySide: return I::Split;
+    case MenuPictogram::LayoutStacked: return I::LayoutStacked;
+    case MenuPictogram::LayoutThree: return I::LayoutThree;
+    case MenuPictogram::LayoutFour: return I::LayoutFour;
+    default: return I::None;
+    }
+}
+
 void Painter::DrawPaneLayoutIcon(const D2D1_RECT_F& bounds, MenuPictogram kind,
                                  const D2D1_COLOR_F& color) {
-    if (!dc_ || kind == MenuPictogram::None) {
-        return;
-    }
+    if (!dc_ || kind == MenuPictogram::None) return;
+    const auto icon = PaneLayoutIcon(kind);
+    if (DrawCommandSvg(icon, bounds, color, true, 18.0f)) return;
     EnsureStrokeStyle();
-    const float box = std::min(Width(bounds), Height(bounds)) * 0.72f;
-    if (box < 6.0f) {
-        return;
-    }
-    const float x0 = bounds.left + (Width(bounds) - box) * 0.5f;
-    const float y0 = bounds.top + (Height(bounds) - box) * 0.5f;
-    const float stroke = std::max(1.0f, Px(1.4f));
-    const float radius = std::min(Px(2.25f), box * 0.18f);
-    StrokeRoundedRect(D2D1::RectF(x0, y0, x0 + box, y0 + box), radius, color, stroke);
-    if (kind == MenuPictogram::LayoutSingle) {
-        return;
-    }
-
-    const float inset = stroke;
-    const float left = x0 + inset;
-    const float top = y0 + inset;
-    const float right = x0 + box - inset;
-    const float bottom = y0 + box - inset;
-    const float mid_x = x0 + box * 0.5f;
-    const float mid_y = y0 + box * 0.5f;
-    auto* brush = ScratchBrush(color);
-    auto vline = [&](float x, float y1, float y2) {
-        dc_->DrawLine(D2D1::Point2F(x, y1), D2D1::Point2F(x, y2),
-                      brush, stroke, round_stroke_.get());
-    };
-    auto hline = [&](float x1, float x2, float y) {
-        dc_->DrawLine(D2D1::Point2F(x1, y), D2D1::Point2F(x2, y),
-                      brush, stroke, round_stroke_.get());
-    };
-    switch (kind) {
-    case MenuPictogram::LayoutSideBySide:
-        vline(mid_x, top, bottom);
-        break;
-    case MenuPictogram::LayoutStacked:
-        hline(left, right, mid_y);
-        break;
-    case MenuPictogram::LayoutThree:
-        vline(mid_x, top, bottom);
-        hline(mid_x, right, mid_y);
-        break;
-    case MenuPictogram::LayoutFour:
-        vline(mid_x, top, bottom);
-        hline(left, right, mid_y);
-        break;
-    default:
-        break;
-    }
+    command_icons::Draw(dc_, ScratchBrush(color), round_stroke_.get(), icon,
+        command_icons::CenteredBounds(bounds, Px(18.0f)));
 }
 
 void Painter::DrawArc(D2D1_POINT_2F center, float radius, float start_degrees,
@@ -769,7 +804,7 @@ void Painter::DrawFocusRing(const D2D1_RECT_F& bounds, float radius, float opaci
         StrokeRoundedRect(ring, radius + Px(1.0f), theme_->bg, width + Px(2.0f));
         StrokeRoundedRect(ring, radius + Px(1.0f), theme_->text, width);
     } else {
-        StrokeRoundedRect(ring, radius + Px(1.0f), MultiplyAlpha(theme_->accent_ink, opacity), width);
+        FillRoundedRect(bounds, radius, MultiplyAlpha(theme_->fill_hover, opacity));
     }
 }
 
@@ -932,8 +967,9 @@ void Painter::DrawButton(const ButtonSpec& spec) {
             MeasureButtonWidth(spec.text, spec.glyph, spec.drop_down)) * 0.5f);
         content.left += inset;
     }
+    const bool monochrome_icon = !spec.state.enabled || spec.kind == ButtonKind::Primary || spec.kind == ButtonKind::Danger;
     if (spec.icon_only) {
-        if (!spec.skip_glyph) DrawGlyph(spec.glyph, content, foreground);
+        if (!spec.skip_glyph) DrawGlyph(spec.glyph, content, foreground, monochrome_icon);
     } else if (Width(content) > 0.0f && Height(content) > 0.0f) {
         float left = content.left;
         if (!spec.glyph.empty()) {
@@ -941,7 +977,7 @@ void Painter::DrawButton(const ButtonSpec& spec) {
             if (!spec.skip_glyph) {
                 DrawGlyph(spec.glyph,
                           D2D1::RectF(left, content.top, left + icon_width, content.bottom),
-                          foreground);
+                          foreground, monochrome_icon);
             }
             left += icon_width + Px(4.0f);
         }
@@ -1485,11 +1521,15 @@ void Painter::DrawMenuItem(const MenuItemSpec& spec) {
     const auto icon_bounds = D2D1::RectF(content.left, content.top,
                                          content.left + icon_width, content.bottom);
     auto draw_glyph = [&]() {
+        if (spec.glyph.empty()) return;
+        const auto icon_color = spec.state.enabled ? foreground : theme_->text_disabled;
         const float glyph_scale = std::clamp(spec.glyph_scale, 0.6f, 1.2f);
-        if (std::abs(glyph_scale - 1.0f) < 0.001f || spec.glyph.empty()) {
-            DrawGlyph(spec.glyph, icon_bounds, foreground);
+        if (std::abs(glyph_scale - 1.0f) < 0.001f) {
+            DrawGlyph(spec.glyph, icon_bounds, icon_color, !spec.state.enabled);
             return;
         }
+        if (DrawCommandSvg(command_icons::FromGlyph(spec.glyph), icon_bounds, icon_color,
+                           !spec.state.enabled, 18.0f * glyph_scale)) return;
         ComPtr<IDWriteTextLayout> glyphLayout;
         IDWriteTextFormat* iconFormat = compositor_->IconFormat();
         const UINT32 length = static_cast<UINT32>(spec.glyph.size());
@@ -1502,10 +1542,10 @@ void Painter::DrawMenuItem(const MenuItemSpec& spec) {
             glyphLayout->SetFontSize(iconFormat->GetFontSize() * glyph_scale,
                                      DWRITE_TEXT_RANGE{0, length});
             compositor_->DrawTextLayout(D2D1::Point2F(icon_bounds.left, icon_bounds.top),
-                                glyphLayout.get(), ScratchBrush(foreground),
+                                glyphLayout.get(), ScratchBrush(icon_color),
                                 D2D1_DRAW_TEXT_OPTIONS_CLIP);
         } else {
-            DrawGlyph(spec.glyph, icon_bounds, foreground);
+            DrawGlyph(spec.glyph, icon_bounds, icon_color, !spec.state.enabled);
         }
     };
     if (spec.has_swatch) {
@@ -1643,6 +1683,16 @@ void Painter::DrawListRowBackground(const ListRowSpec& spec) {
     }
 }
 
+void FillLeadingSelectionIndicator(ID2D1DeviceContext* dc, ID2D1Brush* brush,
+                                   const D2D1_RECT_F& bounds, float scale) {
+    const float height = std::min(18.0f * scale, Height(bounds) - 8.0f * scale);
+    if (height <= 0.0f) return;
+    const float top = (bounds.top + bounds.bottom - height) * 0.5f;
+    dc->FillRoundedRectangle(D2D1::RoundedRect(
+        D2D1::RectF(bounds.left + scale, top, bounds.left + 3.0f * scale, top + height),
+        scale, scale), brush);
+}
+
 void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
     if (!theme_ || !compositor_) {
         return;
@@ -1655,6 +1705,7 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
     if (spec.state.selected) {
         FillRoundedRect(spec.bounds, radius,
                         high_contrast_ ? (spec.state.enabled ? theme_->fill_selected : theme_->fill_input_disabled)
+                                       : spec.show_selection_indicator ? theme_->fill_selected
                                        : dark_ ? Rgba(0xFFFFFF, 26) : Rgba(0x000000, 20));
     } else {
         auto fill = spec.state.pressed ? theme_->fill_pressed : theme_->fill_hover;
@@ -1663,6 +1714,14 @@ void Painter::DrawSidebarItem(const SidebarItemSpec& spec) {
     }
     if (spec.drop_target) {
         StrokeRounded(spec.bounds, radius, BrushId::Accent, std::max(2.0f, Px(2.0f)));
+    }
+    if (spec.show_selection_indicator && spec.state.enabled) {
+        if (spec.state.selected || (!high_contrast_ && spec.state.keyboard_focus)) {
+            const auto color = high_contrast_ ? theme_->text_selected
+                : spec.state.selected ? theme_->accent : theme_->text_secondary;
+            FillLeadingSelectionIndicator(dc_, ScratchBrush(color), spec.bounds, scale_);
+        }
+        if (high_contrast_ && spec.state.keyboard_focus) DrawFocusRing(spec.bounds, radius);
     }
     const D2D1_COLOR_F foreground = !spec.state.enabled ? theme_->text_disabled
         : highlighted ? theme_->text_selected
@@ -2625,9 +2684,9 @@ void Painter::DrawStagingTrayPanel(const StagingTrayPanelSpec& spec) {
         const auto action_fill = spec.action_hovered ? theme_->accent_hover : theme_->accent;
         FillRoundedRect(action_rc, Height(action_rc) * 0.5f, action_fill);
         const bool icon_only = action_width < Px(44.0f);
-        DrawText(icon_only ? std::wstring_view(L"\xE77F") : spec.action_text, action_rc,
-                 icon_only ? SmallIconFormat() : CaptionFormat(), high_contrast_ ? theme_->accent_text : AutoAccentText(action_fill),
-                 HorizontalAlignment::Center);
+        const auto foreground = high_contrast_ ? theme_->accent_text : AutoAccentText(action_fill);
+        if (icon_only) DrawGlyph(L"\xE77F", action_rc, foreground);
+        else DrawText(spec.action_text, action_rc, CaptionFormat(), foreground, HorizontalAlignment::Center);
         right = action_bounds.left - (header_inset < Px(10.0f) ? Px(2.0f) : Px(6.0f));
     }
     if (!count_text.empty()) {

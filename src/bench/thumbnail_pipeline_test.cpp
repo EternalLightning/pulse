@@ -213,6 +213,8 @@ struct ThumbnailPipelineTestAccess {
         StoredThumbnail loaded;
         check(store.Load(key, loaded) && loaded.pixels == thumb.pixels && loaded.source_width == 1024,
             "persistent transparent PNG thumbnail round-trips");
+        check(store.Load(key, loaded, &identity) && loaded.pixels == thumb.pixels,
+            "disk hit reuses a verified source identity");
         HANDLE writer = CreateFileW(fixture.c_str(), GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
         bool source_writing = false;
@@ -264,6 +266,9 @@ struct ThumbnailPipelineTestAccess {
         } else replaced = false;
         replaced &= MoveFileExW(replacement.c_str(), fixture.c_str(), MOVEFILE_REPLACE_EXISTING) != FALSE;
         check(replaced && !store.Load(key, loaded), "same-time same-size file replacement invalidates disk entry");
+        StoredThumbnail rejected;
+        check(replaced && !store.Load(key, rejected, &identity) && rejected.pixels.empty(),
+            "post-decode identity check rejects replacement without returning stale pixels");
         const auto previous_bytes = store.BytesOnDisk();
         store.Save(key, 100, thumb, &identity);
         check(store.BytesOnDisk() == previous_bytes && !store.Load(key, loaded),

@@ -24,6 +24,11 @@ bool IsNetworkAuthenticationError(DWORD error) {
         error == ERROR_INVALID_PASSWORD || error == ERROR_ACCOUNT_RESTRICTION ||
         error == ERROR_SESSION_CREDENTIAL_CONFLICT;
 }
+bool ShouldPromptNetworkAuthentication(DWORD error, bool webdav) {
+    // WebClient can report an authentication challenge as a missing network path.
+    return IsNetworkAuthenticationError(error) || (webdav &&
+        (error == ERROR_BAD_NETPATH || error == ERROR_BAD_NET_NAME || error == ERROR_NOT_AUTHENTICATED));
+}
 std::wstring UncShareRoot(const std::wstring& path) {
     std::wstring rest;
     if (path.size() > 8 && _wcsnicmp(path.c_str(), L"\\\\?\\UNC\\", 8) == 0) rest = path.substr(8);

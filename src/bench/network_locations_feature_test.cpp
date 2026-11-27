@@ -37,6 +37,18 @@ int wmain() {
         ParseServerAddress(L"\\\\nas\\..\\secret").kind == ServerAddressKind::Invalid &&
         ParseServerAddress(L"smb://nas/share%00evil").kind == ServerAddressKind::Invalid,
         "unsupported protocols, local drives, traversal and encoded controls cannot connect");
+    const auto dav = ParseServerAddress(L"http://user:secret@192.168.1.100:8080/shared%20files", true);
+    const auto dav_unc = L"\\\\192.168.1.100@8080\\DavWWWRoot\\shared files";
+    check(dav.kind == ServerAddressKind::WebDav && IsBrowsableServerAddress(dav.kind) &&
+        dav.unc == dav_unc && dav.user == L"user" &&
+        ParseServerAddress(L"\\\\?\\UNC\\" + dav.unc.substr(2)).kind == ServerAddressKind::WebDav &&
+        NetworkRecentRoot(dav.unc) == dav_unc,
+        "WebDAV port and folder survive URL, network-open, authentication and history routing");
+    check(ParseServerAddress(L"https://nas:8443/secure").unc == L"\\\\nas@SSL@8443\\DavWWWRoot\\secure" &&
+        ParseServerAddress(L"http://nas/path").unc == L"\\\\nas\\DavWWWRoot\\path" &&
+        ParseServerAddress(L"https://nas:65536/").kind == ServerAddressKind::Invalid &&
+        ParseServerAddress(L"https://nas:/").kind == ServerAddressKind::Invalid,
+        "WebDAV default and explicit ports select the WebClient namespace and invalid ports are rejected");
     check(NetworkRecentRoot(L"\\\\?\\UNC\\NAS\\share\\child") == L"\\\\NAS\\share" &&
         NetworkRecentRoot(L"\\\\NAS\\") == L"\\\\NAS" && NetworkRecentRoot(L"C:\\x").empty(),
         "history stores server/share roots and rejects local paths");
@@ -57,14 +69,19 @@ int wmain() {
         restored.Items().empty(), "invalid local paths and malformed timestamps are skipped");
 
     std::vector<LanDevice> devices;
-    MergeLanDevice(devices, {L"NAS", L"nas.local", L"", L"DS920+", kLanSourceMdns});
-    MergeLanDevice(devices, {L"NAS", L"NAS", L"192.168.1.2", L"", kLanSourceWsd});
+    MergeLanDevice(devices, {L"NAS", L"nas.local", L"", L"DS920+", kLanSourceMdns, {}});
+    MergeLanDevice(devices, {L"NAS", L"NAS", L"192.168.1.2", L"", kLanSourceWsd, {}});
     check(devices.size() == 1 && devices.front().sources == (kLanSourceMdns | kLanSourceWsd) &&
         devices.front().ip == L"192.168.1.2" && LanDeviceKind(devices.front()) == kLanKindNas,
         "mDNS and WSD answers merge without losing NAS metadata");
     check(MdnsInstanceName(L"Mac\\032mini._smb._tcp.local") == L"Mac mini" &&
-        LanDeviceUnc({L"bad", L"host\\share", L"192.168.1.4", L"", 0}) == L"\\\\192.168.1.4",
+        LanDeviceUnc({L"bad", L"host\\share", L"192.168.1.4", L"", 0, {}}) == L"\\\\192.168.1.4",
         "device labels decode DNS escapes and untrusted host paths cannot become UNC navigation");
+    LanDevice dav_device{L"NAS (WebDAV)", L"nas.local", L"192.168.1.2", L"", kLanSourceMdns, dav.unc};
+    check(MergeLanDevice(devices, dav_device) && !MergeLanDevice(devices, dav_device) &&
+        devices.size() == 2 && LanDeviceUnc(devices.back()) == dav_unc &&
+        LanDeviceUnc(devices.front()) == L"\\\\nas.local",
+        "an advertised WebDAV service opens its own endpoint alongside the SMB device");
     check(RunLanDiscovery([] { return true; }, 0).cancelled,
         "canceled discovery exits before reading network identity or starting protocols");
 

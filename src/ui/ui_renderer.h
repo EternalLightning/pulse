@@ -212,6 +212,7 @@ struct PaneViewModel {
     std::shared_ptr<const FilterMap> filter_map;
     std::shared_ptr<const FilterMap> source_to_view;
     std::shared_ptr<const std::vector<DateGroup>> date_groups;
+    bool file_groups_collapsed = false;
     std::vector<ListEntryView> entries;
     // Real directory views retain the immutable filesystem snapshot and only
     // materialize visible rows. entries remains available to gallery/tests.
@@ -273,6 +274,8 @@ struct PaneViewModel {
     bool marquee_active = false;
     D2D1_RECT_F marquee_rect{};
     ColumnStripView column_strip;
+    bool projection_loading = false;
+    bool projection_identity_rows = false;
 
     bool IsRowSelected(int index) const {
         if (index < 0) return false;
@@ -282,16 +285,17 @@ struct PaneViewModel {
     }
 
     size_t EntryCount() const {
+        if (file_groups_collapsed) return 0;
         if(content_results) return content_results->Count();
         if (filter_map) return filter_map->size();
-        if (!filter_text.empty()) return filter_map ? filter_map->size() : 0;
+        if (!projection_identity_rows && !filter_text.empty()) return 0;
         return snapshot ? snapshot->size() : entries.size();
     }
 
     int SourceIndex(int view_row) const {
-        if (view_row < 0) return -1;
+        if (view_row < 0 || file_groups_collapsed) return -1;
         if(content_results) return view_row;
-        if (filter_map || !filter_text.empty()) {
+        if (filter_map || (!projection_identity_rows && !filter_text.empty())) {
             if (!filter_map || view_row >= static_cast<int>(filter_map->size())) return -1;
             return (*filter_map)[static_cast<size_t>(view_row)];
         }
@@ -299,10 +303,10 @@ struct PaneViewModel {
     }
 
     int ViewIndex(int source_index) const {
-        if (source_index < 0) return -1;
+        if (source_index < 0 || file_groups_collapsed) return -1;
         if (source_to_view) return source_index < static_cast<int>(source_to_view->size())
             ? (*source_to_view)[static_cast<size_t>(source_index)] : -1;
-        if (content_results || (!filter_map && filter_text.empty())) return source_index;
+        if (content_results || (!filter_map && (projection_identity_rows || filter_text.empty()))) return source_index;
         if (!filter_map) return -1;
         const auto it = std::lower_bound(filter_map->begin(), filter_map->end(), source_index);
         return it != filter_map->end() && *it == source_index
@@ -974,7 +978,7 @@ public:
     float ToolbarHeight() const { return toolbar_height_; }
     void InvalidateShellIcon(const std::wstring& path) { icon_cache_.Invalidate(path); }
     void NotifyPreviewActivate(bool active) { preview_handler_.NotifyAppActivate(active); }
-    void NotifyPreviewOwnerHidden() { preview_handler_.Hide(); }
+    void ReleaseHiddenWindowResources();
     void NotifyPreviewOwnerMoved() { preview_handler_.Reposition(); }
 
     // Layout metrics (DIPs).
@@ -1213,6 +1217,8 @@ public:
 
     void Render(const WindowViewModel& vm, const D2D1_RECT_F& rect, const Theme& theme);
     D2D1_RECT_F FileRowsRect(D2D1_RECT_F bounds, ViewMode mode) const;
+    void DrawSidebarRow(fluent::Painter& painter, fluent::SidebarItemSpec row, bool high_contrast,
+        const std::wstring* folder_path = nullptr, const std::wstring& fallback = {});
     ViewLayout MakeFileLayout(const PaneViewModel& vm, const D2D1_RECT_F& rows,
                               float scroll_x, float scroll_y) const;
     int FileItemFromPoint(const PaneViewModel& vm, const ViewLayout& layout, const D2D1_RECT_F& rows,
@@ -1290,6 +1296,7 @@ public:
     int TrayDeckCapacity(float window_w) const;
 
 private:
+    void ResetSurfaceTransitions();
     std::vector<int> toolbar_order_{186, 2, 3, 4, 6, 5, 7};
     struct TabStripMetrics {
         float x0 = 0.0f;

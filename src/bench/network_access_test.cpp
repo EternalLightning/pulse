@@ -18,6 +18,11 @@ int main() {
         "only authentication and permission failures can request credentials");
     check(!IsNetworkAuthenticationError(ERROR_BAD_NETPATH) && !IsNetworkAuthenticationError(ERROR_CANCELLED) &&
         !IsNetworkAuthenticationError(ERROR_NETWORK_UNREACHABLE), "offline and canceled listings never request credentials");
+    check(ShouldPromptNetworkAuthentication(ERROR_BAD_NETPATH, true) &&
+        ShouldPromptNetworkAuthentication(ERROR_NOT_AUTHENTICATED, true) &&
+        !ShouldPromptNetworkAuthentication(ERROR_BAD_NETPATH, false) &&
+        !ShouldPromptNetworkAuthentication(ERROR_CANCELLED, true),
+        "WebClient redirector login errors can prompt without treating offline SMB or cancellation as a password error");
     check(UncShareRoot(L"\\\\server\\share\\child") == L"\\\\server\\share" &&
         UncShareRoot(L"\\\\?\\UNC\\server\\share\\child") == L"\\\\server\\share" &&
         UncShareRoot(L"Z:\\").empty(), "authentication targets UNC shares without touching mapped drives");

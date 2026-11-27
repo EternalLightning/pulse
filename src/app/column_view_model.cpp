@@ -19,8 +19,8 @@ ui::ColumnStripColumnView ToView(const ColumnStripColumn& column) {
     view.highlight_row = column.highlight_row;
     view.scroll_dip = column.scroll_dip;
     view.auto_scroll = column.auto_scroll;
-    view.loading = !column.snapshot && !column.error;
-    view.error = column.error && !column.snapshot;
+    view.loading = !view.snapshot && !column.error;
+    view.error = column.error && !view.snapshot;
     return view;
 }
 

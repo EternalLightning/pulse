@@ -65,6 +65,7 @@ void RevealPendingCreatedItem(AppState& s, app::Tab& tab) {
         names = std::move(actual_names);
     } else names.front() = found->name;
     const std::wstring name = found->name;
+    tab.file_groups_collapsed = false;
     tab.RemapSelection(names, name);
     tab.pending_created_name.clear();
     tab.pending_created_names.clear();
@@ -153,27 +154,73 @@ void PasteIntoCurrent(AppState& s) {
         return;
     }
     if (fs::IsVirtualPath(tab->current_path)) return;
-    if (!CanPasteIntoCurrent(s)) return;
-    const uint32_t observed_sequence = GetClipboardSequenceNumber();
-    ops::ClipboardData cb;
-    const bool clipboard_paths = ops::ReadClipboard(cb);
-    const bool shell_files = ops::ClipboardHasShellFiles();
-    const auto source = app::ChooseClipboardPasteSource(clipboard_paths, cb, shell_files,
-        s.appPrefs.staging_tray_enabled && !s.tray.batches().empty(), observed_sequence, GetClipboardSequenceNumber());
-    if (source == app::ClipboardPasteSource::None) return;
-    if (source == app::ClipboardPasteSource::Tray) {
-        size_t idx = s.tray.batches().size() - 1;
-        if (s.tray.batches()[idx].move_intent) s.cutPaths.clear();
-        ReleaseTrayBatch(s, idx);
-        return;
+    const uint32_t sequence = GetClipboardSequenceNumber();
+    const bool file_format = IsClipboardFormatAvailable(CF_HDROP) != 0;
+    const bool shell_format = ops::ClipboardHasShellFiles();
+    const auto mailbox = s.clipboard_paste_mailbox;
+    if (!mailbox || !sequence || (!file_format && !shell_format)) return;
+
+    app::ClipboardPasteResult result;
+    result.destination = tab->current_path;
+    if (s.appPrefs.staging_tray_enabled && !s.tray.batches().empty())
+        result.tray_revision = s.tray.AvailabilityRevision();
+    // HDROP can be delay-rendered. Read it on the same STA lane that handles
+    // Shell clipboard providers, using the sequence captured by this command.
+    const bool queued = s.worker.EnqueueIo([sequence, file_format, shell_format, mailbox,
+                                            result = std::move(result)]() mutable {
+        if (GetClipboardSequenceNumber() != sequence) return;
+        const HRESULT captured = file_format ? ops::ReadClipboardForPaste(sequence, result.clipboard) : S_FALSE;
+        if (captured == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return;
+        if (captured != S_OK) result.clipboard.sequence = sequence;
+        if (FAILED(captured)) {
+            mailbox->Publish(std::move(result));
+            return;
+        }
+
+        result.source = app::ChooseClipboardPasteSource(captured == S_OK, result.clipboard,
+            shell_format, captured == S_OK && result.tray_revision.has_value(),
+            result.clipboard.sequence, GetClipboardSequenceNumber());
+        if (result.source == app::ClipboardPasteSource::None) return;
+        if (result.source == app::ClipboardPasteSource::Shell) {
+            if (ops::PasteShellClipboard(result.destination, result.clipboard.sequence)) return;
+            result.source = app::ClipboardPasteSource::None;
+        }
+        mailbox->Publish(std::move(result));
+    });
+    if (!queued) {
+        app::ClipboardPasteResult failed;
+        failed.clipboard.sequence = sequence;
+        mailbox->Publish(std::move(failed));
     }
-    if (source == app::ClipboardPasteSource::Paths) {
+}
+
+void HandleClipboardPasteResult(AppState& s, WPARAM cookie) {
+    if (!s.clipboard_paste_mailbox) return;
+    for (auto& result : s.clipboard_paste_mailbox->Take(cookie)) {
+        auto& cb = result.clipboard;
+        if (cb.sequence != GetClipboardSequenceNumber()) continue;
+        if (result.source == app::ClipboardPasteSource::None) {
+            s.notification_toast.Show(s.hwnd, l10n::Get(l10n::StringId::OpCopyFailed),
+                l10n::Get(l10n::StringId::OperationFailedMessage));
+            continue;
+        }
+        if (result.source == app::ClipboardPasteSource::Tray) {
+            const auto* tab = ActiveTab(s);
+            if (!tab || tab->current_path != result.destination || tab->net_readonly ||
+                !s.appPrefs.staging_tray_enabled || s.tray.batches().empty() ||
+                result.tray_revision != s.tray.AvailabilityRevision()) continue;
+            const size_t idx = s.tray.batches().size() - 1;
+            if (s.tray.batches()[idx].move_intent) s.cutPaths.clear();
+            ReleaseTrayBatch(s, idx);
+            continue;
+        }
         ops::OpRequest req;
         req.type = cb.cut ? ops::OpType::Move : ops::OpType::Copy;
-        req.dest_dir = tab->current_path;
+        req.dest_dir = std::move(result.destination);
         if (cb.cut) req.cut_clipboard_sequence = cb.sequence;
         for (auto& p : cb.paths) req.sources.push_back(fs::NormalizePath(p));
-        if (SubmitWithConflictResolution(s, std::move(req)) && cb.cut) {
+        if (cb.sequence == GetClipboardSequenceNumber() &&
+            SubmitWithConflictResolution(s, std::move(req)) && cb.cut) {
             s.cutPaths.clear();
             if (s.pendingCutClipboardSequence != cb.sequence) {
                 s.pendingCutClipboardSequence = cb.sequence;
@@ -181,20 +228,6 @@ void PasteIntoCurrent(AppState& s) {
                 s.completedCutClipboardPaths.clear();
             }
         }
-    } else if (source == app::ClipboardPasteSource::Shell) {
-        // Shell providers can block while materializing virtual files. The I/O
-        // worker is an STA, so OleGetClipboard and the folder drop target stay
-        // off the UI thread and in one apartment.
-        const std::wstring destination = tab->current_path;
-        const uint32_t sequence = observed_sequence;
-        const auto mailbox = s.clipboard_paste_mailbox;
-        const bool queued = s.worker.EnqueueIo([destination, sequence, mailbox] {
-            const bool pasted = ops::PasteShellClipboard(destination, sequence);
-            // Clipboard replacement is a stale request, not a user-visible failure.
-            if (pasted || GetClipboardSequenceNumber() == sequence)
-                if (mailbox) mailbox->Publish(pasted);
-        });
-        if (!queued && mailbox) mailbox->Publish(false);
     }
 }
 
@@ -214,7 +247,7 @@ void DeleteSelected(AppState& s, bool permanent) {
             target.disposition = ops::DeleteDisposition::Permanent;
             confirmation.plan.targets.push_back(std::move(target));
         }
-        const auto spec = BuildDeleteConfirmationSpec(confirmation);
+        const auto spec = ui::BuildDeleteConfirmationSpec(confirmation);
         if (ui::ShowConfirmDialog(s.hwnd, spec, s.darkMode, s.accentColor) &&
             ActiveTab(s) == tab && app::DeviceSelectedIds(*tab) == ids)
             app::QueueDeviceOperation(s, L"delete", ids);

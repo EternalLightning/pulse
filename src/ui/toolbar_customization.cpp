@@ -399,13 +399,12 @@ private:
             const auto color = high_contrast && (row.state.selected || row.state.hovered)
                 ? theme.text_selected : theme.text;
             const auto icon_bounds = D2D1::RectF(bounds.left+10*scale_,bounds.top,bounds.left+30*scale_,bounds.bottom);
-            if (toolbar_icons::DrawArtwork(painter_, action->command, icon_bounds, scale_, dark_, high_contrast, color)) continue;
             if (!icon_brush_.get()) dc->CreateSolidColorBrush(theme.text, &icon_brush_);
             if (!icon_stroke_.get()) command_icons::CreateStrokeStyle(dc, &icon_stroke_);
             if (icon_brush_.get()) {
                 icon_brush_->SetColor(color);
                 toolbar_icons::Draw(painter_, dc, icon_brush_.get(), icon_stroke_.get(),
-                    toolbar_icons::Resolve(action->glyph,action->pictogram,action->command), icon_bounds, scale_);
+                    toolbar_icons::Resolve(action->glyph,action->pictogram), icon_bounds, scale_, 16.0f, high_contrast);
             }
         }
         if (current && dragging_) {

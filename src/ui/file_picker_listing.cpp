@@ -8,6 +8,7 @@
 
 #include <shlwapi.h>
 #include <algorithm>
+#include <filesystem>
 #include <numeric>
 
 namespace pulse::ui {
@@ -27,7 +28,26 @@ bool ReadDirectory(ListingRequest& request, std::vector<fs::DirEntry>& entries) 
     }
 
     const auto cancelled = [&request] { return request.cancelled.load(std::memory_order_relaxed); };
-    if (!fs::EnumerateDirectory(request.directory, entries, cancelled)) return false;
+    const bool recent = request.directory == model::MakeRecentPath();
+    if (recent) {
+        if (request.catalog) for (const auto& item : request.catalog->recent_items) {
+            if (cancelled()) return false;
+            WIN32_FILE_ATTRIBUTE_DATA data{};
+            if (!GetFileAttributesExW(item.path.c_str(), GetFileExInfoStandard, &data)) continue;
+            fs::DirEntry entry;
+            entry.full_path = item.path;
+            const auto path = std::filesystem::path(pulse::path::FriendlyPathText(item.path));
+            entry.name = path.filename().empty() ? path.root_path().wstring() : path.filename().wstring();
+            entry.attrs = data.dwFileAttributes;
+            entry.is_dir = (entry.attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            entry.is_reparse = (entry.attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+            entry.cloud_recall = (entry.attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+            entry.size = (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+            entry.mtime = item.opened_at ? FILETIME{static_cast<DWORD>(item.opened_at), static_cast<DWORD>(item.opened_at >> 32)}
+                                        : data.ftLastWriteTime;
+            entries.push_back(std::move(entry));
+        }
+    } else if (!fs::EnumerateDirectory(request.directory, entries, cancelled)) return false;
     std::erase_if(entries, [&](const fs::DirEntry& entry) {
         if (!request.visibility.Includes(entry.attrs)) return true;
         if (entry.is_dir) return false;
@@ -37,7 +57,7 @@ bool ReadDirectory(ListingRequest& request, std::vector<fs::DirEntry>& entries) 
         request.type_filtered |= excluded;
         return excluded;
     });
-    request.directory = path::FriendlyPathText(fs::NormalizePath(std::move(request.directory)));
+    if (!recent) request.directory = path::FriendlyPathText(fs::NormalizePath(std::move(request.directory)));
     return true;
 }
 

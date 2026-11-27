@@ -147,7 +147,8 @@ inline int RunUndoIdentityRegressions(const std::wstring& fixture_root) {
                     pulse::l10n::StringId::OperationUndoResultChangedFormat, path.c_str()) && exists(path),
                 L"replaced Copy/Create product is preserved with an explicit identity failure");
             const auto backend = pulse::shell::RecycleAuthorized({path}, {}, {}, identities);
-            check(backend.identity_mismatch && backend.error == E_ACCESSDENIED && backend.sources.empty() && exists(path),
+            check(backend.identity_mismatch && backend.error == HRESULT_FROM_WIN32(ERROR_FILE_INVALID) &&
+                backend.failed_path == path && backend.sources.empty() && exists(path),
                 L"native recycle backend refuses a replaced historical product before provider invocation");
         }
         OpsManager unknown;

@@ -39,5 +39,6 @@ ShortcutDropResult CreateDropShortcuts(const std::vector<std::wstring>& sources,
 
 bool QueueDropShortcuts(AppState& state, const std::vector<std::wstring>& sources,
     const std::wstring& destination);
+bool QueuePasteShortcuts(AppState& state, const std::wstring& destination, uint32_t sequence);
 void HandleDropShortcutsResult(AppState& state, WPARAM identity);
 } // namespace pulse

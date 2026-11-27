@@ -5,7 +5,7 @@
 
 #include "command_catalog.h"
 #include "context_menu.h"
-#include "../ui/command_icons.h"
+#include "../ui/file_view_menu.h"
 #include <algorithm>
 #include <cwctype>
 
@@ -22,8 +22,8 @@ constexpr CommandDescriptor kCommands[] = {
     {CmdRename, S::Rename, L"\xE8AC", {VK_F2}, A::Rename},
     {CmdDisplayAlias, S::DisplayAliasSet, ui::command_icons::kDisplayAliasGlyph, {VK_F2, false, true}, A::DisplayAlias},
     {CmdDelete, S::Delete, L"\xE74D", {VK_DELETE}, A::MutableSelection},
-    {CmdProperties, S::Properties, L"\xE946", {VK_RETURN, false, false, true}, A::Properties},
-    {CmdCopyPath, S::CopyPath, L"\xE71B", {'C', true, true}, A::CopyPath},
+    {CmdProperties, S::Properties, ui::command_icons::kPropertiesGlyph, {VK_RETURN, false, false, true}, A::Properties},
+    {CmdCopyPath, S::CopyPath, ui::command_icons::kCopyPathGlyph, {'C', true, true}, A::CopyPath},
     {CmdCopyToTarget, S::CopyToTarget, L"\xE8C8", {'C', true, false, true}, A::CopyToTarget},
     {CmdMoveToTarget, S::MoveToTarget, L"\xE8C6", {'X', true, false, true}, A::MoveToTarget},
     {CmdNewFolder, S::NewFolder, L"\xE8F4", {VK_F7}, A::NewItem},
@@ -37,36 +37,36 @@ constexpr CommandDescriptor kCommands[] = {
     {CmdSelectWildcard, S::SelectWildcard, L"\xE71C", {'A', true, true}, A::Entries},
     {CmdRefresh, S::Refresh, L"\xE72C", {VK_F5}, A::View},
     {CmdOpenTerminal, S::OpenTerminalHere, L"\xE756", {}, A::Terminal},
-    {CmdPinWorkspace, S::PinWorkspace, L"\xE8B7", {}, A::PinWorkspace},
+    {CmdPinWorkspace, S::PinWorkspace, L"\xE718", {}, A::PinWorkspace},
     {CmdLayoutSingle, S::LayoutSingle, L"", {'1', true}, A::Always, P::LayoutSingle},
     {CmdLayoutTwoVertical, S::LayoutVertical, L"", {'2', true}, A::Always, P::LayoutSideBySide},
     {CmdLayoutTwoHorizontal, S::LayoutHorizontal, L"", {}, A::Always, P::LayoutStacked},
     {CmdLayoutThree, S::LayoutThree, L"", {'3', true}, A::Always, P::LayoutThree},
     {CmdLayoutFourGrid, S::LayoutFour, L"", {'4', true}, A::Always, P::LayoutFour},
-    {CmdViewBase, S::ViewExtraLarge, L"\xE7F4", {}, A::View},
-    {CmdViewBase + 1, S::ViewLarge, L"\xE7F4", {}, A::View},
-    {CmdViewBase + 2, S::MediumIcons, L"\xE7F4", {}, A::View},
-    {CmdViewBase + 3, S::ViewSmall, L"\xECA5", {}, A::View},
-    {CmdViewBase + 4, S::ViewList, L"\xEA37", {}, A::View},
-    {CmdViewBase + 5, S::ViewDetails, L"\xE8A5", {}, A::View},
-    {CmdViewBase + 6, S::ViewTiles, L"\xECA5", {}, A::View},
-    {CmdViewBase + 7, S::ViewContent, L"\xE8FD", {}, A::View},
-    {CmdDetailsPanel, S::DetailsPane, L"\xE700", {}, A::View},
+    {CmdViewBase, ui::kFileViewChoices[0].label, ui::kFileViewChoices[0].glyph, {}, A::View},
+    {CmdViewBase + 1, ui::kFileViewChoices[1].label, ui::kFileViewChoices[1].glyph, {}, A::View},
+    {CmdViewBase + 2, ui::kFileViewChoices[2].label, ui::kFileViewChoices[2].glyph, {}, A::View},
+    {CmdViewBase + 3, ui::kFileViewChoices[3].label, ui::kFileViewChoices[3].glyph, {}, A::View},
+    {CmdViewBase + 4, ui::kFileViewChoices[4].label, ui::kFileViewChoices[4].glyph, {}, A::View},
+    {CmdViewBase + 5, ui::kFileViewChoices[5].label, ui::kFileViewChoices[5].glyph, {}, A::View},
+    {CmdViewBase + 6, ui::kFileViewChoices[6].label, ui::kFileViewChoices[6].glyph, {}, A::View},
+    {CmdViewBase + 7, ui::kFileViewChoices[7].label, ui::kFileViewChoices[7].glyph, {}, A::View},
+    {CmdDetailsPanel, S::DetailsPane, L"\xE8A0", {}, A::View},
     {CmdTerminalPanel, S::TerminalPanel, ui::command_icons::kEmbeddedTerminalGlyph, {VK_F4, true, true}, A::View},
-    {CmdOperationCenter, S::OperationCenter, L"\xE9D9", {}, A::Always},
-    {CmdAdvancedSearch, S::AdvancedSearch, L"\xE721", {'F', true, true}, A::Always},
+    {CmdOperationCenter, S::OperationCenter, ui::command_icons::kOperationCenterGlyph, {}, A::Always},
+    {CmdAdvancedSearch, S::AdvancedSearch, ui::command_icons::kAdvancedSearchGlyph, {'F', true, true}, A::Always},
     {CmdInstallFullIndex, S::EnableFullIndex, L"\xE721", {}, A::Always},
     {CmdSettings, S::Settings, L"\xE713", {}, A::Always},
     {CmdOpenRecycle, S::RecycleBin, L"\xE75C", {}, A::Always},
-    {CmdNewMenu, S::New, L"\xE710", {}, A::NewItem},
+    {CmdNewMenu, S::New, ui::command_icons::kNewItemGlyph, {}, A::NewItem},
     {CmdSplitMenu, S::SplitLayout, L"\xE8A7", {}, A::Always, P::LayoutSideBySide},
     {CmdLinkedBrowsing, S::LinkedBrowsing, ui::command_icons::kLinkedBrowsingGlyph, {}, A::LinkedBrowsing},
     {CmdDirectorySync, S::DirectorySync, ui::command_icons::kDirectorySyncGlyph, {}, A::DirectorySync},
     {CmdSyncLeftToRight, S::SyncLeftToRight, L"\xE72A", {}, A::DirectorySync},
     {CmdSyncRightToLeft, S::SyncRightToLeft, L"\xE72B", {}, A::DirectorySync},
     {CmdSyncNewerBothWays, S::SyncNewerBothWays, ui::command_icons::kDirectorySyncGlyph, {}, A::DirectorySync},
-    {CmdColumnLayout, S::ColumnLayout, L"\xE8FD", {}, A::View},
-    {CmdCustomizeCommands, S::CustomizeCommands, L"\xE713", {}, A::Always},
+    {CmdColumnLayout, S::ColumnLayout, ui::command_icons::kColumnsViewGlyph, {}, A::View},
+    {CmdCustomizeCommands, S::CustomizeCommands, ui::command_icons::kCustomizeCommandsGlyph, {}, A::Always},
     {CmdPathAliases, S::PathAliases, L"\xE71B", {}, A::Always},
     {CmdSetPathAlias, S::PathAliasSet, L"\xE71B", {}, A::PinWorkspace},
     {CmdLibraries, S::ShellLibraries, L"\xE8F1", {}, A::Always},
@@ -335,8 +335,8 @@ ui::FluentMenuItem BuildCommandMenuItem(int command, const CommandContext& conte
         item.toggle = true;
         item.checked = context.terminal_panel_open;
     }
-    if (command == CmdViewBase) item.glyph_scale = 1.16f;
-    else if (command == CmdViewBase + 2) item.glyph_scale = 0.82f;
+    if (command >= CmdViewBase && command < CmdViewBase + static_cast<int>(std::size(ui::kFileViewChoices)))
+        item.glyph_scale = ui::kFileViewChoices[command - CmdViewBase].glyph_scale;
     return item;
 }
 

@@ -12,6 +12,7 @@
 #include "home_layout.h"
 #include "address_search_layout.h"
 #include "ui_renderer_internal.h"
+#include "breadcrumb_layout.h"
 #include "../common/localization.h"
 #include "tab_shape.h"
 #include "typography.h"
@@ -554,13 +555,13 @@ HitTestResult MainRenderer::HitTest(const WindowViewModel& vm, const D2D1_RECT_F
         }
         if (RectContains(toolbar.address,x,y)) {
             r.region=HitTestResult::AddressBar;
-            if (!vm.address_editing && x < toolbar.address.right-28*scale_) {
+            if (!vm.address_editing) {
                 std::vector<BreadcrumbPlaced> placed;
                 BreadcrumbLayout(vm.pane,rect.right,placed);
-                for (size_t i=0;i<placed.size();++i) if (RectContains(placed[i].rc,x,y)) {
-                    r.region=HitTestResult::BreadcrumbSegment; r.index=(int)i; r.path=placed[i].path;
-                    if (placed[i].text != placed[i].full_text) r.label=placed[i].full_text;
-                    break;
+                if (const auto index = HitBreadcrumbSegment(placed, x, y); index >= 0) {
+                    const auto& segment = placed[static_cast<size_t>(index)];
+                    r.region=HitTestResult::BreadcrumbSegment; r.index=index; r.path=segment.path;
+                    if (segment.text != segment.full_text) r.label=segment.full_text;
                 }
             }
             return r;

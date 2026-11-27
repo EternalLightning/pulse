@@ -108,7 +108,15 @@ void ResultStoreChecks() {
     ContentResultStore store(nullptr,0);
     Check(store.StreamUpsert(hits,ContentResultSort::Name,false),"seed result-store seek fixture");
     ContentResultStore::Row row;
-    for (size_t index:{768u,256u,0u,1024u,512u}) WaitRow(store,index,row);
+    const auto locate=[&](const ContentHit& hit,int expected) {
+        auto path=std::make_shared<std::promise<int>>(), identity=std::make_shared<std::promise<int>>();
+        auto by_path=path->get_future(), by_identity=identity->get_future();
+        store.FindPath(hit.path,[path](int index){path->set_value(index);});
+        store.FindIdentity(hit.file_id,[identity](int index){identity->set_value(index);});
+        return by_path.wait_for(std::chrono::seconds(5))==std::future_status::ready &&
+            by_identity.wait_for(std::chrono::seconds(5))==std::future_status::ready &&
+            by_path.get()==expected && by_identity.get()==expected;
+    };
     for (auto sort:{ContentResultSort::Index,ContentResultSort::Name,ContentResultSort::Type,
                    ContentResultSort::Path,ContentResultSort::Size,ContentResultSort::Mtime}) {
         for (bool descending:{false,true}) {
@@ -131,9 +139,12 @@ void ResultStoreChecks() {
             });
             store.SetSort(sort,descending);
             bool exact=Wait([&]{return !store.Sorting();});
+            for (size_t index : {768u,256u,0u,1024u,512u})
+                exact=exact && WaitRow(store,index,row) && row.file_id==expected[index].file_id;
             for (size_t i=0;exact && i<count;++i)
                 exact=WaitRow(store,i,row) && row.file_id==expected[i].file_id;
-            Check(exact && !store.Error(),"all sort keys and directions preserve stable ties across seeks and refreshed pages");
+            Check(exact && !store.Error() && locate(expected[768],768) && locate(expected.back(),static_cast<int>(count)-1),
+                "all sort keys and directions preserve stable ties across cold pages, seeks and rank lookups");
         }
     }
     store.SetSort(ContentResultSort::Index,false);
@@ -181,6 +192,10 @@ void ResultStoreChecks() {
     Check(exact,"live refresh ignores old cached position anchors and retains the requested order");
     store.SetFilter([](const pulse::fs::DirEntry& entry){return entry.size%2==0;});
     exact=Wait([&]{return !store.Filtering();});
+    const auto last=std::find_if(hits.rbegin(),hits.rend(),[](const auto& hit){return hit.size%2==0;});
+    const int last_visible=static_cast<int>(store.Count())-1;
+    Check(exact && last_visible>=0 && WaitRow(store,last_visible,row) && row.file_id==last->file_id &&
+        locate(*last,last_visible) && locate(hits[1],-1),"cold tail page and rank lookups preserve filtered membership");
     size_t visible=0;
     for (size_t i=1;exact && i<count;++i) if (hits[i].size%2==0)
         exact=WaitRow(store,visible++,row) && row.file_id==i+1;
@@ -204,7 +219,8 @@ void ResultStoreBenchmark(size_t count) {
     };
     const size_t last_page=(count-1)/ContentResultStore::kPageSize;
     auto begin=std::chrono::steady_clock::now();
-    bool ok=wait_row((last_page-3)*ContentResultStore::kPageSize);
+    const auto random_index=(last_page-3)*ContentResultStore::kPageSize;
+    bool ok=wait_row(random_index) && row.file_id==random_index+1;
     const auto random_ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count();
     begin=std::chrono::steady_clock::now();
     for (size_t page=last_page-2;ok && page<=last_page;++page)

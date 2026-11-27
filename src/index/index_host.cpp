@@ -1200,6 +1200,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
 
     if (a1 == L"--install") return InstallService();
     if (a1 == L"--uninstall") return UninstallService();
+    if (a1 == L"--apply-user-index-migration") {
+        if (args.size() != 2) return ERROR_INVALID_PARAMETER;
+        std::wstring error;
+        return pulse::storage::ApplyUserIndex(error) ? 0 : 1;
+    }
     if (a1 == L"--export-diagnostics") return ExportDiagnosticsCommand(args);
     if (a1 == L"--configure-volume" || a1 == L"--set-index-path" ||
         a1 == L"--configure-exclude" ||

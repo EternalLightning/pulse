@@ -68,6 +68,7 @@ CodecError Validate(const Message& m) {
             return CodecError::InvalidSemantics;
         const uint32_t base = r->operation == Operation::OpenFiles ? Open : r->operation == Operation::PickFolder ? Folder : Save;
         if (!(r->required_capabilities & base) ||
+            ((r->required_capabilities & NativeOpenFolder) && r->operation != Operation::OpenFiles) ||
             (bool(r->required_capabilities & LocalOpenAccessV1) != bool(r->options & ValidateLocalOpenAccessV1)) ||
             ((r->options & ValidateLocalOpenAccessV1) &&
                 (r->operation != Operation::OpenFiles || (r->options & SkipAccessValidation) ||
@@ -98,8 +99,11 @@ CodecError Validate(const Message& m) {
             return CodecError::InvalidSemantics;
         const bool success = response->status == Status::Accepted;
         const bool error = response->status == Status::Failed || response->status == Status::Unsupported;
+        const bool native_folder = response->status == Status::UseNative && !response->paths.empty();
         if (error != (response->error_source != ErrorSource::None) || error != (response->error_code != 0) ||
-            (success ? response->paths.empty() : (!response->paths.empty() || response->filter_index != 0)) ||
+            (success ? response->paths.empty() : (response->filter_index != 0 || (!native_folder && !response->paths.empty()))) ||
+            (native_folder && (response->operation != Operation::OpenFiles || response->paths.size() != 1 ||
+                !response->paths.front().starts_with(u"::pidl:"))) ||
             (success && response->operation == Operation::SaveFile && response->paths.size() != 1)) return CodecError::InvalidSemantics;
         for (const auto& p : response->paths) if (p.empty() || !ValidText(p)) return CodecError::InvalidSemantics;
     } else if (const auto* hello = std::get_if<SessionHello>(&m.body)) {
@@ -302,6 +306,8 @@ bool ValidateResponse(const Message& request, const Message& response) {
     const auto* p = std::get_if<Response>(&response.body);
     if (!q || !p || request.request_id != response.request_id || q->operation != p->operation ||
         Validate(request) != CodecError::None || Validate(response) != CodecError::None) return false;
+    if (p->status == Status::UseNative && !p->paths.empty())
+        return (q->required_capabilities & NativeOpenFolder) != 0;
     return p->status != Status::Accepted ||
         ((p->paths.size() == 1 || (q->options & AllowMultiSelect)) &&
          (q->filters.empty() ? p->filter_index == 0 : p->filter_index < q->filters.size()));

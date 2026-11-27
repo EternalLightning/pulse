@@ -5,6 +5,7 @@
 
 #include "ui_renderer.h"
 #include "ui_renderer_internal.h"
+#include "command_icons.h"
 
 #include <algorithm>
 
@@ -221,10 +222,20 @@ void MainRenderer::DrawSettingsPulseMenu(const WindowViewModel& vm,const D2D1_RE
         if(row.fixed==model::BuiltinFixedRow::Strip) {
             static constexpr const wchar_t* kStrip[]={L"\xE8C6",L"\xE8C8",L"\xE74D",L"\xE8AC"};
             float sx=r.left+28*s;
-            for(const auto* g:kStrip) {DrawIconText(sx,r.top+9*s,16*s,16*s,g,L"",foreground,0.8f);sx+=44*s;}
+            for(const auto* g:kStrip) {
+                painter_.DrawGlyph(g, D2D1::RectF(sx, r.top+9*s, sx+16*s, r.top+25*s), foreground, false);
+                sx+=44*s;
+            }
             return;
         }
-        if(row.glyph) DrawIconText(r.left+10*s,r.top+9*s,16*s,16*s,row.glyph,L"",foreground,0.8f);
+        const auto* glyph = row.glyph;
+        using enum model::BuiltinMenuItem;
+        if (row.item == Properties || row.item == FolderProperties) glyph = command_icons::kPropertiesGlyph;
+        else if (row.item == CopyPath) glyph = command_icons::kCopyPathGlyph;
+        else if (row.item == NewMenu) glyph = command_icons::kNewItemGlyph;
+        else if (row.item == PinWorkspace) glyph = L"\xE718";
+        if (glyph) painter_.DrawGlyph(glyph,
+            D2D1::RectF(r.left+10*s, r.top+9*s, r.left+26*s, r.top+25*s), foreground, false);
         const auto label=row.item==model::BuiltinMenuItem::Tags ? l10n::Get(I::TagsEllipsis) : model::BuiltinMenuRowLabel(row);
         const float label_right=row.submenu ? r.right-28*s : row.shortcut ? r.right-20*s-CellTextWidth(row.shortcut,true) : r.right-8*s;
         const auto shown=FitEndEllipsis(label,label_right-r.left-36*s,[&](const std::wstring& value) {return CellTextWidth(value,true);});

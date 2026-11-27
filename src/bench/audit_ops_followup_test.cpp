@@ -10,6 +10,8 @@
 #include "../shell_host/permanent_fileop.h"
 #include "../common/current_user_security.h"
 #include "../common/localization.h"
+#include <objbase.h>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -71,11 +73,11 @@ std::string Read(const fs::path& name) {
     std::ifstream stream(name, std::ios::binary);
     return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
-void Pair(const fs::path& original, const fs::path& payload) {
+void Pair(const fs::path& original, const fs::path& payload, uint64_t bytes = 22) {
     fs::create_directories(payload.parent_path());
     std::ofstream(payload) << "retained recycle bytes";
     std::ofstream stream(pulse::fs::RecycleIndexPath(payload.wstring()), std::ios::binary);
-    const uint64_t version = 2, bytes = 22, deleted = 0;
+    const uint64_t version = 2, deleted = 0;
     const auto name = original.wstring() + std::wstring(1, L'\0');
     const auto length = static_cast<uint32_t>(name.size());
     stream.write(reinterpret_cast<const char*>(&version), sizeof(version));
@@ -92,27 +94,52 @@ void RecycleEnumeration(const fs::path& root) {
     fs::create_directories(user);
     Pair(root / L"original.txt", user / L"$Rvalid");
     std::vector<pulse::fs::DirEntry> entries;
-    Check(pulse::fs::EnumerateRecycleBinAtRoot(bin.wstring(), entries) && entries.size() == 1,
+    const auto check_enumeration = [&](bool complete, size_t count, const char* label) {
+        entries.clear();
+        const bool strict = pulse::fs::EnumerateRecycleBinAtRoot(bin.wstring(), entries);
+        const size_t strict_count = entries.size();
+        entries.clear();
+        const bool view = pulse::fs::EnumerateRecycleViewAtRoot(bin.wstring(), entries);
+        Check(strict == complete && view == complete && strict_count == count && entries.size() == count, label);
+    };
+    check_enumeration(true, 1,
         "complete synthetic bin enumerates its valid pair");
     std::ofstream(user / L"$Ibroken", std::ios::binary) << "bad";
     std::ofstream(user / L"$Rbroken") << "payload with damaged metadata";
-    entries.clear();
-    Check(!pulse::fs::EnumerateRecycleBinAtRoot(bin.wstring(), entries) && entries.size() == 1,
+    check_enumeration(false, 1,
         "damaged live metadata prevents complete-success while preserving valid rows");
     fs::remove(user / L"$Ibroken"); fs::remove(user / L"$Rbroken");
     std::ofstream(user / L"$Rorphan") << "orphan bytes";
-    entries.clear();
-    Check(!pulse::fs::EnumerateRecycleBinAtRoot(bin.wstring(), entries) && entries.size() == 1,
+    check_enumeration(false, 1,
         "orphan payload prevents complete-success while preserving valid rows");
     fs::remove(user / L"$Rorphan");
     const HANDLE locked = CreateFileW((user / L"$Ivalid").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-    entries.clear();
-    Check(locked != INVALID_HANDLE_VALUE && !pulse::fs::EnumerateRecycleBinAtRoot(bin.wstring(), entries),
-        "unreadable live metadata cannot be reported as an empty complete bin");
+    Check(locked != INVALID_HANDLE_VALUE, "fixture can lock recycle metadata");
+    check_enumeration(false, 0, "unreadable live metadata cannot be reported as an empty complete bin");
     if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
-    fs::remove(user / L"$Rvalid"); entries.clear();
-    Check(pulse::fs::EnumerateRecycleBinAtRoot(bin.wstring(), entries) && entries.empty(),
+    fs::remove(user / L"$Rvalid");
+    check_enumeration(true, 0,
         "payload-free indexes retained by exact restore are harmless empty-bin metadata");
+
+    const auto file = user / L"$rfile", folder = user / L"$Rfolder";
+    Pair(root / L"file.txt", file, 0);
+    Pair(root / L"folder", folder, 0);
+    fs::remove(folder);
+    fs::create_directory(folder);
+    check_enumeration(true, 2, "view finds file and directory payloads including a lowercase prefix");
+    bool file_attributes = false, folder_attributes = false;
+    for (const auto& entry : entries) {
+        if (entry.name == L"file.txt")
+            file_attributes = !entry.is_dir && entry.size == fs::file_size(file) &&
+                entry.recycle_path == pulse::fs::NormalizePath(file.wstring());
+        if (entry.name == L"folder")
+            folder_attributes = entry.is_dir && entry.size == 0 &&
+                entry.recycle_path == pulse::fs::NormalizePath(folder.wstring());
+    }
+    Check(file_attributes && folder_attributes, "view reuses directory attributes and the fallback file size");
+    entries.clear();
+    Check(!pulse::fs::EnumerateRecycleViewAtRoot(bin.wstring(), entries, [&] { return !entries.empty(); }) &&
+        entries.size() == 1, "cancelled view scan stops before reading the remaining payloads");
 }
 void UndoRetention(const fs::path& root) {
     using namespace pulse::ops;
@@ -241,8 +268,93 @@ void PermanentDeletion(const fs::path& root) {
     Check(planning_error.empty() && plan.targets.size() == 1 && plan.targets.front().physical_paths == std::vector<std::wstring>{nested.wstring()},
         "parent and child selection is reduced to one exact non-reparse execution root before authorization");
     ReadPathFileIdentity(nested.wstring(), identity);
+    if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
+        Check(false, "initialize the same COM apartment as the Shell operation worker");
+        return;
+    }
     const auto result = shell::DeletePermanentAuthorized({nested.wstring()}, {identity}, {});
+    CoUninitialize();
+    if (FAILED(result.error))
+        std::cout << "[DIAG] permanent deletion HRESULT=0x" << std::hex
+                  << static_cast<unsigned long>(result.error) << std::dec
+                  << " identity_valid=" << identity.Valid() << '\n';
     Check(SUCCEEDED(result.error) && !fs::exists(nested), "normalized search or tray selection deletes its nonempty parent without handle conflicts");
+}
+void PermanentPlan(const fs::path& root) {
+    using namespace pulse::ops;
+    const auto directory = root / L"selected";
+    fs::create_directories(directory / L"subdir");
+    const auto child = directory / L"subdir" / L"child.txt";
+    const auto sibling = root / L"selected-other" / L"child.txt";
+    const auto case_variant = root / L"Selected" / L"child.txt";
+    const auto missing_intermediate = directory / L"missing" / L"child.txt";
+    const auto file = directory / L"file.txt";
+    const auto file_intermediate = file / L"child.txt";
+    std::ofstream(file) << "not a directory";
+    const auto selected = pulse::fs::NormalizePath(directory.wstring());
+
+    OpRequest request;
+    request.type = OpType::RealDelete;
+    const auto check_plan = [&](const std::vector<std::wstring>& expected, const char* label) {
+        std::wstring error;
+        const auto plan = BuildDeletePlan(request, 1, error);
+        std::vector<std::wstring> actual;
+        for (const auto& target : plan.targets) actual.push_back(target.path);
+        Check(error.empty() && actual == expected, label);
+    };
+    const auto alias = directory / L"subdir" / L".." / L"alias.txt";
+    request.sources = {child.wstring(), sibling.wstring(), case_variant.wstring(), missing_intermediate.wstring(),
+        selected, file_intermediate.wstring(), directory.wstring(), alias.wstring()};
+    check_plan({sibling.wstring(), case_variant.wstring(), missing_intermediate.wstring(), selected,
+        file_intermediate.wstring(), directory.wstring()},
+        "normalized ancestry preserves spelling, component, missing-directory and non-directory boundaries and order");
+
+    request.sources.clear();
+    const auto other = root / L"other";
+    fs::create_directory(other);
+    request.delete_targets = {{L"single child", {(other / L"child.txt").wstring()}, false},
+        {L"paired parent", {other.wstring(), file.wstring()}, false},
+        {L"paired child", {child.wstring(), file.wstring()}, false}, {L"single parent", {selected}, false}};
+    check_plan({L"single child", L"paired parent", L"paired child", L"single parent"},
+        "synthetic targets with multiple physical paths neither provide nor inherit recursive coverage");
+
+    request.delete_targets.clear();
+    request.sources = {selected, (other / L".." / L"lossy.txt").wstring()};
+    std::wstring error;
+    const auto lossy = BuildDeletePlan(request, 1, error);
+    Check(lossy.targets.empty() && !error.empty(), "uncovered lossy Shell path still blocks the plan");
+
+    const auto target = root / L"link-target", link = directory / L"link";
+    fs::create_directories(target / L"subdir");
+    if (CreateSymbolicLinkW(link.c_str(), target.c_str(),
+        SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
+        const auto link_child = link / L"subdir" / L"child.txt";
+        request.sources = {link.wstring(), link_child.wstring(), selected};
+        check_plan({link_child.wstring(), selected}, "recursive coverage stops at selected and intermediate reparse points");
+        fs::remove(link);
+    } else {
+        std::cout << "[SKIP] reparse boundary fixture could not create a directory symlink (" << GetLastError() << ")\n";
+    }
+}
+void PermanentPlanScaling(const fs::path& root) {
+    using namespace pulse::ops;
+    using Clock = std::chrono::steady_clock;
+    OpRequest request;
+    request.type = OpType::RealDelete;
+    for (const size_t count : {4000, 8000}) {
+        while (request.sources.size() < count) {
+            const auto name = L"sibling-" + std::to_wstring(request.sources.size()) + L".txt";
+            request.sources.push_back((root / name).wstring());
+        }
+        std::wstring error;
+        const auto start = Clock::now();
+        const auto plan = BuildDeletePlan(request, 1, error);
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - start);
+        std::cout << "[TIME] " << count << " permanent sibling targets in " << elapsed.count() << " ms\n";
+        bool ordered = plan.targets.size() == count;
+        for (size_t i = 0; ordered && i < count; ++i) ordered = plan.targets[i].path == request.sources[i];
+        Check(error.empty() && ordered, "large permanent sibling selection retains every target in request order");
+    }
 }
 void RemoteLikeDeletionPlan() {
     using namespace pulse;
@@ -305,10 +417,14 @@ int wmain(int argc, wchar_t** argv) {
     fs::create_directories(root);
     const std::wstring mode = argc > 1 ? argv[1] : L"all";
     if (mode != L"all" && mode != L"--recycle-enumeration" && mode != L"--undo-retention" &&
-        mode != L"--permanent" && mode != L"--staged-tray") Check(false, "unknown fixture mode");
+        mode != L"--permanent" && mode != L"--permanent-plan" && mode != L"--staged-tray") Check(false, "unknown fixture mode");
     if (mode == L"all" || mode == L"--recycle-enumeration") RecycleEnumeration(root / L"enumeration");
     if (mode == L"all" || mode == L"--undo-retention") UndoRetention(root / L"undo");
     if (mode == L"all" || mode == L"--permanent") PermanentDeletion(root / L"permanent");
+    if (mode == L"all" || mode == L"--permanent-plan") {
+        PermanentPlan(root / L"permanent-plan");
+        PermanentPlanScaling(root / L"permanent-siblings");
+    }
     if (mode == L"all" || mode == L"--staged-tray") StagedTray(root / L"staging");
     if (root.parent_path() == parent && root.filename().wstring().starts_with(L"audit-ops-followup-")) fs::remove_all(root);
     return failures ? 1 : 0;

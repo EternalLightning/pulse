@@ -473,6 +473,11 @@ static bool EnumerateNtQuery(const std::wstring& path, std::vector<DirEntry>& ou
 // the sidebar ("Label (C:)" or a localized fallback). full_path is set so
 // the app layer can navigate/open without joining parent+name.
 static bool EnumerateThisPc(std::vector<DirEntry>& out, const std::function<bool()>& cancelled) {
+    struct RestoreErrorMode {
+        DWORD previous = 0;
+        BOOL changed = SetThreadErrorMode(GetThreadErrorMode() | SEM_FAILCRITICALERRORS, &previous);
+        ~RestoreErrorMode() { if (changed) SetThreadErrorMode(previous, nullptr); }
+    } error_mode;
     DWORD drives = GetLogicalDrives();
     for (int i = 0; i < 26; ++i) {
         if (cancelled && cancelled()) return false;
@@ -487,7 +492,8 @@ static bool EnumerateThisPc(std::vector<DirEntry>& out, const std::function<bool
                                              : std::wstring(root, 2);
         } else {
             wchar_t volume_name[MAX_PATH + 1] = {};
-            GetVolumeInformationW(root, volume_name, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0);
+            if (!GetVolumeInformationW(root, volume_name, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0) &&
+                DriveHasNoMedia(e.drive_type, GetLastError())) continue;
             e.name = volume_name[0] ? std::wstring(volume_name) + L" (" + root[0] + L":)"
                                     : std::wstring(root, 2);
         }

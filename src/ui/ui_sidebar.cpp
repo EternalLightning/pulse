@@ -24,6 +24,24 @@
 
 namespace pulse::ui {
 
+void MainRenderer::DrawSidebarRow(fluent::Painter& painter, fluent::SidebarItemSpec row, bool high_contrast,
+                                  const std::wstring* folder_path, const std::wstring& fallback) {
+    const bool selected = high_contrast && (row.state.selected || row.state.hovered);
+    const bool shell_icon = row.state.enabled && folder_path && !selected;
+    const int resource = row.tag_dot ? 0 : FluentSvgIdForGlyph(row.glyph);
+    row.skip_glyph = shell_icon || (row.state.enabled && !high_contrast && resource && EnsureFluentSvg(resource, true));
+    painter.DrawSidebarItem(row);
+    if (!row.skip_glyph) return;
+    const auto icon = painter.SidebarItemIconRect(row.bounds, row.status_dot);
+    if (shell_icon) {
+        if (!icon_cache_.Draw(compositor_->Dc(), icon, *folder_path, std::wstring(row.text), true, FILE_ATTRIBUTE_DIRECTORY))
+            DrawIconText(icon.left, icon.top, icon.right - icon.left, icon.bottom - icon.top,
+                std::wstring(row.glyph), fallback, row.icon_color, 0.92f);
+    } else {
+        DrawFluentSvg(resource, icon, 1.0f, nullptr, true);
+    }
+}
+
 namespace {
 
 class SidebarRowLayer {
@@ -395,26 +413,13 @@ void MainRenderer::DrawSidebar(const WindowViewModel& vm, const D2D1_RECT_F& rec
             row.status_color = item.status_color;
             row.icon_color = item.icon_color;
             row.suppress_text = item.editing;
-            const int row_svg = item.is_tag ? 0 : FluentSvgIdForGlyph(item.icon_glyph);
-            row.skip_glyph = (item.use_path_icon && !highlighted) ||
-                (!high_contrast && row_svg != 0 && EnsureFluentSvg(row_svg, true));
             const auto expand_rc = SidebarExpandRect(slot.rc, scale_);
             if (item.expandable)
                 row.trailing_reserve = (std::max)(0.0f,
                     (slot.rc.right - expand_rc.left) - 4.0f * scale_);
-            painter_.DrawSidebarItem(row);
-            if (item.use_path_icon && !highlighted) {
-                const D2D1_RECT_F icon = painter_.SidebarItemIconRect(slot.rc, item.status_dot);
-                if (!icon_cache_.Draw(dc, icon, item.icon_path.empty() ? item.path : item.icon_path, item.label, true,
-                                      FILE_ATTRIBUTE_DIRECTORY)) {
-                    DrawIconText(icon.left, icon.top, icon.right - icon.left,
-                                 icon.bottom - icon.top, item.icon_glyph,
-                                 item.fallback_text, item.icon_color, 0.92f);
-                }
-            } else if (row.skip_glyph) {
-                DrawFluentSvg(row_svg, painter_.SidebarItemIconRect(slot.rc, item.status_dot),
-                              1.0f, nullptr, true);
-            }
+            if (item.use_path_icon)
+                DrawSidebarRow(painter_, row, high_contrast, &(item.icon_path.empty() ? item.path : item.icon_path), item.fallback_text);
+            else DrawSidebarRow(painter_, row, high_contrast);
             if (item.editing) {
                 // In-place tag rename: give the hosted edit a real TextField
                 // frame. Geometry must match TagRenameCell in app_main.cpp.

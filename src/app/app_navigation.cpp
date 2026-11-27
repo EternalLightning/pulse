@@ -1162,6 +1162,9 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         tab.sort_column = sort.column;
         tab.sort_direction = sort.direction;
         const auto group = s.appPrefs.folder_views.FindGroup(normalized).value_or(app::FolderGroupPrefs{});
+        if (tab.group_mode != group.mode ||
+            (group.mode == ui::GroupMode::Auto && sort.column != ui::SortColumn::Mtime))
+            tab.file_groups_collapsed = false;
         tab.group_mode = group.mode;
         tab.group_direction = group.direction;
         const auto columns = s.appPrefs.folder_views.FindColumns(normalized);
@@ -1178,6 +1181,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
             s.appPrefs.folder_views.Set(normalized, mode);
         if (tab.view_mode != mode) {
             tab.view_mode = mode;
+            tab.file_groups_collapsed = false;
             ++tab.view_generation;
         }
         tab.scroll_x = history_viewport ? history_viewport->x : 0.0f;
@@ -1208,7 +1212,7 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
     if (shared_snapshot) {
         tab.SetSnapshot(shared_snapshot);
         tab.loading = false;
-        if (tab.EntryCount() != 0) tab.SelectOnly(0);
+        if (tab.EntryCount() != 0 && !tab.file_groups_collapsed) tab.SelectOnly(0);
     } else if (tab.snapshot) {
         tab.loading = false;
     }
@@ -1216,7 +1220,8 @@ void StartLoadingPath(AppState& s, app::Tab& tab, const std::wstring& path, Path
         ? shared_generation
         : AdmitListingRequest(s, tab, s.worker.Refresh(normalized, tab.sort_column, tab.sort_direction,
                            app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode), snap));
-    if (reason == PathLoadReason::Navigate || reason == PathLoadReason::NetworkRetry) MarkNetworkForegroundListing(s, tab);
+    if (reason == PathLoadReason::Navigate || reason == PathLoadReason::NetworkRetry)
+        MarkNetworkForegroundListing(s, tab, reason == PathLoadReason::Navigate);
 
     SyncVisibleWatches(s);
     if (fs::IsUncPath(normalized)) RequestUncProbe(s, normalized);
@@ -1337,7 +1342,7 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
                     ? app::FormatCacheAge(res.cache_unix) + L"  " + l10n::Get(l10n::StringId::Refreshing)
                     : l10n::Get(l10n::StringId::Refreshing);
             }
-            if (tab->EntryCount() != 0 && tab->selected_index < 0) tab->SelectOnly(0);
+            if (tab->EntryCount() != 0 && tab->selected_index < 0 && !tab->file_groups_collapsed) tab->SelectOnly(0);
         });
         InvalidateRect(s.hwnd, nullptr, FALSE);
         return;
@@ -1353,7 +1358,7 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
             if (res.generation < tab->applied_generation) return;
             tab->applied_generation = res.generation;
             const auto explicit_request = s.explicit_entry_refreshes.find(tab);
-            const bool foreground = TakeNetworkForegroundListing(s, *tab, res.generation) ||
+            const bool foreground = TakeNetworkForegroundListing(s, *tab, res.generation, true) ||
                 (explicit_request != s.explicit_entry_refreshes.end() && explicit_request->second.path == res.path &&
                     explicit_request->second.generation == res.generation);
             FailListing(s, *tab, res.error_code);
@@ -1432,14 +1437,14 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
             }
             if (!res.projection_only && network_opened) RecordNetworkLocationOpened(s, *tab);
             if (virtual_kind == L"recycle" || fs::IsRecycleViewPath(res.path)) {
-                ApplyQueriedRecycleInfo(s, res.recycle_info);
-                ApplyRecycleOccupancy(s);
+                if (!ApplyQueriedRecycleInfo(s, res.recycle_info)) ApplyRecycleOccupancy(s);
             }
 
             bool startedRename = false;
             if (focusedTab && !renameTarget.empty() && tab->snapshot) {
                 for (int i = 0; i < static_cast<int>(tab->EntryCount()); ++i) {
                     if (tab->EntryAt(i).name != renameTarget) continue;
+                    tab->file_groups_collapsed = false;
                     tab->SelectOnly(i);
                     EnsureRowVisible(s, *tab, i);
                     s.pendingRenameName.clear();
@@ -1458,7 +1463,8 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
                 }
             }
             if (!startedRename) {
-                if (focusedTab && !s.pendingRenameName.empty()) {
+                if (tab->file_groups_collapsed) tab->ClearSelection();
+                else if (focusedTab && !s.pendingRenameName.empty()) {
                     if (!pendingNames.empty()) tab->RemapSelection(pendingNames, pendingFocus);
                     else tab->ClearSelection();
                 } else if (!pendingNames.empty()) {
@@ -1478,6 +1484,10 @@ void ApplyWorkerResult(AppState& s, app::WorkResult& res) {
     });
     if (again) RefreshPath(s, res.path);
     if (!any) return;
+    if (!res.projection_only && fs::IsRecycleViewPath(res.path)) {
+        s.recycle_listing_generation = res.generation;
+        if (!res.recycle_info.valid) RequestRecycleOccupancy(s, res.generation);
+    }
     SyncQuickPreview(s);
 
     s.timing.enum_ms = res.enum_ms;
@@ -2027,6 +2037,7 @@ void SetGroup(AppState& s, ui::GroupMode mode, ui::SortDirection direction) {
     if (s.appPrefs.folder_views.SetGroup(tab->current_path, mode, direction))
         s.appPrefs.ScheduleSave(GetTickCount64());
     if (tab->group_mode == mode && tab->group_direction == direction) return;
+    if (tab->group_mode != mode) tab->file_groups_collapsed = false;
     tab->group_mode = mode;
     tab->group_direction = direction;
     ++tab->view_generation;
@@ -2036,6 +2047,8 @@ void SetGroup(AppState& s, ui::GroupMode mode, ui::SortDirection direction) {
     if (tab->selected_index >= 0) {
         EnsureRowVisible(s, *tab, tab->selected_index);
         s.scrollTargetY = tab->scroll_y;
+        if (tab->pending_view_projection)
+            tab->projection_reveal_selection = {tab->selection_revision, tab->scroll_y};
     }
     InvalidateRect(s.hwnd, nullptr, FALSE);
 }
@@ -2053,6 +2066,8 @@ void SetSort(AppState& s, ui::SortColumn col, ui::SortDirection direction) {
     if (s.appPrefs.folder_views.SetSort(tab->current_path, col, direction))
         s.appPrefs.ScheduleSave(GetTickCount64());
     if (!was_relevance && tab->sort_column == col && tab->sort_direction == direction) return;
+    if (tab->group_mode == ui::GroupMode::Auto && col != ui::SortColumn::Mtime)
+        tab->file_groups_collapsed = false;
     tab->sort_column = col;
     tab->sort_direction = direction;
     if(tab->content_results) {

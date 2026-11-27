@@ -11,6 +11,7 @@ namespace pulse {
 bool SubmitWithConflictResolution(AppState& s, ops::OpRequest request);
 void ReleaseTrayBatch(AppState& s, size_t idx);
 void PasteIntoCurrent(AppState& s);
+void HandleClipboardPasteResult(AppState& s, WPARAM cookie);
 void DeleteSelected(AppState& s, bool permanent);
 void RestoreSelected(AppState& s);
 void EmptyRecycleBin(AppState& s);
@@ -30,5 +31,4 @@ void QueueCreatedItemReveal(AppState& s, const std::wstring& path);
 void QueueTransferredItemsReveal(AppState& s, const std::vector<std::wstring>& paths);
 void RevealPendingCreatedItem(AppState& s, app::Tab& tab);
 void PresentDeleteConfirmation(AppState& s);
-ui::ConfirmDialogSpec BuildDeleteConfirmationSpec(const ops::DeleteConfirmation& confirmation);
 } // namespace pulse

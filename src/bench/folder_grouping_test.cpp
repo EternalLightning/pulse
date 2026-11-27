@@ -68,10 +68,57 @@ bool SourceSortPreserved(const pulse::ui::GroupedView& view) {
     }
     return true;
 }
+
+void BackgroundProjection() {
+    using namespace pulse;
+    app::Pane pane;
+    pane.NewTab(L"C:\\fixture");
+    auto& tab = *pane.ActiveTab();
+    tab.SetShowHiddenFiles(true);
+    tab.SetShowProtectedOsFiles(true);
+    auto rows = std::make_shared<std::vector<fs::DirEntry>>(20'000);
+    for (size_t i = 0; i < rows->size(); ++i)
+        (*rows)[i].name = i % 2 ? L"photo.png" : L"notes.txt";
+    (*rows)[0].attrs = FILE_ATTRIBUTE_HIDDEN;
+    tab.SetSnapshot(rows);
+    tab.SelectOnly(5);
+    tab.group_mode = ui::GroupMode::Type;
+    ui::PaneViewModel vm;
+    std::vector<std::function<bool()>> work;
+    const app::SubmitViewProjection queue = [&](auto job) {
+        work.push_back(std::move(job));
+        return true;
+    };
+    app::FillPaneViewModel(vm, pane, nullptr, queue);
+    Check(work.size() == 1 && vm.EntryCount() == rows->size() && !vm.date_groups,
+        "large grouping is queued while the existing row order stays available");
+    tab.filter_text = L"*.png";
+    app::FillPaneViewModel(vm, pane, nullptr, queue);
+    const bool ready = work.size() == 2 && !work[0]() && work[1]() && app::PaneProjectionReady(tab);
+    Check(ready, "changing the filter supersedes a queued group projection");
+    app::FillPaneViewModel(vm, pane, nullptr, queue);
+    Check(vm.EntryCount() == rows->size(), "a ready projection waits for the paint-side commit");
+    app::SyncPaneProjection(tab, nullptr, queue, true);
+    app::FillPaneViewModel(vm, pane, nullptr, queue);
+    Check(vm.EntryCount() == rows->size() / 2 && vm.SourceIndex(2) == 5 && vm.ViewIndex(5) == 2 &&
+        vm.date_groups && vm.date_groups->size() == 1 && tab.selected_index == 5,
+        "filter and group maps publish together, retaining selected source identity");
+    tab.filter_text = L"*.txt";
+    tab.SetShowHiddenFiles(false);
+    app::FillPaneViewModel(vm, pane, nullptr, queue);
+    Check(work.size() == 3 && vm.projection_loading && vm.EntryCount() == 0,
+        "pending visibility change cannot expose hidden files");
+    if (work.size() == 3) work[2]();
+    app::SyncPaneProjection(tab, nullptr, queue, true);
+    app::FillPaneViewModel(vm, pane, nullptr, queue);
+    Check(vm.EntryCount() == rows->size() / 2 - 1 && vm.SourceIndex(0) == 2,
+        "latest visibility and filter publish without resurrecting the hidden row");
+}
 }
 
 int main() {
     using namespace pulse;
+    BackgroundProjection();
     SYSTEMTIME today{};
     today.wYear = 2026;
     today.wMonth = 10;
@@ -130,6 +177,23 @@ int main() {
     tab.MoveFocus(vm.SourceIndex(4), true);
     Check(tab.selected == std::unordered_set<int>({2, 4, 1}),
         "shift navigation selects the displayed grouped range rather than the source-index interval");
+    const auto groups = vm.date_groups;
+    tab.file_groups_collapsed = true;
+    app::FillPaneViewModel(vm, pane);
+    Check(vm.file_groups_collapsed && vm.date_groups == groups && vm.EntryCount() == 0 &&
+        vm.SourceIndex(0) == -1 && vm.ViewIndex(1) == -1,
+        "collapse keeps cached headers and counts while removing file rows from hit and keyboard mapping");
+    const auto header_bounds = D2D1::RectF(0, 0, 160, 64);
+    ui::ViewLayout headers(ui::ViewMode::Details, header_bounds, vm.EntryCount(), 0, 0, 1, 28, groups.get());
+    const auto first_header = headers.GroupHeaderRect(0);
+    const auto next_header = headers.GroupHeaderRect(1);
+    Check(first_header.bottom == next_header.top && headers.MaxScrollY() > 0 &&
+        headers.HitTest(first_header.left + 1, first_header.top + 1) == -1,
+        "collapsed group headers stack and scroll without acquiring file hit targets");
+    tab.file_groups_collapsed = false;
+    app::FillPaneViewModel(vm, pane);
+    Check(!vm.file_groups_collapsed && vm.date_groups == groups && vm.EntryCount() == snapshot->size() &&
+        vm.SourceIndex(4) == 1, "expand restores the existing grouped row order");
     tab.filter_text = L"*.txt";
     app::FillPaneViewModel(vm, pane);
     Check(vm.EntryCount() == 2 && vm.SourceIndex(0) == 1 && vm.SourceIndex(1) == 3 &&

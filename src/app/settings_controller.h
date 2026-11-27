@@ -144,6 +144,7 @@ public:
     void SetError(std::wstring error) { error_ = std::move(error); }
     bool service_installed() const noexcept { return service_installed_; }
     void SetServiceInstalled(bool installed) noexcept { service_installed_ = installed; }
+    void RefreshStorage();
 
     void BindUi(AppPrefs& prefs, ContextMenuPrefs& context, index::IndexClient& index,
                 index::NetworkAgentClient& network, UiCallbacks callbacks);
@@ -232,7 +233,6 @@ private:
     bool StartTask(SettingsTask task, SettingsTaskOperation operation,
                    SettingsTaskCompletion completion);
     bool StartUiTask(SettingsTask task);
-    void RefreshStorage();
     std::wstring configuration_path_;
     std::wstring configuration_pending_path_;
     std::wstring configuration_storage_error_;

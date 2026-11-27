@@ -9,7 +9,7 @@ void ShowDetailsColumnsMenu(AppState& s, POINT point, int pane_index) {
     auto* tab = pane ? pane->ActiveTab() : nullptr;
     if (!tab || !EnsureMenu(s)) return;
     ui::PaneViewModel vm;
-    app::FillPaneViewModel(vm, *pane, &s.places);
+    FillAppPaneViewModel(s, vm, *pane);
     if (vm.is_search) return;
     using K = model::DetailsColumnKind;
     auto prefs = tab->details_columns.configured ? tab->details_columns : model::DefaultDetailsColumns();

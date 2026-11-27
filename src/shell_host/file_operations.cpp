@@ -459,6 +459,7 @@ ipc::ShellOperationResult ExecuteFileOperation(const ipc::ShellOperationRequest&
         const auto target = ShellPath(item.destination);
         if (SUCCEEDED(hr) && !deleting && request.kind != ShellOperationKind::Rename) {
             IShellItem* parsed = nullptr; hr = MakeItem(Parent(target), &parsed); destination.reset(parsed);
+            if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) hr = HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND);
         }
         if (SUCCEEDED(hr) && recycling) {
             IShellItem* recycled = nullptr;

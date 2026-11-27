@@ -64,6 +64,7 @@ public:
     float MaxScrollX() const noexcept;
     float MaxScrollY() const noexcept;
     D2D1_RECT_F ItemRect(int view_index) const noexcept;
+    D2D1_RECT_F GroupHeaderRect(size_t group_index) const noexcept;
     D2D1_RECT_F IconRect(int view_index) const noexcept;
     D2D1_RECT_F NameRect(int view_index) const noexcept;
     D2D1_RECT_F FolderSizeRect(int view_index) const noexcept;

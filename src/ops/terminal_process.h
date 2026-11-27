@@ -32,6 +32,7 @@ public:
     void Stop();
     void SetOwner(HWND window);
     UINT_PTR NotificationId() const;
+    bool HasChildProcesses() const;
     Update TakeOutput();
     bool Write(std::string_view bytes);
     void Resize(COORD size);

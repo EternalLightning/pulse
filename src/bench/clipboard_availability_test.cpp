@@ -130,6 +130,7 @@ int wmain() {
     availability.Consume();
     Check(availability.Available() && reads == reads_before_virtual,
           "virtual-file formats enable paste without treating them as filesystem paths");
+    Check(!availability.CopiedPathsAvailable(1), "virtual clipboard does not enable Paste shortcut");
     availability.Update(1, false, true, {}, true);
     const auto virtual_without_tray_paths = availability.BeginRefresh(1000);
     Check(virtual_without_tray_paths.has_value(),
@@ -157,6 +158,8 @@ int wmain() {
     mixed_formats.Consume();
     Check(!mixed_formats.Available(),
           "valid HDROP with a virtual format still requires the selected tray paths to be available");
+    Check(mixed_formats.CopiedPathsAvailable(1) && !mixed_formats.CopiedPathsAvailable(2),
+          "Paste shortcut uses the current filesystem copy independently of the tray");
     mixed_formats.Update(2, false, false, {});
     mixed_formats.mailbox()->Publish(app::ProbeClipboardAvailability(*mixed_request, failed_reader, exists));
     mixed_formats.Consume();
@@ -173,8 +176,17 @@ int wmain() {
     if (!deleted) return 2;
     complete(*deleted);
     Check(!availability.Available(), "deleted source disables paste with unchanged clipboard sequence");
+    Check(!availability.CopiedPathsAvailable(1), "deleted source disables Paste shortcut");
 
     std::ofstream(source) << "new clipboard source";
+    clipboard.cut = true;
+    availability.Update(1, true, true, {source.wstring()});
+    const auto cut = availability.BeginRefresh(2000);
+    if (!cut) return 2;
+    complete(*cut);
+    Check(availability.Available() && !availability.CopiedPathsAvailable(1),
+          "cut paths remain available to Paste without enabling Paste shortcut");
+    clipboard.cut = false;
     availability.Update(2, true, false, {});
     const auto stale = availability.BeginRefresh(2000);
     availability.Update(3, false, false, {});
@@ -219,8 +231,13 @@ int wmain() {
     if (!deleted_tray) return 2;
     complete(*deleted_tray);
     Check(!availability.Available(), "deleted tray source disables paste instead of trusting cached exists flag");
+    clipboard.sequence = 7;
     availability.Update(7, true, true, {});
-    Check(!availability.Available() && !availability.BeginRefresh(8000), "empty newest tray cannot incorrectly enable clipboard fallback");
+    const auto empty_tray = availability.BeginRefresh(8000);
+    if (!empty_tray) return 2;
+    complete(*empty_tray);
+    Check(!availability.Available() && availability.CopiedPathsAvailable(7),
+          "empty newest tray blocks regular paste while allowing Paste shortcut");
 
     std::filesystem::remove(source, error);
     std::filesystem::remove(fixture, error);

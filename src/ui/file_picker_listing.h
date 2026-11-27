@@ -11,6 +11,7 @@
 namespace pulse::ui {
 
 inline constexpr UINT kPickerListingReady = WM_APP + 0x39;
+enum class PickerNavigation { Navigate, Back, Forward };
 
 struct ListingRequest {
     HWND window = nullptr;
@@ -31,7 +32,7 @@ struct ListingRequest {
     bool project_only = false;
     bool type_filtered = false;
     model::FileVisibility visibility;
-    bool back = false;
+    PickerNavigation navigation = PickerNavigation::Navigate;
     std::atomic<bool> cancelled{false};
     std::atomic<bool> ready{false};
     bool succeeded = false;

@@ -198,7 +198,7 @@ void SubmitAddressSearch(AppState& s, bool live) {
     if (first == std::wstring::npos) {
         s.addressHistoryDue = 0;
         s.addressHistoryPath.clear();
-        if (IsAddressSearchResults(tab)) ExitAddressSearch(s);
+        if (IsAddressSearchResults(tab)) NavigateTo(s, SearchOrigin(*tab));
         return;
     } else query = query.substr(first, query.find_last_not_of(L" \t\r\n") - first + 1);
     const bool continuing = IsAddressSearchResults(tab);

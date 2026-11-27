@@ -323,6 +323,23 @@ void OverwriteConflicts(const fs::path& root, HWND owner) {
     Check(status.phase == OpPhase::Completed && !status.elevation_retry_available && !fs::exists(source) &&
         Read(destination / source.filename()) == "moved replacement",
         "same-name move replaces the existing target and removes only its source");
+
+    Write(source, "selected source");
+    const auto parked = source.parent_path() / L"parked.txt";
+    uint64_t replacement_token = 0;
+    status = session.Run(Request(OpType::Move, {source}, destination), [&] {
+        if (const auto pending = session.manager.PendingConflict(); pending && pending->token != replacement_token) {
+            replacement_token = pending->token;
+            fs::rename(source, parked);
+            Write(source, "different object at the selected path");
+            session.manager.ResolveConflict(pending->token, ConflictChoice::Replace, false);
+        }
+    });
+    Check(replacement_token && status.phase == OpPhase::Failed &&
+        status.failure_hr == HRESULT_FROM_WIN32(ERROR_FILE_INVALID) &&
+        Read(source) == "different object at the selected path" && Read(parked) == "selected source" &&
+        Read(destination / source.filename()) == "moved replacement",
+        "replacing a selected source while the conflict prompt is open never moves its substitute");
 }
 
 void MergeConflicts(const fs::path& root, HWND owner) {
@@ -481,8 +498,16 @@ void Cancellation(const fs::path& root, HWND owner) {
         const auto until = GetTickCount64() + 150;
         while (GetTickCount64() < until) Pump();
         const auto after = session.manager.Status();
-        Check(paused && session.observed.load() && before.phase == OpPhase::Paused && after.phase == OpPhase::Paused &&
-            before.transferred_bytes == after.transferred_bytes && before.completed_items == after.completed_items,
+        const bool held = paused && session.observed.load() && before.phase == OpPhase::Paused && after.phase == OpPhase::Paused &&
+            before.transferred_bytes == after.transferred_bytes && before.completed_items == after.completed_items;
+        if (!held) {
+            Diagnostics(before);
+            Diagnostics(after);
+            std::printf("[DIAG] paused=%d observed=%d bytes=%llu to %llu\n", paused, session.observed.load(),
+                static_cast<unsigned long long>(before.transferred_bytes),
+                static_cast<unsigned long long>(after.transferred_bytes));
+        }
+        Check(held,
             "Shell pause acknowledges and holds real batch progress stable");
         session.manager.CancelCurrent();
         const auto status = session.Finish(task);
@@ -501,6 +526,7 @@ void Cancellation(const fs::path& root, HWND owner) {
                 confirmed += item.state == TransferItemState::Completed && item.destination_committed;
         }
         Check(status.phase == OpPhase::Cancelled && produced > 0 && produced < request.sources.size() && content_valid &&
+            status.transferred_bytes == produced * 2 * 1024 * 1024 &&
             outcomes.size() == 1 && outcomes.front().phase == OpPhase::Cancelled && confirmed == produced &&
             !outcomes.front().remaining_sources.empty(), "mid-batch cancel retains only confirmed partial outputs with truthful terminal evidence");
         Check(completions.size() == 1 && completions.front().destinations.size() == produced && session.manager.CanUndo() &&
@@ -539,6 +565,36 @@ void Cancellation(const fs::path& root, HWND owner) {
 }
 
 void UndoIdentity(const fs::path& root, HWND owner) {
+    for (const auto type : {OpType::Copy, OpType::Move}) {
+        const auto test = root / (type == OpType::Copy ? L"copy-roundtrip" : L"move-roundtrip");
+        Session session(test, owner);
+        const auto source = test / L"source.txt", destination = test / L"destination";
+        const auto product = destination / source.filename();
+        fs::create_directories(destination);
+        Write(source, "round trip content");
+        const auto transferred = session.Run(Request(type, {source}, destination));
+        const bool committed = transferred.phase == OpPhase::Completed && Read(product) == "round trip content" &&
+            fs::exists(source) == (type == OpType::Copy);
+        auto inverse = committed ? session.manager.Undo() : 0;
+        bool declined = false;
+        auto restored = inverse ? session.Finish(inverse, [&] {
+            if (const auto pending = session.manager.PendingDeleteConfirmation()) {
+                declined = true;
+                session.manager.ResolveDeleteConfirmation(pending->token, false);
+            }
+        }).phase : OpPhase::Failed;
+        if (declined) {
+            Check(restored == OpPhase::Cancelled && Read(product) == "round trip content" &&
+                Read(source) == "round trip content" && session.manager.CanUndo(),
+                "declining permanent copy undo retains both files and the undo record");
+            inverse = session.manager.Undo();
+            restored = inverse ? session.Finish(inverse, [&] { session.ConfirmFixtureDelete(); }).phase : OpPhase::Failed;
+        }
+        Check(committed && restored == OpPhase::Completed && Read(source) == "round trip content" && !fs::exists(product) &&
+            !session.manager.CanUndo(), type == OpType::Copy ?
+                "copy undo removes the confirmed product and preserves original bytes" :
+                "move undo restores the original path and bytes");
+    }
     for (const auto type : {OpType::Copy, OpType::Move, OpType::Rename}) {
         const auto test = root / std::to_wstring(static_cast<int>(type));
         Session session(test, owner);

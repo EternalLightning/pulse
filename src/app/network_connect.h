@@ -27,6 +27,7 @@ inline bool NetworkResultMatches(const NetworkConnectResult& result, const Netwo
     return !loading && pending_tab == current_tab && result.identity == pending && pending == current;
 }
 bool IsNetworkAuthenticationError(DWORD error);
+bool ShouldPromptNetworkAuthentication(DWORD error, bool webdav);
 std::wstring UncShareRoot(const std::wstring& path);
 std::wstring NetworkConnectErrorText(DWORD error);
 // A task owns no UI objects; the window closes its mailbox before destruction.

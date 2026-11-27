@@ -24,6 +24,7 @@ namespace pulse {
 inline constexpr size_t kMaxTopLevelWindows = 32;
 
 struct AppState;
+namespace index { class StartupIndexMigration; }
 
 // State that must outlive and be visible to every top-level window in one
 // Pulse process. Window-local services remain in AppState until their worker
@@ -43,6 +44,7 @@ struct AppCore {
     app::SearchHistoryWriter search_history_writer;
     app::SavedSearchStore saved_searches;
     std::shared_ptr<app::NetworkRecentStore> network_recent;
+    std::shared_ptr<index::StartupIndexMigration> startup_index_migration;
     float terminal_panel_width = ui::kTerminalWidthDip;
     bool shared_preferences_loaded = false;
     bool session_preferences_saves_enabled = false;

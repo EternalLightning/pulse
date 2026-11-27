@@ -11,6 +11,7 @@
 #include <chrono>
 #include <memory>
 #include <shellapi.h>
+#include <tuple>
 
 namespace pulse::index {
 namespace {
@@ -48,7 +49,110 @@ bool ReadFrame(HANDLE pipe, uint32_t& type, uint32_t& id, std::vector<uint8_t>& 
     return true;
 }
 
+bool SameRootStatus(const NetworkRootInfo& left, const NetworkRootInfo& right) {
+    return std::tie(left.path, left.online, left.building, left.watching, left.indexed_items,
+                    left.progress, left.state, left.error) ==
+           std::tie(right.path, right.online, right.building, right.watching, right.indexed_items,
+                    right.progress, right.state, right.error);
+}
+
 } // namespace
+
+class NetworkAgentClient::RootStatus {
+public:
+    ~RootStatus() { StopPolling(); }
+
+    bool Subscribe(NetworkAgentClient& client, RootReader read_roots) {
+        std::lock_guard lifecycle(lifecycle_mu_);
+        std::lock_guard lock(mu_);
+        subscribers_.push_back(&client);
+        if (!worker_.joinable()) {
+            if (!transport_.StartTransport()) {
+                subscribers_.pop_back();
+                return false;
+            }
+            try {
+                worker_ = std::thread([this, read_roots] { Poll(read_roots); });
+            } catch (...) {
+                subscribers_.pop_back();
+                transport_.Stop();
+                throw;
+            }
+        } else if (roots_ && !roots_->empty()) {
+            client.PublishRoots(roots_);
+        }
+        return true;
+    }
+
+    void Unsubscribe(NetworkAgentClient& client) {
+        std::lock_guard lifecycle(lifecycle_mu_);
+        {
+            std::lock_guard lock(mu_);
+            std::erase(subscribers_, &client);
+            if (!subscribers_.empty()) return;
+        }
+        StopPolling();
+    }
+
+    void RefreshSoon() {
+        {
+            std::lock_guard lock(mu_);
+            refresh_requested_ = true;
+        }
+        cv_.notify_one();
+    }
+
+private:
+    void StopPolling() {
+        if (!worker_.joinable()) return;
+        {
+            std::lock_guard lock(mu_);
+            subscribers_.clear();
+        }
+        cv_.notify_one();
+        transport_.Stop();
+        worker_.join();
+        roots_.reset();
+    }
+
+    void Poll(RootReader read_roots) {
+        std::unique_lock lock(mu_);
+        while (!subscribers_.empty()) {
+            refresh_requested_ = false;
+            lock.unlock();
+            auto next = read_roots(transport_);
+            lock.lock();
+            if (subscribers_.empty()) break;
+            const bool changed = next && (roots_ ? !std::ranges::equal(*roots_, *next, SameRootStatus) : !next->empty());
+            if (changed) {
+                roots_ = std::make_shared<const RootSnapshot>(std::move(*next));
+                for (auto* client : subscribers_) client->PublishRoots(roots_);
+            }
+            const bool building = roots_ && std::ranges::any_of(*roots_, &NetworkRootInfo::building);
+            // Follow a newly queued scan promptly even before the agent marks it as building.
+            cv_.wait_for(lock, std::chrono::seconds(changed || building ? 1 : 5),
+                         [this] { return subscribers_.empty() || refresh_requested_; });
+        }
+    }
+
+    std::mutex lifecycle_mu_;
+    std::mutex mu_;
+    std::condition_variable cv_;
+    std::vector<NetworkAgentClient*> subscribers_;
+    std::shared_ptr<const RootSnapshot> roots_;
+    bool refresh_requested_ = false;
+    NetworkAgentClient transport_;
+    std::thread worker_;
+};
+
+NetworkAgentClient::RootStatus& NetworkAgentClient::SharedRootStatus() {
+    static RootStatus status;
+    return status;
+}
+
+void NetworkAgentClient::RefreshRootsSoon() {
+    SharedRootStatus().RefreshSoon();
+}
 
 std::wstring NetworkAgentClient::ExePath() {
     wchar_t path[MAX_PATH]{};
@@ -75,7 +179,7 @@ bool NetworkAgentClient::EnsureAgent() {
         return true;
     }
     if (GetLastError() == ERROR_ACCESS_DENIED) return false; // fail closed on a squatted endpoint
-    // A crashing agent must not be relaunched on every 1 s status poll.
+    // A crashing agent must not be relaunched on every status poll.
     const ULONGLONG now = GetTickCount64();
     if (last_spawn_tick_ && now - last_spawn_tick_ < kRespawnBackoffMs) return false;
     const std::wstring exe = ExePath();
@@ -148,24 +252,25 @@ bool NetworkAgentClient::Request(uint32_t type, uint32_t id,
 }
 
 void NetworkAgentClient::Start(HWND notify, UINT status_msg, UINT search_msg) {
+    Start(notify, status_msg, search_msg, [](NetworkAgentClient& transport) {
+        return transport.ReadRoots();
+    });
+}
+
+void NetworkAgentClient::Start(HWND notify, UINT status_msg, UINT search_msg, RootReader read_roots) {
     Stop();
     notify_ = notify;
     status_msg_ = status_msg;
     search_msg_ = search_msg;
-    cancel_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!cancel_) return;
-    running_ = true;
-    status_thread_ = std::thread([this] {
-        std::unique_lock<std::mutex> lock(status_mu_);
-        while (running_) {
-            lock.unlock();
-            RefreshRoots();
-            lock.lock();
-            if (status_cv_.wait_for(lock, std::chrono::seconds(1),
-                                    [this] { return !running_; })) break;
-        }
-    });
+    if (!StartTransport()) return;
+    status_subscribed_ = SharedRootStatus().Subscribe(*this, read_roots);
     search_thread_ = std::thread([this] { SearchLoop(); });
+}
+
+bool NetworkAgentClient::StartTransport() {
+    cancel_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    running_ = cancel_ != nullptr;
+    return running_;
 }
 
 void NetworkAgentClient::Stop() {
@@ -177,14 +282,18 @@ void NetworkAgentClient::Stop() {
             if (live->worker.joinable()) CancelSynchronousIo(live->worker.native_handle());
         }
     }
-    status_cv_.notify_all();
     search_cv_.notify_all();
     if (cancel_) SetEvent(cancel_);
     {
         std::lock_guard<std::mutex> lock(pipe_mu_);
         if (active_pipe_ != INVALID_HANDLE_VALUE) CancelIoEx(active_pipe_, nullptr);
     }
-    if (status_thread_.joinable()) status_thread_.join();
+    if (status_subscribed_) {
+        SharedRootStatus().Unsubscribe(*this);
+        status_subscribed_ = false;
+        std::lock_guard lock(mu_);
+        roots_.reset();
+    }
     if (search_thread_.joinable()) search_thread_.join();
     for (const auto& live : live_searches_) if (live->worker.joinable()) live->worker.join();
     live_searches_.clear();
@@ -335,22 +444,23 @@ bool NetworkAgentClient::TakeResult(uint32_t id, SearchResult& result, HWND repl
     return true;
 }
 
-void NetworkAgentClient::RefreshRoots() {
+std::optional<NetworkAgentClient::RootSnapshot> NetworkAgentClient::ReadRoots() {
     uint32_t response_type = 0;
     std::vector<uint8_t> payload;
     if (!Request(agent::REQ_ROOTS, 1, {}, response_type, payload) || response_type != agent::RSP_ROOTS)
-        return;
+        return std::nullopt;
     PayloadReader reader(payload.data(), payload.size());
     uint32_t count = 0;
-    if (!reader.GetU32(count) || count > 1024 || count > reader.remaining() / (3 * sizeof(uint32_t) + 4 * sizeof(uint32_t))) return;
-    std::vector<NetworkRootInfo> roots;
+    if (!reader.GetU32(count) || count > 1024 || count > reader.remaining() / (3 * sizeof(uint32_t) + 4 * sizeof(uint32_t)))
+        return std::nullopt;
+    RootSnapshot roots;
     roots.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
         NetworkRootInfo root;
         uint32_t flags = 0, progress = 0, lo = 0, hi = 0;
         if (!reader.GetString(root.path) || !reader.GetU32(flags) || !reader.GetU32(progress) ||
             !reader.GetU32(lo) || !reader.GetU32(hi) || !reader.GetString(root.state) ||
-            !reader.GetString(root.error)) return;
+            !reader.GetString(root.error)) return std::nullopt;
         root.online = (flags & 1u) != 0;
         root.building = (flags & 2u) != 0;
         root.watching = (flags & 4u) != 0;
@@ -358,16 +468,20 @@ void NetworkAgentClient::RefreshRoots() {
         root.indexed_items = (static_cast<uint64_t>(hi) << 32) | lo;
         roots.push_back(std::move(root));
     }
+    return roots;
+}
+
+void NetworkAgentClient::PublishRoots(const std::shared_ptr<const RootSnapshot>& roots) {
     {
         std::lock_guard<std::mutex> lock(mu_);
-        roots_ = std::move(roots);
+        roots_ = roots;
     }
     if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
 }
 
 std::vector<NetworkRootInfo> NetworkAgentClient::Roots() const {
     std::lock_guard<std::mutex> lock(mu_);
-    return roots_;
+    return roots_ ? *roots_ : RootSnapshot{};
 }
 
 bool NetworkAgentClient::UsesLiveSearch(const std::wstring& path) const {
@@ -375,7 +489,8 @@ bool NetworkAgentClient::UsesLiveSearch(const std::wstring& path) const {
     const auto root = FilenameSearchRoot(path);
     if (root.empty()) return false;
     std::lock_guard lock(mu_);
-    for (const auto& configured : roots_) {
+    if (!roots_) return true;
+    for (const auto& configured : *roots_) {
         const auto indexed = FilenameSearchRoot(configured.path);
         if (!indexed.empty() && FilenameSearchCovered(root, indexed)) return false;
     }
@@ -394,7 +509,7 @@ bool NetworkAgentClient::AddRoot(const std::wstring& path, std::wstring* error) 
     std::wstring message;
     if (!reader.GetU32(ok) || !reader.GetString(message)) return false;
     if (!ok && error) *error = std::move(message);
-    RefreshRoots();
+    RefreshRootsSoon();
     return ok != 0;
 }
 
@@ -410,7 +525,7 @@ bool NetworkAgentClient::RemoveRoot(const std::wstring& path, std::wstring* erro
     std::wstring message;
     if (!reader.GetU32(ok) || !reader.GetString(message)) return false;
     if (!ok && error) *error = std::move(message);
-    RefreshRoots();
+    RefreshRootsSoon();
     return ok != 0;
 }
 
@@ -420,7 +535,7 @@ void NetworkAgentClient::Rebuild(const std::wstring& path) {
     uint32_t response_type = 0;
     std::vector<uint8_t> ignored;
     Request(agent::REQ_REBUILD, 4, writer.data(), response_type, ignored);
-    RefreshRoots();
+    RefreshRootsSoon();
 }
 
 } // namespace pulse::index

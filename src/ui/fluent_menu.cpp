@@ -648,7 +648,8 @@ bool FluentMenu::RenderSurface(const FluentMenuModel& model, int hover_row, int 
     const bool allow_capture = popup && !IsWindowVisible(popup);
     const bool acrylic = !snapshot_ && s.backdrop.Draw(*compositor_, backdrop_source, drop,
         origin, dark_, scale_, allow_capture);
-    if (painter_.BeginFrame(theme, IsHighContrast())) {
+    const bool high_contrast = IsHighContrast();
+    if (painter_.BeginFrame(theme, high_contrast)) {
         if (drop.right > drop.left && drop.bottom > drop.top)
             painter_.DrawMenuSurface(drop, acrylic);
         if (anchor_to_rect_ && header > 0) {
@@ -725,18 +726,19 @@ bool FluentMenu::RenderSurface(const FluentMenuModel& model, int hover_row, int 
                     const bool hovered = i == hover_row &&
                                          static_cast<int>(swatch_index) == hover_swatch;
                     if (!swatch.glyph.empty()) {
-                        // Icon button: hover pill + Fluent glyph in text color.
+                        // Icon button with its own hover surface.
                         const float half_w = 18.0f * scale_;
                         const float half_h = 13.0f * scale_;
                         const D2D1_RECT_F pill = D2D1::RectF(
                             center_x - half_w, center_y - half_h,
                             center_x + half_w, center_y + half_h);
                         if (hovered && it->enabled)
-                            painter_.FillRoundedRect(pill, 4.0f * scale_, theme.fill_hover);
+                            painter_.FillRoundedRect(pill, 4.0f * scale_, high_contrast ? theme.fill_selected : theme.fill_hover);
                         const float g = 8.0f * scale_;
                         painter_.DrawGlyph(swatch.glyph,
                             D2D1::RectF(center_x - g, center_y - g, center_x + g, center_y + g),
-                            it->enabled ? theme.text : theme.text_disabled);
+                            it->enabled ? (high_contrast && hovered ? theme.text_selected : theme.text) : theme.text_disabled,
+                            !it->enabled);
                     } else {
                         painter_.DrawTagDotState(D2D1::Point2F(center_x, center_y), 6.0f,
                                                  swatch.color, swatch.checked, swatch.mixed,

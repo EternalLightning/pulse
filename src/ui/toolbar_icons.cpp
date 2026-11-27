@@ -1,121 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "toolbar_icons.h"
-#include "../common/resource_ids.h"
 #include <map>
 
 namespace pulse::ui::toolbar_icons {
-namespace {
-int IconResource(command_icons::Icon icon) {
-    if (const int resource = command_icons::WorkspaceSvg(icon)) return resource;
-    using I = command_icons::Icon;
-    switch (icon) {
-    case I::Details: return IDR_FILES_LAYOUT_DETAILS_SVG;
-    case I::Grid: case I::Applications: return IDR_FILES_LAYOUT_GRID_SVG;
-    case I::List: return IDR_FILES_LAYOUT_LIST_SVG;
-    case I::Columns: case I::LayoutThree: return IDR_FILES_LAYOUT_COLUMNS_SVG;
-    case I::Content: return IDR_FILES_LAYOUT_CONTENT_SVG;
-    case I::Split: return IDR_FILES_PANE_VERTICAL_SVG;
-    case I::LayoutStacked: return IDR_FILES_PANE_HORIZONTAL_SVG;
-    case I::Panel: return IDR_FILES_PANEL_RIGHT_SVG;
-    case I::PanelClose: return IDR_FILES_PANEL_RIGHT_FILLED_SVG;
-    case I::SelectAll: return IDR_FILES_SELECT_ALL_SVG;
-    case I::InvertSelection: return IDR_FILES_SELECT_INVERT_SVG;
-    case I::Copy: return IDR_FILES_COPY_SVG;
-    case I::Cut: return IDR_FILES_CUT_SVG;
-    case I::Rename: return IDR_FILES_RENAME_SVG;
-    case I::File: return IDR_FILES_TOOLBAR_FILE_SVG;
-    case I::Folder: return IDR_FILES_TOOLBAR_FOLDER_SVG;
-    case I::NewFolder: return IDR_FILES_TOOLBAR_NEW_FOLDER_SVG;
-    case I::Terminal: return IDR_FILES_TOOLBAR_TERMINAL_SVG;
-    case I::Refresh: return IDR_FILES_TOOLBAR_REFRESH_SVG;
-    case I::Search: return IDR_FILES_TOOLBAR_SEARCH_SVG;
-    case I::Settings: return IDR_FILES_TOOLBAR_SETTINGS_SVG;
-    case I::Recycle: return IDR_FILES_TOOLBAR_RECYCLE_SVG;
-    case I::Pin: return IDR_FILES_TOOLBAR_PIN_SVG;
-    case I::Filter: return IDR_FILES_FILTER_SVG;
-    case I::Library: return IDR_FLUENT_BOOK_OPEN_SVG;
-    case I::Undo: return IDR_FLUENT_ARROW_UNDO_SVG;
-    case I::Link: return IDR_FLUENT_LINK_SVG;
-    case I::LayoutSingle: return IDR_FLUENT_SQUARE_SVG;
-    case I::LayoutFour: return IDR_FLUENT_TABLE_SIMPLE_SVG;
-    default: return 0;
-    }
-}
+void DrawNavigationButton(fluent::Painter& painter, D2D1_RECT_F bounds, std::wstring_view glyph,
+                          const Theme& theme, fluent::ControlState state, bool high_contrast) {
+    painter.DrawButton({bounds, {}, {}, fluent::ButtonKind::Transparent, state, true});
+    const auto foreground = !state.enabled ? theme.text_disabled
+        : high_contrast ? (state.hovered || state.pressed ? theme.text_selected : theme.text_secondary) : theme.text;
+    painter.DrawGlyph(glyph, bounds, foreground, true, 20.0f);
 }
 
-bool DrawArtwork(fluent::Painter& painter, int command, D2D1_RECT_F bounds, float scale,
-                 bool dark, bool monochrome, const D2D1_COLOR_F& foreground, float slot_dip) {
-    struct Artwork {
-        int command, outline, light, dark;
-        float inset;
-        float max_dip = 18.0f;
-    };
-    // SVGs that fill more of the canvas need a larger inset to match the neighboring icon ink.
-    constexpr Artwork artwork[] = {
-        {186, IDR_FILES_NEW_SVG, IDR_FILES_NEW_COLOR_SVG, IDR_FILES_NEW_COLOR_DARK_SVG, 1},
-        {2, IDR_FILES_CUT_SVG, IDR_FILES_CUT_COLOR_SVG, IDR_FILES_CUT_COLOR_DARK_SVG, 0, 17},
-        {3, IDR_FILES_COPY_SVG, IDR_FILES_COPY_COLOR_SVG, IDR_FILES_COPY_COLOR_DARK_SVG, 0},
-        {4, IDR_FILES_PASTE_SVG, IDR_FILES_PASTE_COLOR_SVG, IDR_FILES_PASTE_COLOR_DARK_SVG, 0, 17},
-        {6, IDR_FILES_RENAME_SVG, IDR_FILES_RENAME_COLOR_SVG, IDR_FILES_RENAME_COLOR_DARK_SVG, 1},
-        {5, IDR_FILES_DELETE_SVG, IDR_FILES_DELETE_COLOR_SVG, IDR_FILES_DELETE_COLOR_DARK_SVG, 1},
-        {7, IDR_FILES_PROPERTIES_SVG, IDR_FILES_PROPERTIES_COLOR_SVG, IDR_FILES_PROPERTIES_COLOR_DARK_SVG, 1},
-        {9, IDR_FILES_COPY_PATH_SVG, 0, 0, 0},
-        {174, IDR_FILES_TOOLBAR_ADVANCED_SEARCH_SVG, 0, 0, 0},
-        {189, IDR_FILES_STATUS_CENTER_SVG, 0, 0, 0, 16},
-        {300, IDR_TOOLBAR_CUSTOMIZE_SVG, 0, 0, 0, 16},
-    };
-    const auto* icon = std::find_if(std::begin(artwork), std::end(artwork),
-        [command](const Artwork& item) { return item.command == command; });
-    if (icon == std::end(artwork)) return false;
-    const float art_dip = (std::min)(slot_dip - 2 * icon->inset, icon->max_dip);
-    const float size = std::round((std::min)({art_dip * scale,
-        bounds.right - bounds.left, bounds.bottom - bounds.top}));
-    const float cx = (bounds.left + bounds.right) * 0.5f;
-    const float cy = (bounds.top + bounds.bottom) * 0.5f;
-    // The New icon's two plus strokes intersect on the canvas center.
-    const float left = command == 186 ? std::floor(cx) + 0.5f - size * 0.5f : std::round(cx - size * 0.5f);
-    const float top = command == 186 ? std::floor(cy) + 0.5f - size * 0.5f : std::round(cy - size * 0.5f);
-    const auto art = D2D1::RectF(left, top, left + size, top + size);
-    const int color_resource = dark ? icon->dark : icon->light;
-    if (!monochrome && color_resource && painter.DrawSvgResource(color_resource, art)) return true;
-    return painter.DrawSvgResource(icon->outline, art, &foreground);
-}
-
-command_icons::Icon Resolve(std::wstring_view glyph, fluent::MenuPictogram pictogram, int command) {
-    using I = command_icons::Icon;
-    using P = fluent::MenuPictogram;
-    if (command == 181) return I::Columns;
-    if (command == 101) return I::Panel;
-    if (command == 57) return I::Pin;
-    if ((command >= 80 && command <= 83) || command == 86) return I::Grid;
-    if (command == 85) return I::Details;
-    if (command == 87) return I::Content;
-    switch (pictogram) {
-    case P::LayoutSingle: return I::LayoutSingle;
-    case P::LayoutSideBySide: return I::Split;
-    case P::LayoutStacked: return I::LayoutStacked;
-    case P::LayoutThree: return I::LayoutThree;
-    case P::LayoutFour: return I::LayoutFour;
-    default: break;
-    }
-    if (glyph.size() == 1) switch (glyph.front()) {
-    case L'\xE7A7': return I::Undo;
-    case L'\xE8B3': return I::SelectAll;
-    case L'\xE7A1': return I::InvertSelection;
-    case L'\xE8F4': return I::NewFolder;
-    case L'\xE8A9': return I::Split;
-    case L'\xECA5': return I::Grid;
-    case L'\xEA37': return I::List;
-    case L'\xE9D9': return I::Tray;
-    case L'\xE8F1': return I::Library;
-    case L'\xE71D': return I::Applications;
-    default: break;
-    }
+command_icons::Icon Resolve(std::wstring_view glyph, fluent::MenuPictogram pictogram) {
+    if (pictogram != fluent::MenuPictogram::None) return fluent::PaneLayoutIcon(pictogram);
     return command_icons::FromGlyph(glyph);
 }
 
 bool Draw(fluent::Painter& painter, ID2D1RenderTarget* target, ID2D1SolidColorBrush* brush, ID2D1StrokeStyle* stroke,
-          command_icons::Icon icon, D2D1_RECT_F bounds, float scale, float slot_dip) {
+          command_icons::Icon icon, D2D1_RECT_F bounds, float scale, float slot_dip, bool monochrome) {
     if (!target || !brush || icon <= command_icons::Icon::None || icon >= command_icons::Icon::Count) return false;
     const int side = static_cast<int>(std::round((std::min)({slot_dip * scale,
         bounds.right - bounds.left, bounds.bottom - bounds.top})));
@@ -133,16 +35,7 @@ bool Draw(fluent::Painter& painter, ID2D1RenderTarget* target, ID2D1SolidColorBr
             target->FillEllipse(D2D1::Ellipse({x + dx, y}, radius, radius), brush);
         return true;
     }
-    if (const int resource = IconResource(icon)) {
-        // Keep the center line of these symmetric outlines on one physical pixel.
-        using I = command_icons::Icon;
-        const bool center_line = icon == I::Split || icon == I::LayoutStacked || icon == I::LayoutFour || icon == I::Library;
-        const float size = center_line && side > 1 && side % 2 == 0 ? art - 1.0f : art;
-        const float x = std::round(cx - size * 0.5f);
-        const float y = std::round(cy - size * 0.5f);
-        const auto foreground = brush->GetColor();
-        if (painter.DrawSvgResource(resource, {x, y, x + size, y + size}, &foreground)) return true;
-    }
+    if (painter.DrawCommandSvg(icon, bounds, brush->GetColor(), monochrome, slot_dip)) return true;
     const float weight = (std::max)(1.0f,std::round(command_icons::kStroke*art/command_icons::kCanvas));
     struct Cache {
         ID2D1Factory* factory = nullptr;

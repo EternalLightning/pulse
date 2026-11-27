@@ -6,6 +6,7 @@
 // index_client.cpp — Connect to Pulse.Index (service or spawned helper).
 #include "../common/localization.h"
 #include "../common/command_line.h"
+#include "../common/user_storage.h"
 #include "index_client.h"
 #include "persistent_index_policy.h"
 #include "index_server_auth.h"
@@ -19,6 +20,19 @@
 
 namespace pulse::index {
 
+void StartupIndexMigration::Complete() {
+    std::call_once(finish_, [this] {
+        DWORD status = 0;
+        const bool succeeded = GetExitCodeProcess(process_, &status) && status == 0;
+        storage::Refresh();
+        if (!succeeded || !storage::Pending(storage::Kind::Index).empty()) {
+            error_ = storage::LastError(storage::Kind::Index);
+            if (error_.empty()) error_ = l10n::Get(l10n::StringId::IndexMigrationFailed);
+        }
+        ready_ = true;
+    });
+}
+
 std::wstring IndexClient::ExePath() {
     wchar_t exe[MAX_PATH]{};
     GetModuleFileNameW(nullptr, exe, ARRAYSIZE(exe));
@@ -27,7 +41,23 @@ std::wstring IndexClient::ExePath() {
     return std::wstring(exe, slash + 1) + L"Pulse.Index.exe";
 }
 
-void IndexClient::Start(HWND notify, UINT status_msg, UINT search_msg, std::wstring pipe_name) {
+std::shared_ptr<StartupIndexMigration> IndexClient::StartUserIndexMigration() {
+    const auto executable = ExePath();
+    auto command = QuoteWindowsArgument(executable) + L" --apply-user-index-migration";
+    STARTUPINFOW startup{sizeof(startup)};
+    startup.dwFlags = STARTF_FORCEOFFFEEDBACK;
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process)) return {};
+    transport::Handle owner(process.hProcess);
+    CloseHandle(process.hThread);
+    auto migration = std::make_shared<StartupIndexMigration>(owner.get());
+    owner.release();
+    return migration;
+}
+
+void IndexClient::Start(HWND notify, UINT status_msg, UINT search_msg, std::wstring pipe_name,
+                        std::shared_ptr<StartupIndexMigration> migration) {
     Stop();
     pipe_name_ = std::move(pipe_name);
     notify_ = notify;
@@ -37,12 +67,31 @@ void IndexClient::Start(HWND notify, UINT status_msg, UINT search_msg, std::wstr
     helper_missing_ = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        local_status_ = l10n::StringId::IndexDisconnected;
+        local_status_ = migration ? l10n::StringId::IndexMigrating : l10n::StringId::IndexDisconnected;
         query_status_ = {};
         scope_ready_ = false;
     }
-    worker_ = std::thread([this] { Worker(); });
+    worker_ = std::thread([this, migration = std::move(migration)] {
+        if (!migration || WaitForStartupMigration(*migration)) Worker();
+    });
     writer_ = std::thread([this] { Writer(); });
+}
+
+bool IndexClient::WaitForStartupMigration(StartupIndexMigration& migration) {
+    {
+        std::unique_lock lock(mu_);
+        while (running_ && WaitForSingleObject(migration.process_, 0) == WAIT_TIMEOUT)
+            pending_cv_.wait_for(lock, std::chrono::milliseconds(100), [this] { return !running_; });
+        if (!running_) return false;
+    }
+    migration.Complete();
+    {
+        std::lock_guard lock(mu_);
+        if (!running_) return false;
+        local_status_ = l10n::StringId::IndexDisconnected;
+    }
+    if (notify_ && status_msg_) PostMessageW(notify_, status_msg_, 0, 0);
+    return true;
 }
 
 void IndexClient::Stop() {

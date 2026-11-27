@@ -734,7 +734,7 @@ void ThumbnailCache::Worker(size_t lane) {
             continue;
         }
         StoredThumbnail stored;
-        bool disk_hit = verified && ThumbnailDiskCache::Shared().Load(disk_key, stored);
+        const bool disk_hit = verified && ThumbnailDiskCache::Shared().Load(disk_key, stored, &before);
         const auto started = GetTickCount64();
         bool ok = disk_hit;
         if (disk_hit) {
@@ -759,14 +759,14 @@ void ThumbnailCache::Worker(size_t lane) {
             if (!ok) StopChild(lane);
             continue;
         }
-        if (verified) {
+        if (verified && !disk_hit) {
             ThumbnailFileIdentity after{};
             if (!ReadThumbnailFileIdentity(disk_key, after) || !(before == after)) ok = false;
-        }
-        if (verified && ok && !disk_hit && !result.failed && result.kind == ipc::PreviewContentKind::Bitmap) {
-            stored = {result.pixels, result.w, result.h, result.source_width, result.source_height, 0};
-            ThumbnailDiskCache::Shared().Save(disk_key,
-                static_cast<uint32_t>(std::min<ULONGLONG>(GetTickCount64() - started, UINT32_MAX)), stored, &before);
+            if (ok && !result.failed && result.kind == ipc::PreviewContentKind::Bitmap) {
+                stored = {result.pixels, result.w, result.h, result.source_width, result.source_height, 0};
+                ThumbnailDiskCache::Shared().Save(disk_key,
+                    static_cast<uint32_t>(std::min<ULONGLONG>(GetTickCount64() - started, UINT32_MAX)), stored, &after);
+            }
         }
         if (!ok) {
             result = {};

@@ -6,9 +6,29 @@
 #include "../ui/animation_clock.h"
 #include "app_internal.h"
 #include "app_column_view.h"
+#include "../model/file_visibility.h"
 #include "../ui/column_strip_layout.h"
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cwchar>
+
+namespace pulse::app {
+
+struct ColumnRowsProjection {
+    fs::SnapshotPtr snapshot;
+    std::wstring highlight;
+    bool show_hidden;
+    bool show_protected;
+    ui::SortColumn sort_column;
+    ui::SortDirection sort_direction;
+    FolderSortMode folder_sort;
+    std::shared_ptr<const std::vector<int>> rows;
+    int highlight_row = -1;
+    std::atomic_bool ready = false;
+};
+
+} // namespace pulse::app
 
 namespace pulse {
 
@@ -88,50 +108,127 @@ void RequestColumn(AppState& s, const app::Tab& tab, app::ColumnStripColumn& col
     }
 }
 
-void RebuildRows(app::ColumnStripColumn& col, const app::Tab& tab, app::FolderSortMode folders) {
-    if (col.rows && col.rows_snapshot == col.snapshot &&
-        col.rows_show_hidden == tab.show_hidden_files &&
-        col.rows_show_protected == tab.show_protected_os_files &&
-        col.rows_sort_column == tab.sort_column && col.rows_sort_direction == tab.sort_direction &&
-        col.rows_folder_sort == folders) return;
-    col.scroll_motion.Reset();
-    col.rows_snapshot = col.snapshot;
-    col.rows_show_hidden = tab.show_hidden_files;
-    col.rows_show_protected = tab.show_protected_os_files;
-    col.rows_sort_column = tab.sort_column;
-    col.rows_sort_direction = tab.sort_direction;
-    col.rows_folder_sort = folders;
-    col.highlight_row = -1;
+void RebuildRows(AppState& s, app::ColumnStripColumn& col, const app::Tab& tab,
+                 app::FolderSortMode folders) {
     if (!col.snapshot) {
         col.rows.reset();
+        col.rows_snapshot.reset();
+        col.pending_rows.reset();
         return;
     }
-    auto rows = std::make_shared<std::vector<int>>();
-    rows->reserve(col.snapshot->size());
-    const auto& entries = *col.snapshot;
-    for (size_t i = 0; i < entries.size(); ++i) {
-        const fs::DirEntry& e = entries[i];
-        if (e.change_record_only) continue;
-        if (!tab.AllowsAttributes(e.attrs)) continue;
-        rows->push_back(static_cast<int>(i));
+    const bool compatible = col.rows_snapshot == col.snapshot &&
+        col.rows_show_hidden == tab.show_hidden_files &&
+        col.rows_show_protected == tab.show_protected_os_files;
+    if (!compatible) {
+        col.rows.reset();
+        col.rows_snapshot.reset();
+        col.highlight_row = -1;
     }
-    std::sort(rows->begin(), rows->end(), [&](int a, int b) {
-        return app::EntryLess(entries[static_cast<size_t>(a)], entries[static_cast<size_t>(b)],
-            tab.sort_column, tab.sort_direction, folders, col.path);
-    });
-    for (size_t i = 0; i < rows->size(); ++i)
-        if (!col.highlight_name.empty() && SamePath(entries[static_cast<size_t>((*rows)[i])].name,
-                                                   col.highlight_name)) {
-            col.highlight_row = static_cast<int>(i);
-            break;
+    const bool reuse_rows = col.rows && col.rows_sort_column == tab.sort_column &&
+        col.rows_sort_direction == tab.sort_direction && col.rows_folder_sort == folders;
+    if (reuse_rows && col.rows_highlight_name == col.highlight_name) {
+        col.pending_rows.reset();
+        return;
+    }
+    const auto publish = [&] {
+        auto result = std::move(col.pending_rows);
+        if (!result->rows) return;
+        if (col.rows && !col.auto_scroll && col.rows != result->rows) {
+            const float row_dip = s.renderer.RowHeight() / s.scale;
+            if (row_dip > 0.0f) {
+                const size_t top = static_cast<size_t>(std::max(0.0f, std::floor(col.scroll_dip / row_dip)));
+                if (top < col.rows->size()) {
+                    const auto found = std::find(result->rows->begin(), result->rows->end(), (*col.rows)[top]);
+                    if (found != result->rows->end())
+                        col.scroll_dip += (static_cast<float>(found - result->rows->begin()) -
+                                           static_cast<float>(top)) * row_dip;
+                }
+            }
         }
-    col.rows = std::move(rows);
+        if (col.rows != result->rows) col.scroll_motion.Reset();
+        col.rows = std::move(result->rows);
+        col.rows_snapshot = std::move(result->snapshot);
+        col.rows_show_hidden = result->show_hidden;
+        col.rows_show_protected = result->show_protected;
+        col.rows_sort_column = result->sort_column;
+        col.rows_sort_direction = result->sort_direction;
+        col.rows_folder_sort = result->folder_sort;
+        col.rows_highlight_name = std::move(result->highlight);
+        col.highlight_row = result->highlight_row;
+    };
+    const auto& pending = col.pending_rows;
+    if (pending && pending->snapshot == col.snapshot && pending->highlight == col.highlight_name &&
+        pending->show_hidden == tab.show_hidden_files && pending->show_protected == tab.show_protected_os_files &&
+        pending->sort_column == tab.sort_column && pending->sort_direction == tab.sort_direction &&
+        pending->folder_sort == folders) {
+        if (pending->ready.load(std::memory_order_acquire)) publish();
+        return;
+    }
+    col.pending_rows = std::make_shared<app::ColumnRowsProjection>();
+    auto& job = *col.pending_rows;
+    job.snapshot = col.snapshot;
+    job.highlight = col.highlight_name;
+    job.show_hidden = tab.show_hidden_files;
+    job.show_protected = tab.show_protected_os_files;
+    job.sort_column = tab.sort_column;
+    job.sort_direction = tab.sort_direction;
+    job.folder_sort = folders;
+    const std::weak_ptr<app::ColumnRowsProjection> target = col.pending_rows;
+    auto work = [target, snapshot = job.snapshot, path = col.path, highlight = job.highlight,
+                    visibility = model::FileVisibility{job.show_hidden, job.show_protected},
+                    column = job.sort_column, direction = job.sort_direction, folders,
+                    rows = reuse_rows ? col.rows : nullptr]() mutable {
+        if (target.expired()) return false;
+        int highlight_row = -1;
+        try {
+            const auto& entries = *snapshot;
+            if (!rows) {
+                auto filtered = std::make_shared<std::vector<int>>();
+                filtered->reserve(entries.size());
+                for (size_t i = 0; i < entries.size(); ++i) {
+                    if ((i & 1023) == 0 && target.expired()) return false;
+                    if (!entries[i].change_record_only && visibility.Includes(entries[i].attrs))
+                        filtered->push_back(static_cast<int>(i));
+                }
+                size_t comparisons = 0;
+                struct Cancelled {};
+                const auto less = [&](int a, int b) {
+                    if ((++comparisons & 8191) == 0 && target.expired()) throw Cancelled{};
+                    return app::EntryLess(entries[static_cast<size_t>(a)], entries[static_cast<size_t>(b)],
+                        column, direction, folders, path);
+                };
+                if (!std::is_sorted(filtered->begin(), filtered->end(), less))
+                    std::sort(filtered->begin(), filtered->end(), less);
+                rows = std::move(filtered);
+            }
+            if (!highlight.empty())
+                for (size_t i = 0; i < rows->size(); ++i) {
+                    if ((i & 1023) == 0 && target.expired()) return false;
+                    if (SamePath(entries[static_cast<size_t>((*rows)[i])].name, highlight)) {
+                        highlight_row = static_cast<int>(i);
+                        break;
+                    }
+                }
+        } catch (...) {
+            rows.reset();
+        }
+        if (const auto result = target.lock()) {
+            result->rows = std::move(rows);
+            result->highlight_row = highlight_row;
+            result->ready.store(true, std::memory_order_release);
+            return true;
+        }
+        return false;
+    };
+    if (col.snapshot->size() >= 16'384 && QueueViewProjection(s, work)) return;
+    work();
+    publish();
 }
 
 void SyncColumn(AppState& s, const app::Tab& tab, app::ColumnStripColumn& col) {
     if (col.path.empty()) return;
     if (!col.requested) RequestColumn(s, tab, col);
-    RebuildRows(col, tab, app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode));
+    RebuildRows(s, col, tab, app::FolderSortModeFromInt(s.appPrefs.folder_sort_mode));
 }
 
 // Drive roots show their sidebar label ("Data (D:)") instead of "D:".
@@ -170,7 +267,7 @@ void RebuildAncestors(AppState& s, app::Tab& tab) {
         }
         if (!SamePath(col.highlight_name, highlight)) {
             col.highlight_name = highlight;
-            col.rows.reset(); // re-resolve the highlight row
+            col.highlight_row = -1;
             col.auto_scroll = true;
         }
         col.scroll_motion.Reset();
@@ -435,7 +532,7 @@ void InvalidateColumnStripPath(AppState& s, const std::wstring& path, fs::Snapsh
     const auto update = [&](app::ColumnStripColumn& col) {
         if (!SamePath(col.path, path)) return;
         col.scroll_motion.Reset();
-        col.rows.reset();
+        col.pending_rows.reset();
         if (fresh) {
             col.notify_watermark = (std::max)({col.notify_watermark, col.applied_generation,
                 col.generation, s.worker.ResultWatermark()});

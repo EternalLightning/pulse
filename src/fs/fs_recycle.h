@@ -7,6 +7,7 @@
 #pragma once
 #include "fs_enum.h"
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -36,7 +37,13 @@ std::wstring RecycleIndexPath(const std::wstring& content_path);
 // metadata for live payloads and orphan payloads return false; valid items are
 // still appended. Payload-free indexes retained by exact restore are ignored.
 bool EnumerateRecycleBinAtRoot(const std::wstring& recycle_root, std::vector<DirEntry>& out);
-void EnumerateRecycleBin(std::vector<DirEntry>& out, RecycleBinInfo* info = nullptr);
+// The view uses payload attributes from the directory scan. Completeness at
+// the root also requires readable metadata for each payload.
+bool EnumerateRecycleViewAtRoot(const std::wstring& recycle_root, std::vector<DirEntry>& out,
+                                const std::function<bool()>& cancelled = {});
+// Returns false on cancellation. Occupancy is valid only for a complete scan.
+bool EnumerateRecycleBin(std::vector<DirEntry>& out, RecycleBinInfo& info,
+                         const std::function<bool()>& cancelled);
 
 inline bool IsRecycleViewPath(const std::wstring& path) {
     return path == L"pulse:recycle";

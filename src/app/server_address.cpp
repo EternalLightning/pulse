@@ -164,6 +164,16 @@ void SplitHost(const std::wstring& path, std::wstring& host, std::wstring& rest)
     rest = cut == std::wstring::npos ? std::wstring() : path.substr(cut);
 }
 
+bool ValidPort(std::wstring_view port) {
+    if (port.empty() || port.size() > 5) return false;
+    unsigned value = 0;
+    for (const wchar_t c : port) {
+        if (c < L'0' || c > L'9') return false;
+        value = value * 10 + (c - L'0');
+    }
+    return value > 0 && value <= 65535;
+}
+
 std::wstring Slashes(std::wstring text) {
     for (auto& c : text) if (c == L'/') c = L'\\';
     return text;
@@ -200,13 +210,18 @@ ServerAddress ParseServerAddress(std::wstring_view input, bool allow_bare_host) 
             if (out.kind != ServerAddressKind::Invalid) out.user = user;
         } else if (scheme == L"http" || scheme == L"https") {
             std::wstring host = authority, port;
-            if (host.empty() || host.front() != L'[') {
-                if (const size_t colon = host.find(L':'); colon != std::wstring::npos) {
-                    port = host.substr(colon + 1);
-                    host.resize(colon);
-                }
+            size_t port_start = 0;
+            if (host.starts_with(L"[")) {
+                const size_t bracket = host.find(L']');
+                if (bracket == std::wstring::npos) return out;
+                port_start = bracket + 1;
+                if (port_start < host.size() && host[port_start] != L':') return out;
             }
-            for (wchar_t c : port) if (c < L'0' || c > L'9') return ServerAddress{};
+            if (const size_t colon = host.find(L':', port_start); colon != std::wstring::npos) {
+                port = host.substr(colon + 1);
+                if (!ValidPort(port)) return out;
+                host.resize(colon);
+            }
             ServerAddress parts = FromParts(host, path);
             if (parts.kind == ServerAddressKind::Invalid) return parts;
             std::wstring tail = parts.unc.substr(2 + parts.host.size());
@@ -215,7 +230,7 @@ ServerAddress ParseServerAddress(std::wstring_view input, bool allow_bare_host) 
             if (!port.empty() && port != (scheme == L"https" ? L"443" : L"80")) decorated += L"@" + port;
             out.kind = ServerAddressKind::WebDav;
             out.host = parts.host;
-            out.unc = L"\\\\" + decorated + (tail.empty() ? std::wstring(L"\\DavWWWRoot") : tail);
+            out.unc = L"\\\\" + decorated + L"\\DavWWWRoot" + tail;
             out.user = user;
         } else {
             bool known = false;
@@ -234,6 +249,19 @@ ServerAddress ParseServerAddress(std::wstring_view input, bool allow_bare_host) 
         if (text.size() >= 3 && text[2] == L'?') return out;  // \\?\C:\ and other device paths
         std::wstring host, rest;
         SplitHost(text.substr(2), host, rest);
+        const auto lower_rest = Lower(rest);
+        if (const size_t at = host.find(L'@'); at != std::wstring::npos ||
+            lower_rest == L"\\davwwwroot" || lower_rest.starts_with(L"\\davwwwroot\\")) {
+            std::wstring suffix = at == std::wstring::npos ? L"" : Lower(host.substr(at));
+            if (suffix.starts_with(L"@ssl")) suffix.erase(0, 4);
+            if ((!suffix.empty() && (suffix.front() != L'@' || !ValidPort(std::wstring_view(suffix).substr(1)))) ||
+                rest.empty()) return {};
+            auto parts = FromParts(host.substr(0, at), rest);
+            if (parts.kind != ServerAddressKind::Share) return {};
+            if (at != std::wstring::npos) parts.unc.insert(2 + parts.host.size(), host.substr(at));
+            parts.kind = ServerAddressKind::WebDav;
+            return parts;
+        }
         return FromParts(host, rest);
     }
     if (text.front() == L'\\') return out;
@@ -247,9 +275,10 @@ ServerAddress ParseServerAddress(std::wstring_view input, bool allow_bare_host) 
 
 std::wstring NetworkRecentRoot(std::wstring_view input) {
     const auto address = ParseServerAddress(input);
-    if (address.kind != ServerAddressKind::Server && address.kind != ServerAddressKind::Share) return {};
+    if (!IsBrowsableServerAddress(address.kind)) return {};
     // History contains UNC locations only, never URLs or credentials.
     if (!input.starts_with(L"\\\\") && !input.starts_with(L"//")) return {};
+    if (address.kind == ServerAddressKind::WebDav) return address.unc;
     const auto& path = address.unc;
     const size_t host_end = path.find(L'\\', 2);
     if (host_end == std::wstring::npos) return path;

@@ -34,9 +34,10 @@ enum class Operation : uint32_t { OpenFiles = 1, PickFolder, SaveFile };
 // DialogLabels carries the caller's title / OK / file-name labels; the label
 // section is on the wire only when it is required, so old peers fail closed.
 enum Capability : uint32_t { Open = 1, Folder = 2, Save = 4, MultiSelect = 8, Filters = 16, PreserveLinks = 32, AdvisoryFilters = 64, ExplicitAccessPolicy = 128, LocalOpenAccessV1 = 256,
-                             LocalSaveAccessV1 = 512, DialogLabels = 1024, CallerWindow = 2048, DialogEvents = 4096, DialogButton = 8192 };
+                             LocalSaveAccessV1 = 512, DialogLabels = 1024, CallerWindow = 2048, DialogEvents = 4096, DialogButton = 8192,
+                             NativeOpenFolder = 16384 };
 constexpr uint32_t kRequestCapabilities = Open | Folder | Save | MultiSelect | Filters | PreserveLinks | AdvisoryFilters | ExplicitAccessPolicy | LocalOpenAccessV1 |
-    LocalSaveAccessV1 | DialogLabels | CallerWindow | DialogEvents | DialogButton;
+    LocalSaveAccessV1 | DialogLabels | CallerWindow | DialogEvents | DialogButton | NativeOpenFolder;
 constexpr uint32_t kSessionVersion = 2;
 // Version 3 lets the host return the result while its dialog still owns the foreground.
 constexpr uint32_t kSessionForegroundHandoff = 3;
@@ -83,7 +84,7 @@ struct Response {
     ErrorSource error_source = ErrorSource::None;
     uint32_t error_code = 0;
     uint32_t filter_index = 0;
-    std::vector<std::u16string> paths;
+    std::vector<std::u16string> paths; // UseNative may carry one Shell folder ID for NativeOpenFolder clients.
     bool operator==(const Response&) const = default;
 };
 struct Cancel { bool operator==(const Cancel&) const = default; };

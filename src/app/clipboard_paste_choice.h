@@ -5,10 +5,18 @@
 
 #pragma once
 #include "../ops/clipboard.h"
+#include <optional>
 
 namespace pulse::app {
 
 enum class ClipboardPasteSource { None, Paths, Shell, Tray };
+
+struct ClipboardPasteResult {
+    ClipboardPasteSource source = ClipboardPasteSource::None;
+    ops::ClipboardData clipboard;
+    std::wstring destination;
+    std::optional<uint64_t> tray_revision;
+};
 
 inline ClipboardPasteSource ChooseClipboardPasteSource(bool paths_read,
     const ops::ClipboardData& clipboard, bool shell_format, bool tray_present,

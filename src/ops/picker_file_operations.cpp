@@ -11,6 +11,46 @@
 namespace pulse::ops {
 namespace {
 
+HRESULT WaitForTask(PickerFileOperations& session, PickerFileOperation& operation,
+                    OpsManager& manager, uint64_t task, HWND owner,
+                    const ClipboardData* clipboard = nullptr,
+                    const std::vector<std::wstring>& cut_sources = {}) {
+    operation.refresh = true;
+
+    bool cancel_sent = false;
+    bool permanent_declined = false;
+    for (;;) {
+        const auto status = manager.Status();
+        if (status.task_id == task && !status.active) {
+            auto completed = manager.DrainCompletions();
+            manager.DrainTransferOutcomes();
+            manager.DrainDeleteOutcomes();
+            if (clipboard && clipboard->cut && status.phase == OpPhase::Completed) {
+                std::vector<std::wstring> moved;
+                for (auto& entry : completed)
+                    if (entry.type == OpType::Move && entry.cut_clipboard_sequence == clipboard->sequence)
+                        std::move(entry.sources.begin(), entry.sources.end(), std::back_inserter(moved));
+                if (CutPasteMovedAllPaths(cut_sources, moved))
+                    CompleteCutClipboard(clipboard->sequence, clipboard->paths, owner);
+            }
+            if (permanent_declined) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+            if (status.phase == OpPhase::Completed) return S_OK;
+            if (status.phase == OpPhase::Cancelled) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+            return FAILED(status.failure_hr) ? status.failure_hr : E_FAIL;
+        }
+        if (status.task_id == task && status.active && operation.cancelled.load() && !cancel_sent) {
+            cancel_sent = true;
+            manager.CancelCurrent();
+        }
+        if (const auto pending = manager.PendingDeleteConfirmation(); pending && pending->plan.origin != DeleteOrigin::Undo) {
+            // The picker only presents permanent deletion confirmation for a verified copy inverse.
+            permanent_declined = true;
+            manager.ResolveDeleteConfirmation(pending->token, false);
+        }
+        session.WaitForChange();
+    }
+}
+
 HRESULT RunRequest(PickerFileOperations& session, PickerFileOperation& operation,
                    OpRequest request, HWND owner, bool verify_copies, const ClipboardData* clipboard = nullptr) {
     if (operation.cancelled.load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
@@ -29,40 +69,14 @@ HRESULT RunRequest(PickerFileOperations& session, PickerFileOperation& operation
         return HRESULT_FROM_WIN32(ERROR_CANCELLED);
     const auto task = manager.Submit(std::move(request));
     if (!task) return E_FAIL;
-    operation.refresh = true;
+    return WaitForTask(session, operation, manager, task, owner, clipboard, cut_sources);
+}
 
-    bool cancel_sent = false;
-    bool permanent_declined = false;
-    for (;;) {
-        const auto status = manager.Status();
-        if (status.task_id == task && !status.active) {
-            auto completed = manager.DrainCompletions();
-            manager.DrainTransferOutcomes();
-            manager.DrainDeleteOutcomes();
-            if (cut && status.phase == OpPhase::Completed) {
-                std::vector<std::wstring> moved;
-                for (auto& entry : completed)
-                    if (entry.type == OpType::Move && entry.cut_clipboard_sequence == clipboard->sequence)
-                        std::move(entry.sources.begin(), entry.sources.end(), std::back_inserter(moved));
-                if (CutPasteMovedAllPaths(cut_sources, moved))
-                    CompleteCutClipboard(clipboard->sequence, clipboard->paths, owner);
-            }
-            if (permanent_declined) return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-            if (status.phase == OpPhase::Completed) return S_OK;
-            if (status.phase == OpPhase::Cancelled) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
-            return FAILED(status.failure_hr) ? status.failure_hr : E_FAIL;
-        }
-        if (status.task_id == task && status.active && operation.cancelled.load() && !cancel_sent) {
-            cancel_sent = true;
-            manager.CancelCurrent();
-        }
-        if (const auto pending = manager.PendingDeleteConfirmation()) {
-            // Only recycle requests are offered here. Never approve a permanent fallback.
-            permanent_declined = true;
-            manager.ResolveDeleteConfirmation(pending->token, false);
-        }
-        session.WaitForChange();
-    }
+HRESULT Undo(PickerFileOperations& session, PickerFileOperation& operation, HWND owner) {
+    if (!operation.BeginMutation() || operation.cancelled.load()) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    auto& manager = session.Manager();
+    const auto task = manager.Undo();
+    return task ? WaitForTask(session, operation, manager, task, owner) : HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
 }
 
 HRESULT Paste(PickerFileOperations& session, PickerFileOperation& operation,
@@ -119,6 +133,8 @@ void CALLBACK Run(PTP_CALLBACK_INSTANCE, void* argument) {
                     operation.result = WriteClipboard(clipboard->paths, clipboard->cut, work->owner) ? S_OK : E_FAIL;
                 }
             }
+        } else if (std::holds_alternative<PickerUndo>(work->request)) {
+            operation.result = Undo(session, operation, work->owner);
         } else {
             operation.result = RunRequest(session, operation, std::move(std::get<OpRequest>(work->request)),
                 work->owner, work->verify_copies);

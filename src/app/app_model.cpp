@@ -33,6 +33,45 @@
 
 namespace pulse::app {
 
+struct PaneProjection {
+    struct Key {
+        fs::SnapshotPtr snapshot;
+        std::wstring path;
+        std::wstring filter;
+        bool show_hidden;
+        bool show_protected;
+        const PlacesCatalog* catalog;
+        uint64_t tag_revision;
+        model::DisplayAliasSnapshot aliases;
+        ui::FileGrouping grouping;
+        unsigned day;
+
+        bool SameVisibility(const Key& other) const {
+            return snapshot == other.snapshot && path == other.path &&
+                show_hidden == other.show_hidden && show_protected == other.show_protected;
+        }
+
+        bool SameFilter(const Key& other) const {
+            return SameVisibility(other) && filter == other.filter && catalog == other.catalog &&
+                tag_revision == other.tag_revision && aliases == other.aliases;
+        }
+
+        bool operator==(const Key&) const = default;
+    };
+
+    struct Rows {
+        std::shared_ptr<const ui::PaneViewModel::FilterMap> filtered;
+        std::shared_ptr<const ui::PaneViewModel::FilterMap> grouped;
+        std::shared_ptr<const ui::PaneViewModel::FilterMap> reverse;
+        std::shared_ptr<const std::vector<ui::DateGroup>> groups;
+    };
+
+    explicit PaneProjection(Key value) : key(std::move(value)) {}
+    const Key key;
+    Rows rows;
+    std::atomic_bool ready = false;
+};
+
 std::wstring NavigationReturnChildName(const std::wstring& from_path,
                                        const std::wstring& destination_path) {
     if (from_path.empty() || destination_path.empty() ||
@@ -76,6 +115,7 @@ Tab::HistoryEntry CurrentHistoryEntry(const Tab& tab) {
 
 void RestoreHistoryEntry(Tab& tab, Tab::HistoryEntry entry) {
     tab.current_path = std::move(entry.path);
+    tab.file_groups_collapsed = false;
     tab.search_origin_valid = IsSearchPath(tab.current_path) && entry.search_origin.has_value();
     tab.search_origin_path = tab.search_origin_valid ? std::move(*entry.search_origin) : std::wstring{};
     tab.pending_history_viewport = entry.viewport;
@@ -106,6 +146,7 @@ bool Tab::NavigateTo(const std::wstring& path, ui::SurfaceMotion motion) {
         search_origin_valid = false;
     }
     current_path = path;
+    file_groups_collapsed = false;
     ClearSelection();
     scroll_y = 0.0f;
     scroll_x = 0.0f;
@@ -167,12 +208,9 @@ void Tab::SetSnapshot(fs::SnapshotPtr value) {
     view_cache_snapshot.reset();
     view_cache_places = nullptr;
     view_cache_places_revision = 0;
-    view_cache_filter_text.clear();
-    view_filter_map.reset();
-    view_date_groups.reset();
-    view_date_filter.reset();
-    view_group_order.reset();
-    view_group_reverse.reset();
+    view_projection.reset();
+    pending_view_projection.reset();
+    projection_reveal_selection.reset();
     view_tag_dots.reset();
     snapshot_path = snapshot ? current_path : L"";
     if(content_results) { directory_count=0; file_count=content_results->Count(); return; }
@@ -287,19 +325,17 @@ void Tab::SelectRange(int from, int to) {
     to = std::clamp(to, 0, n - 1);
     all_selected = false;
     selected.clear();
-    const auto [effective_group, effective_direction] =
-        ui::ResolveFileGrouping(view_mode, group_mode, sort_column, sort_direction, group_direction);
-    if (!content_results &&
-        !current_path.empty() && !fs::IsVirtualPath(current_path) &&
-        snapshot && effective_group != ui::GroupMode::None && view_group_mode == effective_group &&
-        view_group_direction == effective_direction && view_cache_snapshot == snapshot &&
-        view_group_order && view_group_reverse && view_group_reverse->size() == snapshot->size()) {
-        int first = (*view_group_reverse)[static_cast<size_t>(from)];
-        const int last = (*view_group_reverse)[static_cast<size_t>(to)];
+    if (!content_results && view_mode == ui::ViewMode::Details && view_projection &&
+        view_projection->key.snapshot == snapshot && view_projection->key.path == current_path &&
+        view_projection->key.show_hidden == show_hidden_files &&
+        view_projection->key.show_protected == show_protected_os_files && view_projection->rows.reverse) {
+        const auto& rows = view_projection->rows;
+        int first = (*rows.reverse)[static_cast<size_t>(from)];
+        const int last = (*rows.reverse)[static_cast<size_t>(to)];
         if (last >= 0) {
             if (first < 0) first = last;
             for (int row = std::min(first, last); row <= std::max(first, last); ++row)
-                selected.insert((*view_group_order)[static_cast<size_t>(row)]);
+                selected.insert((*rows.grouped)[static_cast<size_t>(row)]);
             selected_index = to;
             if (selection_anchor < 0) selection_anchor = from;
             return;
@@ -1271,9 +1307,46 @@ std::vector<int> NormalizeSidebarOrder(const std::vector<int>& order) {
     return out;
 }
 
+std::vector<SidebarEntry> BuildQuickAccessDefaults(const fs::RecycleBinInfo* recycle) {
+    std::vector<SidebarEntry> entries;
+    SidebarEntry recent;
+    recent.glyph = L"\xE823";
+    recent.fallback = L"Recent";
+    recent.color = ui::HexColor(0x60A5FA);
+    recent.label = l10n::Get(l10n::StringId::Recent);
+    recent.path = MakeRecentPath();
+    recent.builtin = static_cast<int>(BuiltinQuickAccess::Recent);
+    entries.push_back(std::move(recent));
+    SidebarEntry desktop = MakeKnownEntry(FOLDERID_Desktop, L"\xE7F4", L"Desktop",
+        ui::HexColor(0x38BDF8), l10n::Get(l10n::StringId::Desktop).c_str());
+    desktop.badge = l10n::Get(l10n::StringId::Desktop);
+    desktop.badge_rgb = 0x0078D4;
+    desktop.builtin = static_cast<int>(BuiltinQuickAccess::Desktop);
+    entries.push_back(std::move(desktop));
+    SidebarEntry downloads = MakeKnownEntry(FOLDERID_Downloads, L"\xE896", L"Downloads",
+        ui::HexColor(0xC084FC), l10n::Get(l10n::StringId::Downloads).c_str());
+    downloads.builtin = static_cast<int>(BuiltinQuickAccess::Downloads);
+    entries.push_back(std::move(downloads));
+    SidebarEntry recycle_bin;
+    recycle_bin.glyph = L"\xE75C";
+    recycle_bin.fallback = L"Bin";
+    recycle_bin.color = ui::HexColor(0x94A3B8);
+    recycle_bin.label = l10n::Get(l10n::StringId::RecycleBin);
+    recycle_bin.path = MakeRecyclePath();
+    recycle_bin.builtin = static_cast<int>(BuiltinQuickAccess::RecycleBin);
+    if (recycle && recycle->valid) {
+        wchar_t occupancy[96]{};
+        swprintf_s(occupancy, l10n::Get(l10n::StringId::RecycleOccupancyFormat).c_str(),
+                   std::to_wstring(recycle->items).c_str(),
+                   pulse::format::ByteSize(recycle->bytes).c_str());
+        recycle_bin.detail = occupancy;
+    }
+    entries.push_back(std::move(recycle_bin));
+    return entries;
+}
+
 SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle) {
     SidebarModel m;
-    // Starred items lead their own section, next to (not inside) quick access.
     SidebarEntry starred;
     starred.glyph = L"\xE735";
     starred.fallback = L"Starred";
@@ -1282,24 +1355,8 @@ SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle) {
     starred.path = MakeStarredPath();
     starred.expandable = true;
     m.starred.push_back(std::move(starred));
-    SidebarEntry recent;
-    recent.glyph = L"\xE823";
-    recent.fallback = L"Recent";
-    recent.color = ui::HexColor(0x60A5FA);
-    recent.label = l10n::Get(l10n::StringId::Recent);
-    recent.path = MakeRecentPath();
-    recent.builtin = static_cast<int>(BuiltinQuickAccess::Recent);
-    m.quick_access.push_back(std::move(recent));
-    SidebarEntry desktop = MakeKnownEntry(FOLDERID_Desktop, L"\xE7F4", L"Desktop",
-        ui::HexColor(0x38BDF8), l10n::Get(l10n::StringId::Desktop).c_str());
-    desktop.badge = l10n::Get(l10n::StringId::Desktop);
-    desktop.badge_rgb = 0x0078D4;
-    desktop.builtin = static_cast<int>(BuiltinQuickAccess::Desktop);
-    m.quick_access.push_back(std::move(desktop));
-    SidebarEntry downloads = MakeKnownEntry(FOLDERID_Downloads, L"\xE896", L"Downloads",
-        ui::HexColor(0xC084FC), l10n::Get(l10n::StringId::Downloads).c_str());
-    downloads.builtin = static_cast<int>(BuiltinQuickAccess::Downloads);
-    m.quick_access.push_back(std::move(downloads));
+    m.quick_access = BuildQuickAccessDefaults(recycle);
+
     // OneDrive leads its own section: one row per signed-in account, the way
     // Explorer lists them. The known folder only resolves for the primary
     // account, so it stays as the fallback when the registry has nothing.
@@ -1318,21 +1375,6 @@ SidebarModel BuildSidebarModel(const fs::RecycleBinInfo* recycle) {
     m.cloud.clear();
     for (const auto& root : roots ? *roots : cloud_seeds)
         m.cloud.push_back(BuildCloudSidebarEntry(root));
-    SidebarEntry recycle_bin;
-    recycle_bin.glyph = L"\xE75C";
-    recycle_bin.fallback = L"Bin";
-    recycle_bin.color = ui::HexColor(0x94A3B8);
-    recycle_bin.label = l10n::Get(l10n::StringId::RecycleBin);
-    recycle_bin.path = MakeRecyclePath();
-    recycle_bin.builtin = static_cast<int>(BuiltinQuickAccess::RecycleBin);
-    if (recycle && recycle->valid) {
-        wchar_t occupancy[96]{};
-        swprintf_s(occupancy, l10n::Get(l10n::StringId::RecycleOccupancyFormat).c_str(),
-                   std::to_wstring(recycle->items).c_str(),
-                   pulse::format::ByteSize(recycle->bytes).c_str());
-        recycle_bin.detail = occupancy;
-    }
-    m.quick_access.push_back(std::move(recycle_bin));
 
     static const uint32_t kDrivePalette[] = { 0x60A5FA, 0x34D399, 0xFBBF24, 0xC084FC };
     DWORD drives = GetLogicalDrives();
@@ -1418,6 +1460,7 @@ static ui::SidebarGroup ConvertGroup(const std::wstring& header, const std::vect
     g.header = header;
     g.collapsed = collapsed;
     for (const auto& e : src) {
+        if (e.drive_without_media) continue;
         ui::SidebarItem it;
         it.label = e.label;
         it.detail = e.detail;
@@ -1442,10 +1485,62 @@ static ui::SidebarGroup ConvertGroup(const std::wstring& header, const std::vect
     return g;
 }
 
-static std::wstring EntryPathOf(const Tab& tab, const fs::DirEntry& e) {
+ui::SidebarGroup BuildQuickAccessGroup(const std::vector<SidebarEntry>& defaults, const model::PlacesCatalog* places,
+                                       uint32_t quick_access_hidden_mask, const std::wstring& gitRoot) {
+    // Built-in quick-access links the user switched off in the section menu.
+    std::vector<SidebarEntry> quick_access_visible;
+    quick_access_visible.reserve(defaults.size());
+    for (const auto& entry : defaults) {
+        if (entry.builtin >= 0 &&
+            ((quick_access_hidden_mask >> entry.builtin) & 1u) != 0) continue;
+        quick_access_visible.push_back(entry);
+    }
+    auto access = ConvertGroup(
+        l10n::Get(l10n::StringId::SidebarQuickAccess), quick_access_visible, false);
+    if (!gitRoot.empty() && (!places || !places->IsStarred(gitRoot)) &&
+        std::none_of(access.items.begin(), access.items.end(), [&](const auto& item) {
+            return _wcsicmp(fs::NormalizePath(item.path).c_str(), fs::NormalizePath(gitRoot).c_str()) == 0;
+        })) {
+        ui::SidebarItem project;
+        wchar_t project_label[512]{};
+        swprintf_s(project_label, l10n::Get(l10n::StringId::ProjectFormat).c_str(),
+                   TabTitle(gitRoot).c_str());
+        project.label = project_label;
+        project.path = gitRoot;
+        project.icon_glyph = L"\xE8B7";
+        project.fallback_text = L"Repo";
+        project.icon_color = ui::HexColor(0x34D399);
+        project.badge = L"Git";
+        project.transient_project = true;
+        access.items.push_back(std::move(project));
+    }
+    if (places) {
+        for (const auto& path : places->quick_access_paths) {
+            if (std::any_of(access.items.begin(), access.items.end(), [&](const auto& existing) {
+                return _wcsicmp(fs::NormalizePath(existing.path).c_str(), fs::NormalizePath(path).c_str()) == 0;
+            })) continue;
+            ui::SidebarItem item;
+            item.label = TabTitle(path);
+            item.path = path;
+            item.icon_glyph = L"\xE8B7";
+            item.fallback_text = L"Dir";
+            item.icon_color = ui::HexColor(0xFBBF24);
+            item.use_path_icon = true;
+            access.items.push_back(std::move(item));
+        }
+        if (!places->quick_access_order.empty()) {
+            std::stable_sort(access.items.begin(), access.items.end(), [&](const auto& left, const auto& right) {
+                return places->QuickAccessRank(left.path) < places->QuickAccessRank(right.path);
+            });
+        }
+    }
+    return access;
+}
+
+static std::wstring EntryPathOf(const std::wstring& directory, const fs::DirEntry& e) {
     if (!e.full_path.empty()) return e.full_path;
-    if (fs::IsVirtualPath(tab.current_path)) return {};
-    std::wstring full = tab.current_path;
+    if (fs::IsVirtualPath(directory)) return {};
+    std::wstring full = directory;
     if (!full.empty() && full.back() != L'\\') full += L'\\';
     full += e.name;
     return full;
@@ -1525,40 +1620,144 @@ index::ContentResultStore::Filter ContentFilter(const std::wstring& text, const 
     };
 }
 
-void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vector<int>& out) {
+static void CollectSnapshotMatches(const fs::SnapshotPtr& snapshot, const std::wstring& directory,
+                                   model::FileVisibility visibility, const model::CompiledItemFilter& filter,
+                                   const model::DisplayAliasSnapshot& aliases,
+                                   const model::ItemFilterTagLookup& lookup, std::vector<int>& out,
+                                   const std::function<bool()>& cancelled = {}) {
     out.clear();
-    if (!tab.snapshot) return;
-    const int n = static_cast<int>(tab.EntryCount());
-    if (n == 0) return;
-    if(tab.content_results) { out.reserve(n); for(int i=0;i<n;++i) out.push_back(i); return; }
-    if (tab.filter_text.empty() && tab.ShowsEveryEntry()) {
-        out.reserve(static_cast<size_t>(n));
-        for (int i = 0; i < n; ++i) if (tab.EntryVisible(i)) out.push_back(i);
-        return;
-    }
-    const auto filter = model::CompileCatalogItemFilter(tab.filter_text, places);
     if (!filter.Valid()) return;
-    const model::ItemFilterTagLookup lookup = [places](const std::wstring& full) {
-        return places ? places->TagIndicesForPath(full) : nullptr;
-    };
-    const auto aliases = places ? places->display_aliases : model::DisplayAliasSnapshot{};
-    const bool needs_path = aliases || filter.HasTagConditions() ||
+    const bool bypass_visibility = directory.starts_with(L"pulse:recycle");
+    const bool has_conditions = !filter.name.empty() || filter.HasTagConditions() || !filter.metadata.empty();
+    const bool needs_path = (aliases && has_conditions) || filter.HasTagConditions() ||
         std::any_of(filter.metadata.begin(), filter.metadata.end(), [](const auto& term) { return term.name_in_path; });
-    out.reserve(static_cast<size_t>(n));
-    const fs::DirEntry empty_entry;
-    for (int i = 0; i < n; ++i) {
-        if (!tab.EntryVisible(i)) continue;
-        // Content-backed rows returned above; borrow immutable snapshot rows here.
-        const auto& e = static_cast<size_t>(i) < tab.snapshot->size()
-            ? (*tab.snapshot)[static_cast<size_t>(i)] : empty_entry;
-        const auto path = needs_path ? EntryPathOf(tab, e) : std::wstring{};
+    out.reserve(snapshot->size());
+    for (size_t i = 0; i < snapshot->size(); ++i) {
+        if ((i & 1023) == 0 && cancelled && cancelled()) return;
+        const auto& e = (*snapshot)[i];
+        if (!bypass_visibility && !visibility.Includes(e.attrs)) continue;
+        if (!has_conditions) {
+            out.push_back(static_cast<int>(i));
+            continue;
+        }
+        const auto path = needs_path ? EntryPathOf(directory, e) : std::wstring{};
         const auto alias = e.change_record_only || !e.recycle_path.empty()
             ? std::wstring_view{} : model::FindDisplayAlias(aliases, path);
-        if (filter.Matches(e, path, lookup, alias)) out.push_back(i);
+        if (filter.Matches(e, path, lookup, alias)) out.push_back(static_cast<int>(i));
     }
 }
 
-void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCatalog* places) {
+void CollectFilterMatches(const Tab& tab, const PlacesCatalog* places, std::vector<int>& out) {
+    out.clear();
+    if (!tab.snapshot) return;
+    if (tab.content_results) {
+        const size_t count = tab.EntryCount();
+        out.reserve(count);
+        for (size_t i = 0; i < count; ++i) out.push_back(static_cast<int>(i));
+        return;
+    }
+    const model::ItemFilterTagLookup lookup = [places](const std::wstring& full) {
+        return places ? places->TagIndicesForPath(full) : nullptr;
+    };
+    CollectSnapshotMatches(tab.snapshot, tab.current_path, {tab.show_hidden_files, tab.show_protected_os_files},
+        model::CompileCatalogItemFilter(tab.filter_text, places),
+        places ? places->display_aliases : model::DisplayAliasSnapshot{}, lookup, out);
+}
+
+static PaneProjection::Key MakePaneProjectionKey(const Tab& tab, const PlacesCatalog* places, SYSTEMTIME& today) {
+    const auto grouping = !tab.current_path.empty() && !fs::IsVirtualPath(tab.current_path)
+        ? ui::ResolveFileGrouping(tab.view_mode, tab.group_mode, tab.sort_column, tab.sort_direction,
+                                  tab.group_direction) : ui::FileGrouping{};
+    if (grouping.mode == ui::GroupMode::DateModified) GetLocalTime(&today);
+    const unsigned day = today.wYear * 10000u + today.wMonth * 100u + today.wDay;
+    return {tab.snapshot, tab.current_path, tab.filter_text, tab.show_hidden_files, tab.show_protected_os_files,
+            places, places ? places->TagRevision() : 0, places ? places->display_aliases : nullptr, grouping, day};
+}
+
+bool PaneProjectionReady(const Tab& tab) {
+    return tab.pending_view_projection && tab.pending_view_projection->ready.load(std::memory_order_acquire);
+}
+
+void SyncPaneProjection(const Tab& tab, const PlacesCatalog* places,
+                        const SubmitViewProjection& submit, bool publish) {
+    if (!tab.snapshot || tab.content_results) {
+        tab.view_projection.reset();
+        tab.pending_view_projection.reset();
+        return;
+    }
+    SYSTEMTIME today{};
+    auto key = MakePaneProjectionKey(tab, places, today);
+    const bool filter_needed = !tab.ShowsEveryEntry() || !key.filter.empty();
+    if (!filter_needed && key.grouping.mode == ui::GroupMode::None) {
+        tab.view_projection.reset();
+        tab.pending_view_projection.reset();
+        return;
+    }
+    const auto& old = tab.view_projection;
+    auto& pending = tab.pending_view_projection;
+    if (old && old->key == key) {
+        pending.reset();
+        return;
+    }
+    if (pending && pending->key == key && submit) {
+        if (publish && PaneProjectionReady(tab)) {
+            if (pending->rows.filtered || pending->rows.grouped ||
+                (!filter_needed && key.snapshot->empty()))
+                tab.view_projection = std::move(pending);
+            else pending.reset();
+        }
+        return;
+    }
+    const bool reuse_filter = old && old->key.SameFilter(key);
+    pending = std::make_shared<PaneProjection>(key);
+    const std::weak_ptr<PaneProjection> target = pending;
+    const auto filter = filter_needed && !reuse_filter ? model::CompileCatalogItemFilter(key.filter, places)
+                                                      : model::CompiledItemFilter{};
+    const auto tags = filter.HasTagConditions() && places ? places->TagIndexSnapshot() : nullptr;
+    auto work = [target, key = std::move(key), today, filter_needed, filter, tags, reuse_filter,
+                       filtered = reuse_filter ? old->rows.filtered : nullptr]() mutable {
+        if (target.expired()) return false;
+        PaneProjection::Rows rows;
+        rows.filtered = std::move(filtered);
+        try {
+            if (filter_needed && !reuse_filter) {
+                const model::ItemFilterTagLookup lookup = [&tags](const std::wstring& path) {
+                    return tags ? PlacesCatalog::TagIndicesForPath(*tags, path) : nullptr;
+                };
+                auto matches = std::make_shared<ui::PaneViewModel::FilterMap>();
+                CollectSnapshotMatches(key.snapshot, key.path, {key.show_hidden, key.show_protected},
+                    filter, key.aliases, lookup, *matches, [&target] { return target.expired(); });
+                rows.filtered = std::move(matches);
+            }
+            if (target.expired()) return false;
+            if (key.grouping.mode != ui::GroupMode::None && !key.snapshot->empty() &&
+                (!rows.filtered || !rows.filtered->empty())) {
+                auto grouped = ui::BuildGroupedView(key.snapshot, rows.filtered.get(),
+                    key.grouping.mode, key.grouping.direction, today);
+                rows.grouped = std::make_shared<const ui::PaneViewModel::FilterMap>(std::move(grouped.indices));
+                rows.reverse = std::make_shared<const ui::PaneViewModel::FilterMap>(std::move(grouped.source_to_view));
+                rows.groups = std::make_shared<const std::vector<ui::DateGroup>>(std::move(grouped.groups));
+            }
+        } catch (...) {
+            rows = {};
+        }
+        if (const auto result = target.lock()) {
+            result->rows = std::move(rows);
+            result->ready.store(true, std::memory_order_release);
+            return true;
+        }
+        return false;
+    };
+    // Small listings and a cached filter with grouping disabled can publish immediately.
+    const bool expensive = tab.snapshot->size() >= 16'384 &&
+        (!reuse_filter || pending->key.grouping.mode != ui::GroupMode::None);
+    if (submit && expensive && submit(work)) return;
+    work();
+    tab.view_projection = std::move(pending);
+}
+
+void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCatalog* places,
+                       const SubmitViewProjection& submit) {
     const Tab* tab = pane.ActiveTab();
     if (!tab) return;
     // Navigation identity is independent of localized or user-defined titles.
@@ -1593,8 +1792,11 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     out.filter_map.reset();
     out.source_to_view.reset();
     out.date_groups.reset();
+    out.file_groups_collapsed = false;
     out.tag_dots.reset();
     out.loading = tab->loading;
+    out.projection_loading = false;
+    out.projection_identity_rows = false;
     out.listing_failed = tab->listing_failed;
     out.search_retaining_results = tab->search_retaining_results;
     out.can_go_back = tab->CanGoBack();
@@ -1677,7 +1879,6 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
         tab->view_cache_places_revision = places_revision;
         tab->view_cache_display_aliases = out.display_aliases;
         tab->view_tag_dots = std::move(dots_by_row);
-        tab->view_filter_map.reset();
         tab->view_row_cache = std::make_shared<ui::RowPresentationCache>();
         tab->view_row_cache->snapshot = tab->snapshot;
     }
@@ -1687,40 +1888,31 @@ void FillPaneViewModel(ui::PaneViewModel& out, const Pane& pane, const PlacesCat
     }
     out.row_cache = tab->view_row_cache;
     out.tag_dots = tab->view_tag_dots;
-    if (!tab->content_results && tab->snapshot &&
-        (!tab->ShowsEveryEntry() || !tab->filter_text.empty())) {
-        if (!tab->view_filter_map || tab->view_cache_filter_text != tab->filter_text) {
-            auto filtered = std::make_shared<ui::PaneViewModel::FilterMap>();
-            CollectFilterMatches(*tab, places, *filtered);
-            tab->view_cache_filter_text = tab->filter_text;
-            tab->view_filter_map = std::move(filtered);
+    SyncPaneProjection(*tab, places, submit, !submit);
+    const auto& projection = tab->view_projection;
+    const auto& pending = tab->pending_view_projection;
+    if (projection && (!pending || projection->key.SameVisibility(pending->key))) {
+        const auto& rows = projection->rows;
+        if (out.view_mode == ui::ViewMode::Details && rows.grouped) {
+            out.filter_map = rows.grouped;
+            out.source_to_view = rows.reverse;
+            out.date_groups = rows.groups;
+            out.file_groups_collapsed = tab->file_groups_collapsed && rows.groups && !rows.groups->empty();
+        } else {
+            out.filter_map = rows.filtered;
+            out.projection_identity_rows = pending && !rows.filtered;
         }
-        out.filter_map = tab->view_filter_map;
-    }
-    const auto [group_mode, group_direction] = ui::ResolveFileGrouping(out.view_mode, tab->group_mode,
-        tab->sort_column, tab->sort_direction, tab->group_direction);
-    if (out.is_file_system &&
-        group_mode != ui::GroupMode::None && !tab->content_results && out.snapshot && out.EntryCount()) {
-        SYSTEMTIME today{};
-        if (group_mode == ui::GroupMode::DateModified) GetLocalTime(&today);
-        const unsigned day_key = today.wYear * 10000u + today.wMonth * 100u + today.wDay;
-        if (!tab->view_date_groups || !tab->view_group_order || source_changed ||
-            tab->view_date_filter.get() != out.filter_map.get() ||
-            tab->view_group_mode != group_mode || tab->view_group_direction != group_direction ||
-            tab->view_date_day != day_key) {
-            auto grouped = ui::BuildGroupedView(out.snapshot, out.filter_map.get(), group_mode, group_direction, today);
-            tab->view_date_groups = std::make_shared<const std::vector<ui::DateGroup>>(
-                std::move(grouped.groups));
-            tab->view_group_order = std::make_shared<const ui::PaneViewModel::FilterMap>(std::move(grouped.indices));
-            tab->view_group_reverse = std::make_shared<const ui::PaneViewModel::FilterMap>(std::move(grouped.source_to_view));
-            tab->view_date_filter = out.filter_map;
-            tab->view_date_day = day_key;
-            tab->view_group_mode = group_mode;
-            tab->view_group_direction = group_direction;
+    } else if (pending) {
+        // With no previous projection, rows can be shown until grouping or
+        // filtering completes only if all entries pass the visibility policy.
+        out.projection_identity_rows = tab->ShowsEveryEntry() ||
+            tab->directory_count + tab->file_count == tab->snapshot->size();
+        if (!out.projection_identity_rows) {
+            static const auto kNoRows = std::make_shared<const ui::PaneViewModel::FilterMap>();
+            out.filter_map = kNoRows;
+            out.projection_loading = true;
+            out.loading = true;
         }
-        out.date_groups = tab->view_date_groups;
-        out.filter_map = tab->view_group_order;
-        out.source_to_view = tab->view_group_reverse;
     }
 }
 
@@ -1786,7 +1978,8 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
                                          bool starred_expanded,
                                          const std::vector<int>* sidebar_order,
                                          uint32_t quick_access_hidden_mask,
-                                         bool include_status) {
+                                         bool include_status,
+                                         const SubmitViewProjection& submit) {
     ui::WindowViewModel vm;
     const Tab* tab = pane.ActiveTab();
     if (!tab) return vm;
@@ -1815,7 +2008,7 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
     vm.can_go_back = tab->CanGoBack();
     vm.can_go_forward = tab->CanGoForward();
 
-    FillPaneViewModel(vm.pane, pane, places);
+    FillPaneViewModel(vm.pane, pane, places, submit);
     vm.pane.focused = focused;
 
     if (include_status) {
@@ -1864,16 +2057,7 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
         }
     }
 
-    // Built-in quick-access links the user switched off in the section menu.
-    std::vector<SidebarEntry> quick_access_visible;
-    quick_access_visible.reserve(sidebar.quick_access.size());
-    for (const auto& entry : sidebar.quick_access) {
-        if (entry.builtin >= 0 &&
-            ((quick_access_hidden_mask >> entry.builtin) & 1u) != 0) continue;
-        quick_access_visible.push_back(entry);
-    }
-    access = ConvertGroup(
-        l10n::Get(l10n::StringId::SidebarQuickAccess), quick_access_visible, false);
+    access = BuildQuickAccessGroup(sidebar.quick_access, places, quick_access_hidden_mask, tab->git_root);
     starred_section = ConvertGroup(l10n::Get(l10n::StringId::StarredItems),
                                    sidebar.starred, false);
     if (!starred_section.items.empty()) {
@@ -1898,44 +2082,6 @@ ui::WindowViewModel BuildWindowViewModel(const Pane& pane,
                 starred_section.items.begin() + static_cast<std::ptrdiff_t>(starred_insert),
                 std::move(child));
             ++starred_insert;
-        }
-    }
-    const std::wstring& gitRoot = tab->git_root;
-    if (!gitRoot.empty() && (!places || !places->IsStarred(gitRoot)) &&
-        std::none_of(access.items.begin(), access.items.end(), [&](const auto& item) {
-            return _wcsicmp(fs::NormalizePath(item.path).c_str(), fs::NormalizePath(gitRoot).c_str()) == 0;
-        })) {
-        ui::SidebarItem project;
-        wchar_t project_label[512]{};
-        swprintf_s(project_label, l10n::Get(l10n::StringId::ProjectFormat).c_str(),
-                   TabTitle(gitRoot).c_str());
-        project.label = project_label;
-        project.path = gitRoot;
-        project.icon_glyph = L"\xE8B7";
-        project.fallback_text = L"Repo";
-        project.icon_color = ui::HexColor(0x34D399);
-        project.badge = L"Git";
-        project.transient_project = true;
-        access.items.push_back(std::move(project));
-    }
-    if (places) {
-        for (const auto& path : places->quick_access_paths) {
-            if (std::any_of(access.items.begin(), access.items.end(), [&](const auto& existing) {
-                return _wcsicmp(fs::NormalizePath(existing.path).c_str(), fs::NormalizePath(path).c_str()) == 0;
-            })) continue;
-            ui::SidebarItem item;
-            item.label = TabTitle(path);
-            item.path = path;
-            item.icon_glyph = L"\xE8B7";
-            item.fallback_text = L"Dir";
-            item.icon_color = ui::HexColor(0xFBBF24);
-            item.use_path_icon = true;
-            access.items.push_back(std::move(item));
-        }
-        if (!places->quick_access_order.empty()) {
-            std::stable_sort(access.items.begin(), access.items.end(), [&](const auto& left, const auto& right) {
-                return places->QuickAccessRank(left.path) < places->QuickAccessRank(right.path);
-            });
         }
     }
     savedSearches = ConvertGroup(l10n::Get(l10n::StringId::SidebarSavedSearches),

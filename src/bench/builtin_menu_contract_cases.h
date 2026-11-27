@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <iterator>
 
 inline int RunBuiltinMenuContractChecks() {
     using namespace pulse;
@@ -134,6 +135,22 @@ inline int RunBuiltinMenuContractChecks() {
     }
     ContextMenuPrefs prefs;
     prefs.persist = false;
+    const auto clipboard_menu = BuildBackgroundMenu(true, false, {}, true);
+    const auto paste = std::find_if(clipboard_menu.begin(), clipboard_menu.end(),
+        [](const auto& item) { return item.command == CmdPaste; });
+    check(paste != clipboard_menu.end() && std::next(paste) != clipboard_menu.end() &&
+        std::next(paste)->command == CmdPasteShortcut && std::next(paste)->enabled &&
+        !contains(contains, BuildBackgroundMenu(true, false, {}), CmdPasteShortcut),
+        "Paste shortcut appears next to Paste only with an eligible filesystem copy");
+    check(!contains(contains, FilterBuiltinMenuItems(clipboard_menu, BuiltinMenuBit(B::Paste)), CmdPasteShortcut),
+        "hiding Paste also hides Paste shortcut");
+    const auto expanded_groups = BuildGroupingMenu(ui::GroupMode::Type, ui::SortDirection::Asc, true, false);
+    const auto collapsed_groups = BuildGroupingMenu(ui::GroupMode::Type, ui::SortDirection::Asc, true, true);
+    check(expanded_groups.back().command == CmdCollapseFileGroups && expanded_groups.back().enabled &&
+        collapsed_groups[collapsed_groups.size() - 2].command == CmdExpandFileGroups &&
+        collapsed_groups[collapsed_groups.size() - 2].enabled && !collapsed_groups.back().enabled &&
+        !contains(contains, BuildGroupingMenu(ui::GroupMode::None, ui::SortDirection::Asc, true), CmdCollapseFileGroups),
+        "grouping menu offers only the applicable bulk action when grouped rows exist");
     std::vector<ui::FluentMenuItem> groups;
     AppendBackgroundViewCommands(groups, {});
     for (auto& row : groups) row.glyph = L"fixture replacement icon";

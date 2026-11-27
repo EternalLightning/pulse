@@ -32,6 +32,13 @@ namespace pulse::ops {
 
 namespace {
 
+void WakeTransferWaiter(std::mutex& mutex, std::condition_variable& condition) {
+    // Serialize with the worker's predicate-to-wait transition even when the
+    // caller changed an atomic flag outside the conflict mutex.
+    std::lock_guard lock(mutex);
+    condition.notify_all();
+}
+
 constexpr size_t kFinishedTaskLimit = 64;
 
 std::wstring FileName(const std::wstring& path) {
@@ -346,7 +353,7 @@ void OpsManager::BeginShutdown() {
     }
     ui_hwnd_.store(nullptr);
     CancelCurrent();
-    transfer_control_cv_.notify_all();
+    WakeTransferWaiter(transfer_control_mutex_, transfer_control_cv_);
     delete_wait_cv_.notify_all();
     done_cv_.notify_all();
     cv_.notify_all();
@@ -596,7 +603,7 @@ void OpsManager::CancelCurrent() {
     if (transfer_active_.load()) {
         transfer_cancel_.store(true);
         transfer_pause_.store(false);
-        transfer_control_cv_.notify_all();
+        WakeTransferWaiter(transfer_control_mutex_, transfer_control_cv_);
         SetStatus([](OpStatus& status) {
             if (status.active) status.phase = OpPhase::Cancelling;
         });
@@ -630,7 +637,7 @@ bool OpsManager::CancelTask(uint64_t task_id) {
         status_.phase = OpPhase::Cancelling;
         request = current_req_id_.load();
     }
-    transfer_control_cv_.notify_all();
+    WakeTransferWaiter(transfer_control_mutex_, transfer_control_cv_);
     if (request) ipc::ShellClient::Instance().Cancel(request);
     if (notify_) notify_();
     return true;
@@ -658,8 +665,9 @@ bool OpsManager::ResumeTask(uint64_t task_id) {
         transfer_pause_.store(false);
         status_.phase = OpPhase::Running;
         request = current_req_id_.load();
+        shell_activity_tick_ = GetTickCount64();
     }
-    transfer_control_cv_.notify_all();
+    WakeTransferWaiter(transfer_control_mutex_, transfer_control_cv_);
     if (request) ipc::ShellClient::Instance().SetFileOperationPaused(request, false);
     if (notify_) notify_();
     return true;
@@ -1233,7 +1241,9 @@ void OpsManager::PushUndo(const OpRequest& req,
                 for (size_t j = 0; j < req.sources.size() && j < destinations.size(); ++j) {
                     if (i < remaining.destinations.size() && i < remaining.produced_identities.size() &&
                         j < req.undo_produced_identities.size() && remaining.destinations[i] == req.sources[j] &&
-                        remaining.sources[i] == destinations[j] && remaining.produced_identities[i] == req.undo_produced_identities[j]) {
+                        remaining.produced_identities[i] == req.undo_produced_identities[j] &&
+                        (remaining.sources[i] == destinations[j] ||
+                            fs::NormalizePath(remaining.sources[i]) == fs::NormalizePath(destinations[j]))) {
                         remaining.sources.erase(remaining.sources.begin() + i);
                         remaining.destinations.erase(remaining.destinations.begin() + i);
                         remaining.produced_identities.erase(remaining.produced_identities.begin() + i);
@@ -1347,26 +1357,27 @@ std::vector<CompletedOperation> OpsManager::DrainCompletions() {
     return out;
 }
 
-void OpsManager::Undo() {
+uint64_t OpsManager::Undo() {
     UndoEntry e;
     uint64_t deletion_reservation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (undo_.empty() || pending_mutation_undo_revision_ || pending_recycle_undo_revision_) return;
+        if (undo_.empty() || pending_mutation_undo_revision_ || pending_recycle_undo_revision_) return 0;
         e = undo_.back();
         if (e.type == OpType::RecycleDelete && !e.recycle_verified && e.supported) {
-            if (!accepting_) return;
+            if (!accepting_) return 0;
             undo_validation_requested_.store(true);
-            if (pending_recycle_undo_revision_) return;
+            if (pending_recycle_undo_revision_) return 0;
             pending_recycle_undo_revision_ = undo_revision_;
             QueueItem validation;
             validation.req.type = OpType::RestoreRecycle; validation.req.is_undo = true;
             validation.req.sources = e.sources; validation.req.recycle_paths = e.destinations;
             validation.req.undo_revision = undo_revision_;
             validation.seq = next_seq_++;
+            const auto task = validation.seq;
             queue_.push_front(std::move(validation));
             cv_.notify_one();
-            return; // the worker validates before executing; the UI performs no IO
+            return task; // the worker validates before executing; the UI performs no IO
         }
         if (!e.supported) {
             // Leave the entry; report why it cannot be undone.
@@ -1383,7 +1394,7 @@ void OpsManager::Undo() {
     // Produced-object inverses consume history only after actual completion.
     if (!e.supported) {
         if (notify_) notify_();
-        return;
+        return 0;
     }
 
     switch (e.type) {
@@ -1411,12 +1422,13 @@ void OpsManager::Undo() {
                 std::reverse(inv.undo_produced_identities.begin(), inv.undo_produced_identities.end());
             }
         }
-        if (!Submit(std::move(inv))) {
+        const auto task = Submit(std::move(inv));
+        if (!task) {
             OpRequest rejected;
             rejected.type = e.type; rejected.is_undo = true; rejected.undo_revision = deletion_reservation;
             FinishMutationUndo(rejected);
         }
-        break;
+        return task;
     }
     case OpType::Copy: {
         // Explorer semantics: undo copy = delete the produced copies (to bin).
@@ -1430,8 +1442,7 @@ void OpsManager::Undo() {
         if (!e.destinations.empty()) inv.sources = e.destinations;
         else for (const auto& src : e.sources)
             inv.sources.push_back(JoinPath(e.dest_dir, FileName(src)));
-        Submit(std::move(inv));
-        break;
+        return Submit(std::move(inv));
     }
     case OpType::CreateFolder:
     case OpType::CreateTextFile: {
@@ -1448,8 +1459,7 @@ void OpsManager::Undo() {
             inv.type = OpType::RemoveEmptyFolder;
             inv.folder_action = FolderAction::RemoveCreatedFolder;
         }
-        Submit(std::move(inv));
-        break;
+        return Submit(std::move(inv));
     }
     case OpType::RecycleDelete: {
         OpRequest inv;
@@ -1460,12 +1470,13 @@ void OpsManager::Undo() {
         inv.sources = e.sources;
         inv.recycle_paths = e.destinations;
         inv.recycle_undo_identities = e.recycle_identities;
-        if (!Submit(std::move(inv))) {
+        const auto task = Submit(std::move(inv));
+        if (!task) {
             OpRequest rejected;
             rejected.type = OpType::RestoreRecycle; rejected.is_undo = true; rejected.undo_revision = deletion_reservation;
             FinishRecycleUndo(rejected);
         }
-        break;
+        return task;
     }
     case OpType::RemoveEmptyFolder: {
         OpRequest inverse;
@@ -1476,11 +1487,12 @@ void OpsManager::Undo() {
         inverse.undo_revision = deletion_reservation;
         inverse.undo_group = e.undo_group;
         inverse.folder_metadata = e.folder_metadata;
-        if (!Submit(inverse)) FinishMutationUndo(inverse);
-        break;
+        const auto task = Submit(inverse);
+        if (!task) FinishMutationUndo(inverse);
+        return task;
     }
     default:
-        break;
+        return 0;
     }
 }
 
@@ -1594,7 +1606,7 @@ void OpsManager::StartShellClient() {
         shell_activity_tick_ = GetTickCount64();
         if (id != current_req_id_.load() || !transfer_active_.load()) return;
         SetStatus([&](OpStatus& status) {
-            if (!status.active) return;
+            if (!status.active || transfer_pause_.load()) return;
             const auto base = shell_bytes_base_.load();
             status.transferred_bytes = (std::max)(status.transferred_bytes, base + done);
             status.total_bytes = (std::max)(status.total_bytes, base + total);
@@ -1608,7 +1620,7 @@ void OpsManager::StartShellClient() {
                          uint32_t items_done, uint32_t total_items) {
         shell_activity_tick_ = GetTickCount64();
         SetStatus([&](OpStatus& st) {
-            if (!st.active) return;
+            if (!st.active || transfer_pause_.load()) return;
             const bool deleting = delete_active_.load();
             if (deleting) {
                 // Authorized backends report this path only after its root
@@ -2193,7 +2205,7 @@ bool OpsManager::WaitShellDone(uint32_t id, ShellCompletion& result) {
         std::unique_lock<std::mutex> lock(done_mutex_);
         while (!done_results_.contains(id) && !stopping_.load()) {
             done_cv_.wait_for(lock, std::chrono::seconds(5));
-            if (done_results_.contains(id) ||
+            if (done_results_.contains(id) || transfer_pause_.load() ||
                 GetTickCount64() - shell_activity_tick_.load() < kShellInactivityTimeoutMs)
                 continue;
             lock.unlock();

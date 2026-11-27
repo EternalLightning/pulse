@@ -3,6 +3,7 @@
 // Modified for this Pulse distribution. See LICENSE and NOTICE.
 
 #include "file_save_access_policy.h"
+#include "../common/picker_user_storage.h"
 #include <algorithm>
 #include <array>
 #include <cwchar>
@@ -27,7 +28,9 @@ struct Handle {
         return CloseHandle(closing) ? ERROR_SUCCESS : GetLastError();
     }
 };
-std::wstring Native(const std::wstring& path) { return L"\\\\?\\" + path; }
+std::wstring Native(const std::wstring& path) {
+    return path.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + path.substr(2) : L"\\\\?\\" + path;
+}
 DWORD Cancelled(const std::function<bool()>& fn) noexcept {
     try { return fn && fn() ? ERROR_CANCELLED : ERROR_SUCCESS; }
     catch (...) { return ERROR_UNHANDLED_EXCEPTION; }
@@ -45,38 +48,52 @@ DWORD Metadata(HANDLE handle, SaveObjectIdentity& id, DWORD& attributes) {
     std::copy_n(file.FileId.Identifier, id.file.size(), id.file.begin());
     return ERROR_SUCCESS;
 }
-DWORD SamePath(HANDLE handle, const std::wstring& path) {
+bool UnsupportedQuery(DWORD error) {
+    return error == ERROR_INVALID_FUNCTION || error == ERROR_NOT_SUPPORTED ||
+        error == ERROR_INVALID_PARAMETER || error == ERROR_INVALID_LEVEL || error == ERROR_UNRECOGNIZED_VOLUME;
+}
+
+DWORD SamePath(HANDLE handle, const std::wstring& path, bool* unsupported = nullptr) {
     std::array<wchar_t, 32768> name{};
     const DWORD n = GetFinalPathNameByHandleW(handle, name.data(), static_cast<DWORD>(name.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    if (!n) return GetLastError();
+    if (!n) {
+        const DWORD error = GetLastError();
+        if (unsupported) *unsupported = UnsupportedQuery(error);
+        return error;
+    }
     if (n >= name.size()) return ERROR_FILENAME_EXCED_RANGE;
     const wchar_t* actual = name.data();
     if (wcsncmp(actual, L"\\\\?\\", 4) == 0) actual += 4;
     return CompareStringOrdinal(actual, -1, path.c_str(), -1, TRUE) == CSTR_EQUAL ? ERROR_SUCCESS : ERROR_NOT_SUPPORTED;
 }
-DWORD Scope(const std::wstring& path) {
-    if (path.size() < 3 || !((path[0] >= L'A' && path[0] <= L'Z') || (path[0] >= L'a' && path[0] <= L'z')) ||
-        path[1] != L':' || path[2] != L'\\' || path.find(L':', 2) != path.npos) return ERROR_NOT_SUPPORTED;
-    return GetDriveTypeW(path.substr(0, 3).c_str()) == DRIVE_FIXED ? ERROR_SUCCESS : ERROR_NOT_SUPPORTED;
+DWORD ValidateSaveAccessAttributes(DWORD attributes, bool require_unencrypted) noexcept {
+    return (attributes & (kUnsupportedAttributes | (require_unencrypted ? FILE_ATTRIBUTE_ENCRYPTED : 0u))) ? ERROR_NOT_SUPPORTED : ERROR_SUCCESS;
 }
 // Attribute-only opens do not participate in normal sharing checks. Request
 // actual directory read access while withholding write/delete sharing, retaining
 // each ordinary ancestor until the probe and cleanup have finished.
 DWORD GuardParents(const SaveConfirmationSnapshot& snapshot, std::vector<Handle>& guards,
-                   const std::function<bool()>& cancelled, bool require_unencrypted) {
+                   const std::function<bool()>& cancelled, bool require_unencrypted, bool& unsupported) {
     const auto& parent = snapshot.Parent();
-    DWORD error = Scope(parent); if (error) return error;
+    DWORD error = ERROR_SUCCESS;
     for (size_t end = 3;;) {
         if ((error = Cancelled(cancelled))) return error;
         const auto path = parent.substr(0, end);
         Handle handle(CreateFileW(Native(path).c_str(), FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
             nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-        if (handle.value == INVALID_HANDLE_VALUE) return GetLastError();
+        if (handle.value == INVALID_HANDLE_VALUE) {
+            error = GetLastError();
+            unsupported = UnsupportedQuery(error);
+            return error;
+        }
         SaveObjectIdentity identity; DWORD attributes = 0;
-        if ((error = Metadata(handle.value, identity, attributes))) return error;
+        if ((error = Metadata(handle.value, identity, attributes))) {
+            unsupported = UnsupportedQuery(error);
+            return error;
+        }
         if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) return ERROR_DIRECTORY;
         if (const DWORD rejected = ValidateSaveAccessAttributes(attributes, require_unencrypted)) return rejected;
-        if ((error = SamePath(handle.value, path))) return error;
+        if ((error = SamePath(handle.value, path, &unsupported))) return error;
         if (end == parent.size() && identity != snapshot.ParentIdentity()) return ERROR_FILE_INVALID;
         guards.push_back(std::move(handle));
         if (end == parent.size()) break;
@@ -122,20 +139,15 @@ void Refresh(SaveAccessResult& result, const SaveConfirmationSnapshot& snapshot,
         result.error = fresh.error ? fresh.error : ERROR_RETRY;
     }
 }
-}
 
-DWORD ValidateSaveAccessAttributes(DWORD attributes, bool require_unencrypted) noexcept {
-    return (attributes & (kUnsupportedAttributes | (require_unencrypted ? FILE_ATTRIBUTE_ENCRYPTED : 0u))) ? ERROR_NOT_SUPPORTED : ERROR_SUCCESS;
-}
-
-SaveAccessResult ValidateLocalSaveAccessV1(const SaveConfirmationSnapshot& snapshot,
-    const std::function<bool()>& cancelled, const SaveAccessObserver& observer, bool require_unencrypted) noexcept {
+SaveAccessResult ValidateLocalSaveAccess(const SaveConfirmationSnapshot& snapshot,
+    const std::function<bool()>& cancelled, const SaveAccessObserver& observer, bool require_unencrypted,
+    bool& unsupported) noexcept {
     SaveAccessResult result;
     try {
         result.path = snapshot.Path(); result.parent_identity = snapshot.ParentIdentity();
-        result.error = Scope(result.path); if (result.error) return result;
         std::vector<Handle> guards;
-        result.error = GuardParents(snapshot, guards, cancelled, require_unencrypted); if (result.error) return result;
+        result.error = GuardParents(snapshot, guards, cancelled, require_unencrypted, unsupported); if (result.error) return result;
         result.stage = SaveAccessStage::Revalidation;
         auto revalidated = RevalidateSaveConfirmation(snapshot, cancelled);
         if (revalidated.state != SaveRevalidationState::Ready || !revalidated.snapshot) {
@@ -249,6 +261,71 @@ SaveAccessResult ValidateLocalSaveAccessV1(const SaveConfirmationSnapshot& snaps
         return result;
     } catch (const std::bad_alloc&) { result.state = SaveAccessState::Failed; result.error = ERROR_NOT_ENOUGH_MEMORY; }
     catch (...) { result.state = SaveAccessState::Failed; result.error = ERROR_UNHANDLED_EXCEPTION; }
+    return result;
+}
+
+SaveAccessResult ValidateMetadataSaveAccess(const SaveConfirmationSnapshot& snapshot,
+    const picker_user_storage::Path& parent, UINT drive, const std::function<bool()>& cancelled, bool require_unencrypted) {
+    SaveAccessResult result;
+    result.path = snapshot.Path();
+    result.parent_identity = snapshot.ParentIdentity();
+    if ((result.error = Cancelled(cancelled))) return result;
+    DWORD flags = 0;
+    if (!GetVolumeInformationW(parent.root.c_str(), nullptr, 0, nullptr, nullptr, &flags, nullptr, 0)) {
+        const DWORD error = GetLastError();
+        if (!UnsupportedQuery(error)) { result.error = error; return result; }
+        flags = 0;
+    }
+    if (flags & FILE_READ_ONLY_VOLUME) { result.error = ERROR_WRITE_PROTECT; return result; }
+    const auto attributes = [&](const std::wstring& path, DWORD& attrs) {
+        attrs = GetFileAttributesW(Native(path).c_str());
+        return attrs == INVALID_FILE_ATTRIBUTES ? GetLastError() : ValidateSaveAccessAttributes(attrs, require_unencrypted);
+    };
+    if ((result.error = picker_user_storage::CheckAncestors(parent, false,
+        [drive](const std::wstring&) { return drive; }, attributes, [&] { return Cancelled(cancelled) != ERROR_SUCCESS; })))
+        return result;
+    if (snapshot.TargetExists()) {
+        DWORD target = 0;
+        if ((result.error = attributes(snapshot.Path(), target))) return result;
+    }
+    auto current = RevalidateSaveConfirmation(snapshot, cancelled);
+    result.error = current.error;
+    if (current.state == SaveRevalidationState::Ready) {
+        result.state = SaveAccessState::Ready;
+        result.stage = SaveAccessStage::Complete;
+    } else if (current.state == SaveRevalidationState::ConfirmOverwrite) {
+        result.state = SaveAccessState::NeedsConfirmation;
+        result.confirmation = std::move(current.snapshot);
+    }
+    return result;
+}
+} // namespace
+
+SaveAccessResult ValidateSaveAccess(const SaveConfirmationSnapshot& snapshot,
+    const std::function<bool()>& cancelled, const SaveAccessObserver& observer, bool require_unencrypted) noexcept {
+    SaveAccessResult result;
+    try {
+        if ((result.error = Cancelled(cancelled))) return result;
+        picker_user_storage::Path parent;
+        if (!picker_user_storage::Parse(snapshot.Parent(), parent)) {
+            result.error = ERROR_INVALID_NAME;
+            return result;
+        }
+        const UINT drive = parent.unc ? DRIVE_REMOTE : GetDriveTypeW(parent.root.c_str());
+        if (!picker_user_storage::SupportedDrive(drive)) {
+            result.error = drive == DRIVE_NO_ROOT_DIR ? ERROR_PATH_NOT_FOUND :
+                drive == DRIVE_UNKNOWN ? ERROR_NOT_READY : ERROR_NOT_SUPPORTED;
+            return result;
+        }
+        if (drive == DRIVE_FIXED && !snapshot.UsesLegacyIdentity()) {
+            // Capability failures during parent setup can fall back before a target is opened for writing.
+            bool unsupported = false;
+            auto local = ValidateLocalSaveAccess(snapshot, cancelled, observer, require_unencrypted, unsupported);
+            if (!unsupported) return local;
+        }
+        return ValidateMetadataSaveAccess(snapshot, parent, drive, cancelled, require_unencrypted);
+    } catch (const std::bad_alloc&) { result.error = ERROR_NOT_ENOUGH_MEMORY; }
+    catch (...) { result.error = ERROR_UNHANDLED_EXCEPTION; }
     return result;
 }
 }

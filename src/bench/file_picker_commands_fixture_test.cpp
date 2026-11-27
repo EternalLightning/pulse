@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "../common/windows_compat.h"
 #include "../app/app_file_picker.h"
+#include "../app/app_ops_ui.h"
 #include "../app/app_prefs.h"
 #include "../ops/clipboard.h"
 #include "../ops/picker_file_operations.h"
@@ -64,10 +65,16 @@ struct DeferredFile {
     std::wstring path;
     pulse::ops::PickerFileOperation* cancel = nullptr;
     pulse::ops::PickerFileOperations* session = nullptr;
+    pulse::AppState* paste_state = nullptr;
     bool rendered = false;
     bool cancelled_before_mutation = false;
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+        if (message == pulse::WM_CLIPBOARD_PASTE_RESULT) {
+            auto& file = *reinterpret_cast<DeferredFile*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            if (file.paste_state) pulse::HandleClipboardPasteResult(*file.paste_state, wparam);
+            return 0;
+        }
         if (message == WM_RENDERFORMAT && wparam == CF_HDROP) {
             auto& file = *reinterpret_cast<DeferredFile*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
             file.rendered = true;
@@ -97,6 +104,100 @@ struct DeferredFile {
     }
 };
 
+bool MainPasteDispatch(const std::filesystem::path& root) {
+    using namespace pulse;
+    namespace fs = std::filesystem;
+    const auto source = root / L"sample.txt";
+    const auto target = root / L"target";
+    const auto other = root / L"other";
+    fs::create_directory(target);
+    fs::create_directory(other);
+    std::ofstream(source) << "mailbox fixture";
+
+    WNDCLASSW wc{};
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"PulsePasteResultFixture";
+    wc.lpfnWndProc = DeferredFile::WindowProc;
+    RegisterClassW(&wc);
+    const auto owner = CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0,
+        HWND_MESSAGE, nullptr, wc.hInstance, nullptr);
+    if (!owner) return false;
+
+    auto main = std::make_unique<AppState>();
+    app::Pane pane;
+    pane.view.current_path = other.wstring();
+    main->hwnd = owner;
+    main->pane = &pane;
+    main->clipboard_paste_mailbox = std::make_shared<WindowResultMailbox<app::ClipboardPasteResult>>(
+        owner, WM_CLIPBOARD_PASTE_RESULT);
+    DeferredFile fixture;
+    fixture.paste_state = main.get();
+    SetWindowLongPtrW(owner, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(&fixture));
+    main->ops.Start([] {});
+    const auto sequence = GetClipboardSequenceNumber();
+    const auto mailbox = main->clipboard_paste_mailbox;
+    const bool sent = mailbox->Publish({app::ClipboardPasteSource::Paths, {{source.wstring()}, false, sequence + 1},
+                                       other.wstring(), {}}) &&
+        mailbox->Publish({app::ClipboardPasteSource::Paths, {{source.wstring()}, false, sequence},
+                          target.wstring(), {}});
+    const bool ok = sent && WaitWithMessages([&] { return main->ops.CanUndo(); }) &&
+        main->ops.DrainCompletions().size() == 1 && fs::exists(source) &&
+        fs::exists(target / source.filename()) && !fs::exists(other / source.filename());
+    mailbox->Close();
+    main->ops.Stop();
+    DestroyWindow(owner);
+    return ok;
+}
+
+int PickerCopyUndoConfirmation(const std::filesystem::path& parent) {
+    using namespace pulse::ops;
+    namespace fs = std::filesystem;
+    const auto root = parent / (L"Pulse-picker-undo-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()));
+    if (!fs::create_directory(root)) return 2;
+    const auto source = root / L"owned.txt", destination = root / L"destination";
+    const auto product = destination / source.filename();
+    fs::create_directory(destination);
+    std::ofstream(source) << "picker copy undo";
+    const auto owner = CreateWindowExW(0, L"STATIC", L"Picker undo confirmation fixture", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    const auto session = CreatePickerFileOperations();
+    const auto ready = [](const auto& operation) {
+        return WaitWithMessages([&] { return operation->ready.load(std::memory_order_acquire); });
+    };
+    OpRequest copy;
+    copy.type = OpType::Copy;
+    copy.dest_dir = destination.wstring();
+    copy.sources = {source.wstring()};
+    auto operation = std::make_shared<PickerFileOperation>();
+    bool ok = owner && SubmitPickerFileOperation(session, operation, std::move(copy), owner, true) &&
+        ready(operation) && operation->result == S_OK && fs::exists(source) && fs::exists(product);
+    for (bool accept : {false, true}) {
+        if (!ok) break;
+        operation = std::make_shared<PickerFileOperation>();
+        std::optional<DeleteConfirmation> pending;
+        const bool queued = SubmitPickerFileOperation(session, operation, PickerUndo{}, owner, true);
+        const bool prompted = queued && WaitWithMessages([&] {
+            pending = session->Manager().PendingDeleteConfirmation();
+            return pending.has_value() || operation->ready.load(std::memory_order_acquire);
+        }) && pending && pending->plan.origin == DeleteOrigin::Undo && pending->plan.targets.size() == 1 &&
+            pulse::fs::NormalizePath(pending->plan.targets.front().path) ==
+                pulse::fs::NormalizePath(product.wstring()) && fs::exists(product);
+        if (pending) session->Manager().ResolveDeleteConfirmation(pending->token, prompted && accept);
+        else if (!operation->ready.load(std::memory_order_acquire)) operation->Cancel(*session);
+        const auto waited = queued && ready(operation);
+        ok = prompted && waited && operation->result == (accept ? S_OK : HRESULT_FROM_WIN32(ERROR_CANCELLED)) &&
+            fs::exists(product) != accept && fs::exists(source);
+        std::printf("[%s] picker copy undo %s confirmation and preserves the original\n",
+            ok ? "PASS" : "FAIL", accept ? "accepts" : "honors declined");
+    }
+    session->Manager().Stop();
+    if (owner) DestroyWindow(owner);
+    std::error_code error;
+    fs::remove_all(root, error);
+    return ok && !error ? 0 : 1;
+}
+
 int ClipboardCases() {
     using namespace pulse::ops;
     namespace fs = std::filesystem;
@@ -104,8 +205,9 @@ int ClipboardCases() {
     const auto previous_desktop = GetThreadDesktop(GetCurrentThreadId());
     const auto station = CreateWindowStationW(nullptr, CWF_CREATE_ONLY, WINSTA_ALL_ACCESS, nullptr);
     if (!station || !SetProcessWindowStation(station)) {
+        const auto error = GetLastError();
         if (station) CloseWindowStation(station);
-        std::puts("[SKIP] no fresh private clipboard station");
+        std::printf("[SKIP] no fresh private clipboard station (Win32 %lu)\n", error);
         return 77;
     }
     const auto desktop = CreateDesktopW(L"PickerClipboardFixture", nullptr, nullptr, 0, GENERIC_ALL, nullptr);
@@ -149,8 +251,8 @@ int ClipboardCases() {
             const bool undo = session->Manager().CanUndo();
             std::printf("[INFO] delayed sequence %lu -> %lu, rendered %d, undo %d\n",
                 delayed_sequence, rendered_sequence, static_cast<int>(file.rendered), static_cast<int>(undo));
-            check(copied && file.rendered && fs::exists(source) && !undo,
-                "first paste renders delayed CF_HDROP without retaining private undo history");
+            check(copied && file.rendered && fs::exists(source) && undo,
+                "first picker paste renders delayed CF_HDROP and records undo");
 
             if (copied) {
                 std::ofstream(destination, std::ios::trunc) << "existing";
@@ -194,6 +296,41 @@ int ClipboardCases() {
                 operation->result == S_OK && !fs::exists(source_folder) &&
                 fs::exists(target_folder / L"moved.txt") && fs::exists(target_folder / L"kept.txt") &&
                 !IsClipboardFormatAvailable(CF_HDROP), "cut merged into a same-name folder clears its removed source");
+
+            operation = std::make_shared<PickerFileOperation>();
+            check(SubmitPickerFileOperation(session, operation, PickerUndo{}, owner, true) && ready(operation) &&
+                operation->result == S_OK && fs::exists(source_folder / L"moved.txt") &&
+                !fs::exists(target_folder / L"moved.txt") && fs::exists(target_folder / L"kept.txt"),
+                "undoing a picker merge restores the moved file and keeps the existing folder contents");
+
+            const auto main_target = root / L"main-target";
+            const auto other = root / L"other";
+            fs::create_directories(main_target);
+            fs::create_directories(other);
+            std::ofstream(source) << "main copy";
+            auto main = std::make_unique<pulse::AppState>();
+            pulse::app::Pane pane;
+            pane.view.current_path = main_target.wstring();
+            main->pane = &pane;
+            main->hwnd = owner;
+            main->clipboard_paste_mailbox =
+                std::make_shared<pulse::WindowResultMailbox<pulse::app::ClipboardPasteResult>>(
+                    owner, pulse::WM_CLIPBOARD_PASTE_RESULT);
+            file.paste_state = main.get();
+            main->ops.Start([] {});
+            const bool main_started = main->worker.Start({});
+            const bool main_published = main_started && file.Publish(owner);
+            if (main_published) pulse::PasteIntoCurrent(*main);
+            const bool returned_before_render = !file.rendered;
+            pane.view.current_path = other.wstring();
+            check(main_published && returned_before_render && WaitWithMessages([&] {
+                return fs::exists(main_target / source.filename()) && main->ops.CanUndo();
+            }) && file.rendered && !fs::exists(other / source.filename()) && fs::exists(source),
+                "main paste returns before clipboard rendering and keeps the original destination after navigation");
+            main->clipboard_paste_mailbox->Close();
+            main->worker.Stop();
+            main->ops.Stop();
+            file.paste_state = nullptr;
 
             DestroyWindow(owner);
         } else check(false, "create a delayed clipboard provider");
@@ -338,8 +475,18 @@ void SaveRenameCase(const std::filesystem::path& root, Check check) {
             if (opened) PostMessageW(menu, WM_KEYDOWN, VK_ESCAPE, 1);
             const bool dismissed = opened && WaitFor([&] { return !FindOnThread(picker, L"PulseFluentMenu"); });
             if (dismissed) PostMessageW(picker, WM_KEYDOWN, VK_F2, 1);
-            const bool prompted = dismissed && WaitFor(find_prompt);
-            check(prompted, "F2 works directly after using the toolbar");
+            const bool prompted = dismissed && WaitFor([&] {
+                for (HWND field = FindWindowExW(picker, nullptr, L"Edit", nullptr); field;
+                    field = FindWindowExW(picker, field, L"Edit", nullptr)) {
+                    if (field == address || field == filename || !IsWindowVisible(field)) continue;
+                    if (EditText(field) != L"Old.txt") continue;
+                    edit = field;
+                    return true;
+                }
+                return false;
+            });
+            check(prompted && !FindOnThread(picker, L"PulsePickerItemName"),
+                "F2 after using the toolbar edits the selected name inside the Save picker");
             if (prompted) {
                 SendMessageW(edit, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L"New.txt"));
                 PostMessageW(edit, WM_KEYDOWN, VK_RETURN, 1);
@@ -751,6 +898,8 @@ int wmain(int argc, wchar_t** argv) {
     using enum ui::PickerCommand;
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     if (argc == 2 && std::wstring_view(argv[1]) == L"--clipboard") return ClipboardCases();
+    if (argc == 3 && std::wstring_view(argv[1]) == L"--copy-undo-confirm")
+        return PickerCopyUndoConfirmation(fs::absolute(argv[2]));
     compat::EnableDpiAwareness();
     if (FAILED(OleInitialize(nullptr))) return 2;
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -770,6 +919,15 @@ int wmain(int argc, wchar_t** argv) {
         (L"picker-commands-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     if (!fs::create_directories(root)) return 2;
     const std::wstring_view option = argc == 2 ? argv[1] : L"";
+    if (option == L"--paste-dispatch") {
+        const bool passed = MainPasteDispatch(root);
+        std::error_code error;
+        fs::remove_all(root, error);
+        OleUninitialize();
+        std::printf("[%s] main paste drops a stale result and submits the original folder only\n",
+            passed && !error ? "PASS" : "FAIL");
+        return passed && !error ? 0 : 1;
+    }
     if (option == L"--projection-only") {
         const bool passed = PickerProjection(root);
         std::error_code error;
@@ -815,7 +973,8 @@ int wmain(int argc, wchar_t** argv) {
     };
     const auto background = ui::PickerContextMenu({true, true, 0, false});
     const auto selected = ui::PickerContextMenu({true, true, 1, true});
-    check(background.size() == 3 && background.front().children.size() == 3 && !background[1].enabled,
+    check(background.size() == 4 && background.front().children.size() == 3 && !background[1].enabled &&
+            background.back().command == static_cast<int>(Undo) && !background.back().enabled,
         "empty space offers New and Refresh, with file Paste disabled for an empty clipboard");
     check(std::any_of(selected.begin(), selected.end(), [](const auto& item) {
               return item.command == static_cast<int>(Paste) && item.enabled;
@@ -889,12 +1048,46 @@ int wmain(int argc, wchar_t** argv) {
             check(context, "the reloaded file list opens its Fluent right-click menu");
             if (context) PostMessageW(menu, WM_KEYDOWN, VK_ESCAPE, 1);
             if (context && WaitFor([&] { return !FindOnThread(picker, L"PulseFluentMenu"); })) {
-                click(236, 182);
-                PostMessageW(picker, WM_KEYDOWN, VK_F2, 1);
+                click(260, 182);
+                click(260, 182);
             }
-            const bool renamed = context && input_name(L"Renamed Project") &&
-                WaitFor([&] { return !fs::exists(first) && fs::is_directory(second); });
-            check(renamed, "F2 renames the selected directory on disk");
+            HWND rename = nullptr;
+            const bool editing = context && WaitFor([&] {
+                for (HWND field = FindWindowExW(picker, nullptr, L"Edit", nullptr); field;
+                    field = FindWindowExW(picker, field, L"Edit", nullptr)) {
+                    if (!IsWindowVisible(field) || EditText(field) != L"Project") continue;
+                    rename = field;
+                    return true;
+                }
+                return false;
+            });
+            if (editing) {
+                SendMessageW(rename, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L"Renamed Project"));
+                PostMessageW(rename, WM_KEYDOWN, VK_RETURN, 1);
+            }
+            const bool renamed = editing && WaitFor([&] { return !fs::exists(first) && fs::is_directory(second); });
+            check(renamed && !FindOnThread(picker, L"PulsePickerItemName"), "slow clicks rename the selected directory in place");
+            const auto undo = [&] {
+                if (!WaitFor([&] {
+                        if ((menu = FindOnThread(picker, L"PulseFluentMenu"))) return true;
+                        PostMessageW(picker, WM_CONTEXTMENU, reinterpret_cast<WPARAM>(picker), MAKELPARAM(row.x, row.y));
+                        return false;
+                    })) return false;
+                PostMessageW(menu, WM_KEYDOWN, VK_UP, 1); // Wrap from the first command to Undo.
+                PostMessageW(menu, WM_KEYDOWN, VK_RETURN, 1);
+                return true;
+            };
+            const bool rename_undone = renamed && undo() &&
+                WaitFor([&] { return fs::is_directory(first) && !fs::exists(second); });
+            check(rename_undone, "the picker Undo command restores the original directory name");
+            const bool recycled = rename_undone && WaitFor([&] {
+                if (!fs::exists(first)) return true;
+                click(236, 182);
+                PostMessageW(picker, WM_KEYDOWN, VK_DELETE, 1);
+                return false;
+            });
+            check(recycled && undo() && WaitFor([&] { return fs::is_directory(first); }),
+                "the picker Undo command restores an item moved to the Recycle Bin");
             finish.store(true);
         });
     };

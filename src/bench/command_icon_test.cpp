@@ -125,7 +125,9 @@ void Gallery(IWICImagingFactory* wic, ID2D1Factory* factory, const wchar_t* file
         L"Panel",L"Close panel",L"Check",L"Eye",L"Info",L"Home",L"Tray",L"Pin",
         L"Link",L"Palette",L"Sliders",L"Warning",L"Lock",L"External",L"Favourite",L"More",
         L"Undo",L"Select all",L"Invert selection",L"Terminal",L"New folder",L"Library",L"Applications",
-        L"Single pane",L"Stacked panes",L"Three panes",L"Four panes"
+        L"Single pane",L"Stacked panes",L"Three panes",L"Four panes",L"Details",L"Content",
+        L"Display alias",L"Linked browsing",L"Sync",L"Embedded terminal",
+        L"New item",L"Properties",L"Copy path",L"Advanced search",L"Operation center",L"Customize commands",L"Group"
     };
     static_assert(std::size(names) == static_cast<size_t>(Icon::Count)-1);
     Ref<IWICBitmap> bitmap;

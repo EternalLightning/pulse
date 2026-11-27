@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "file_picker_commands.h"
 #include "input_dialog.h"
+#include "command_icons.h"
 
 namespace pulse::ui {
 
@@ -8,7 +9,7 @@ PickerCommandInfo PickerCommandPresentation(PickerCommand command) {
     using enum PickerCommand;
     using I = l10n::StringId;
     switch (command) {
-    case New: return {I::New, L"\xE710"};
+    case New: return {I::New, command_icons::kNewItemGlyph};
     case Cut: return {I::Cut, L"\xE8C6", L"Ctrl+X"};
     case Copy: return {I::Copy, L"\xE8C8", L"Ctrl+C"};
     case Paste: return {I::Paste, L"\xE77F", L"Ctrl+V"};
@@ -16,11 +17,12 @@ PickerCommandInfo PickerCommandPresentation(PickerCommand command) {
     case Recycle: return {I::OperationCenterRecycle, L"\xE74D", L"Del"};
     case Refresh: return {I::Refresh, L"\xE72C", L"F5"};
     case Open: return {I::Open, L"\xE838", L"Enter"};
-    case NewFolder: return {I::NewFolder, L"\xE8B7", L"Ctrl+Shift+N", true};
+    case NewFolder: return {I::NewFolder, L"\xE8F4", L"F7", true};
     case NewFile: return {I::NewFile, L"\xE8A5", L"", true};
     case NewText: return {I::NewTextDocument, L"\xE8A5", L"", true};
-    case CopyPath: return {I::CopyPath, L"\xE71B", L"Ctrl+Shift+C"};
-    case Properties: return {I::Properties, L"\xE946", L"Alt+Enter"};
+    case CopyPath: return {I::CopyPath, command_icons::kCopyPathGlyph, L"Ctrl+Shift+C"};
+    case Properties: return {I::Properties, command_icons::kPropertiesGlyph, L"Alt+Enter"};
+    case Undo: return {I::Undo, L"\xE7A7", L"Ctrl+Z"};
     default: return {I::New, L""};
     }
 }
@@ -30,6 +32,7 @@ bool PickerCommandEnabled(PickerCommand command, const PickerCommandState& state
     if (!state.ready) return false;
     switch (command) {
     case Refresh: return true;
+    case Undo: return state.can_undo;
     case Open: return state.selected == 1;
     default: break;
     }
@@ -87,20 +90,19 @@ std::vector<FluentMenuItem> PickerContextMenu(const PickerCommandState& state) {
         add(CopyPath);
         add(Properties);
     }
+    if (state.in_folder || state.can_undo) add(Undo);
     return menu;
 }
 
-std::wstring PromptPickerName(HWND owner, PickerCommand command, std::wstring initial,
-                              bool dark, D2D1_COLOR_F accent) {
+std::wstring PromptPickerName(HWND owner, PickerCommand command, bool dark, D2D1_COLOR_F accent) {
     using I = l10n::StringId;
     const auto presentation = PickerCommandPresentation(command);
-    const bool renaming = command == PickerCommand::Rename;
     InputDialogSpec spec;
     spec.window_class = L"PulsePickerItemName";
     spec.title = l10n::Get(presentation.label);
     spec.glyph = presentation.glyph;
-    spec.confirm_text = l10n::Get(renaming ? I::Rename : I::CreateItemAction);
-    return PromptFileName(owner, std::move(spec), std::move(initial),
+    spec.confirm_text = l10n::Get(I::CreateItemAction);
+    return PromptFileName(owner, std::move(spec), {},
         command == PickerCommand::NewText ? kNewTextDocumentNameLimit : 255, dark, accent);
 }
 

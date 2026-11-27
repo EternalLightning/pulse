@@ -8,6 +8,7 @@
 #include "../ui/toolbar_layout.h"
 #include "../ui/address_search_layout.h"
 #include "../ui/home_layout.h"
+#include "../ui/file_picker_commands.h"
 #include "../common/resource_ids.h"
 #include "../common/windows_compat.h"
 #include <algorithm>
@@ -210,8 +211,11 @@ void CheckMainUiColors(pulse::AppState& s, const std::filesystem::path& output,
 }
 }
 
-int RunGroupToolbarUiTest(bool order_only = false, bool colors_only = false) {
+int RunGroupToolbarUiTest(std::string_view test_mode) {
     using namespace pulse;
+    const bool order_only = test_mode == "--group-order-only";
+    const bool colors_only = test_mode == "--main-ui-colors-only";
+    const bool icons_only = test_mode == "--command-icons-only";
     int checks = 0, failures = 0;
     const auto check = [&](bool ok, const char* label) {
         ++checks;
@@ -220,7 +224,8 @@ int RunGroupToolbarUiTest(bool order_only = false, bool colors_only = false) {
     };
     const auto output = std::filesystem::absolute(order_only
         ? L"docs/validation/group-order-20261030" : colors_only
-        ? L"bench_data/main-ui-colors" : L"bench_data/group-toolbar-ui");
+        ? L"bench_data/main-ui-colors" : icons_only
+        ? L"bench_data/command-icons" : L"bench_data/group-toolbar-ui");
     std::filesystem::create_directories(output);
     auto owned = std::make_unique<AppState>();
     auto& s = *owned;
@@ -237,6 +242,41 @@ int RunGroupToolbarUiTest(bool order_only = false, bool colors_only = false) {
     s.pane = s.window_tabs.Active()->FocusedPane();
     auto* tab = ActiveTab(s);
     tab->SetSnapshot(std::make_shared<std::vector<fs::DirEntry>>());
+    if (icons_only) {
+        s.scale = 1.0f;
+        s.renderer.SetScale(s.scale);
+        s.compositor.RecreateTextFormats(s.scale);
+        s.compositor.Resize(1100, 720);
+        for (const bool dark : {true, false}) {
+            auto vm = BuildVm(s, false);
+            vm.dark = dark;
+            vm.window_effect = ui::WindowEffect::None;
+            vm.backdrop_enabled = false;
+            vm.pane_slots.clear();
+            vm.pane.loading = true;
+            vm.toolbar_commands_enabled = std::array{true, true, true, true, true, true};
+            const auto theme = ui::MakeTheme(dark, s.accentColor);
+            const auto suffix = dark ? L"-dark.png" : L"-light.png";
+            auto* dc = s.compositor.Dc();
+            dc->BeginDraw();
+            s.renderer.Render(vm, D2D1::RectF(0, 0, 1100, 720), theme);
+            check(SUCCEEDED(dc->EndDraw()) &&
+                s.compositor.SaveSnapshot((output / (std::wstring(L"toolbar") + suffix)).c_str()),
+                "capture enabled main toolbar commands");
+            ui::FluentMenu menu;
+            if (!menu.Create(s.hwnd, &s.compositor, 1.0f)) { check(false, "create command icon menu"); break; }
+            menu.SetTheme(dark, s.accentColor);
+            const auto capture = [&](const wchar_t* name, auto items) {
+                check(menu.SaveDebugSnapshot((output / (std::wstring(name) + suffix)).c_str(), std::move(items)),
+                    "capture built-in command menu");
+            };
+            capture(L"context-item", app::BuildItemMenu(false, L""));
+            capture(L"context-background", app::BuildBackgroundMenu(false, false, L""));
+            capture(L"picker-menu", ui::PickerContextMenu({true, true, 1, true}));
+        }
+        s.renderer.SetCompositor(nullptr); s.compositor.Shutdown(); DestroyWindow(s.hwnd); s.hwnd = nullptr;
+        return failures ? 1 : 0;
+    }
     if (colors_only) {
         CheckMainUiColors(s, output, check);
         s.renderer.SetCompositor(nullptr); s.compositor.Shutdown(); DestroyWindow(s.hwnd); s.hwnd = nullptr;
@@ -394,8 +434,7 @@ int main(int argc, char** argv) {
     OleInitialize(nullptr);
     pulse::compat::EnableDpiAwareness();
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"zh-CN");
-    const int result = RunGroupToolbarUiTest(argc == 2 && std::string_view(argv[1]) == "--group-order-only",
-        argc == 2 && std::string_view(argv[1]) == "--main-ui-colors-only");
+    const int result = RunGroupToolbarUiTest(argc == 2 ? std::string_view(argv[1]) : std::string_view{});
     OleUninitialize();
     return result;
 }

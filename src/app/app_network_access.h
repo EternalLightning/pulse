@@ -21,7 +21,11 @@ struct NetworkAccessState {
         std::shared_ptr<std::atomic_bool> cancelled;
     };
     std::unordered_map<uint64_t, Pending> pending;
-    std::unordered_map<uint64_t, uint64_t> foreground_listings;
+    struct ForegroundListing {
+        uint64_t generation = 0;
+        bool may_prompt = true;
+    };
+    std::unordered_map<uint64_t, ForegroundListing> foreground_listings;
     std::mutex discovery_mutex;
     NetworkDiscoveryState discovery = NetworkDiscoveryState::Unknown;
     bool discovery_pending = false;
@@ -32,8 +36,8 @@ struct NetworkAccessState {
 }
 namespace pulse {
 void RequestNetworkAuthentication(AppState& s, app::Tab& tab, DWORD error);
-void MarkNetworkForegroundListing(AppState& s, const app::Tab& tab);
-bool TakeNetworkForegroundListing(AppState& s, const app::Tab& tab, uint64_t generation);
+void MarkNetworkForegroundListing(AppState& s, const app::Tab& tab, bool may_prompt);
+bool TakeNetworkForegroundListing(AppState& s, const app::Tab& tab, uint64_t generation, bool for_prompt = false);
 bool NetworkForegroundRequestPending(const AppState& s, const app::Tab& tab);
 void CancelNetworkAuthenticationForTab(AppState& s, const app::Tab& tab);
 void CancelNetworkAuthentication(AppState& s);

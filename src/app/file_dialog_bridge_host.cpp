@@ -9,13 +9,17 @@
 #include "app_prefs.h"
 #include "link_resolve.h"
 #include "../common/display_path.h"
+#include "../common/file_operation_error.h"
 #include "../common/known_folder_labels.h"
 #include "../common/localization.h"
 #include "../common/picker_user_storage.h"
+#include "../common/picker_shell_namespace.h"
+#include "../common/shell_id.h"
 #include "../common/user_storage.h"
 #include "../common/utf8_file.h"
 #include "../ipc/picker_client.h"
 #include "../ipc/picker_session.h"
+#include "../fs/device_source.h"
 #include "../ui/file_operation_dialog.h"
 #include "../ui/file_picker_dialog.h"
 #include "../ui/file_save_access_policy.h"
@@ -72,7 +76,7 @@ wire::Response Response(const wire::Request& request, wire::Status status, DWORD
 
 bool Supports(const wire::Request& request) {
     if (request.operation == wire::Operation::PickFolder)
-        return !(request.options & wire::AllowMultiSelect);
+        return true;
     if (request.operation == wire::Operation::OpenFiles)
         return request.default_extension.empty() &&
             (request.options & (wire::ValidateLocalOpenAccessV1 | wire::SkipAccessValidation));
@@ -105,12 +109,35 @@ bool CheckOpenFile(const std::wstring& source, uint32_t options, const std::atom
     std::wstring final_path(wire::kMaxStringUnits, L'\0');
     const DWORD length = GetFinalPathNameByHandleW(file.Get(), final_path.data(), static_cast<DWORD>(final_path.size()),
         FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    return length && length < final_path.size() && !cancelled &&
+    if (length) return length < final_path.size() && !cancelled &&
         picker_user_storage::SamePath(storage.value, std::wstring_view(final_path.data(), length));
+    if (GetLastError() != ERROR_UNRECOGNIZED_VOLUME || cancelled) return false;
+
+    // A provider can expose a normalized NT path without a DOS volume name.
+    // Resolve the selected root in that namespace too, so the comparison
+    // still verifies the volume and the complete relative path.
+    wire::PipeHandle root(CreateFileW(fs::NormalizePath(storage.root).c_str(), FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+    if (!root || cancelled) return false;
+    std::wstring expected(wire::kMaxStringUnits, L'\0');
+    constexpr DWORD nt_path = FILE_NAME_NORMALIZED | VOLUME_NAME_NT;
+    const DWORD root_length = GetFinalPathNameByHandleW(root.Get(), expected.data(), static_cast<DWORD>(expected.size()), nt_path);
+    if (!root_length || root_length >= expected.size() || cancelled) return false;
+    expected.resize(root_length);
+    if (!expected.ends_with(L'\\')) expected += L'\\';
+    auto relative = std::wstring_view(storage.value).substr(storage.root_length);
+    if (relative.starts_with(L'\\')) relative.remove_prefix(1);
+    expected += relative;
+    const DWORD actual_length = GetFinalPathNameByHandleW(file.Get(), final_path.data(), static_cast<DWORD>(final_path.size()), nt_path);
+    return actual_length && actual_length < final_path.size() && !cancelled &&
+        CompareStringOrdinal(final_path.data(), static_cast<int>(actual_length),
+            expected.c_str(), static_cast<int>(expected.size()), TRUE) == CSTR_EQUAL;
 }
 
 struct Validation {
     bool accepted = false;
+    DWORD error = ERROR_SUCCESS;
     ui::FilePickerResult selection;
     std::optional<ui::SaveConfirmationSnapshot> confirm;
 };
@@ -138,23 +165,28 @@ Validation ValidateSelection(const wire::Request& request, ui::FilePickerResult 
             save.no_test_file_create = (request.options & wire::SaveNoTestFileCreate) != 0;
             save.require_existing_save_parent = (request.options & wire::SaveRequireExistingParent) != 0;
             save.caller_validates_access = (request.options & wire::SaveSkipAccessValidation) != 0;
+            save.allow_legacy_identity = true;
             current = ui::CaptureSaveConfirmation(save, cancelled_check);
         }
-        if (current.state == ui::SaveRevalidationState::Failed || !current.snapshot || cancelled) return result;
+        if (cancelled) return result;
+        if (current.state == ui::SaveRevalidationState::Failed || !current.snapshot) {
+            result.error = current.error;
+            return result;
+        }
         if (current.state == ui::SaveRevalidationState::ConfirmOverwrite) {
             result.selection = std::move(selection);
             result.confirm = std::move(current.snapshot);
             return result;
         }
         if (!(request.options & wire::SaveSkipAccessValidation)) {
-            auto checked = ui::ValidateLocalSaveAccessV1(*current.snapshot, cancelled_check, {},
-                (request.options & wire::SaveRequireUnencrypted) != 0);
-            if (checked.state == ui::SaveAccessState::NeedsConfirmation) {
+            const bool require_unencrypted = (request.options & wire::SaveRequireUnencrypted) != 0;
+            auto checked = ui::ValidateSaveAccess(*current.snapshot, cancelled_check, {}, require_unencrypted);
+            if (checked.state != ui::SaveAccessState::Ready) {
+                result.error = checked.error;
                 result.selection = std::move(selection);
                 result.confirm = std::move(checked.confirmation);
                 return result;
             }
-            if (checked.state != ui::SaveAccessState::Ready) return result;
         }
         selection.paths = {current.snapshot->Path()};
     } else {
@@ -326,6 +358,28 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner, DWORD 
     SetFilePickerFolderViews(spec, prefs);
     spec.load_places = LoadTakeoverPickerPlaces;
     bool use_windows = false;
+    std::wstring native_folder;
+    if (request.required_capabilities & wire::NativeOpenFolder) {
+        spec.load_places = [](const auto& cancelled) {
+            auto places = LoadTakeoverPickerPlaces(cancelled);
+            if (cancelled() || !fs::AnyPortableDevicePresent()) return places;
+            const picker_shell::Apartment apartment;
+            if (FAILED(apartment.Result())) return places;
+            for (auto& device : fs::MakeShellDeviceSource()->ListDevices()) {
+                if (cancelled()) break;
+                Microsoft::WRL::ComPtr<IShellItem> item;
+                if (FAILED(shell_id::CreateItem(device.id, IID_PPV_ARGS(&item)))) continue;
+                auto id = shell_id::FromItem(item.Get());
+                if (!id.empty()) places.portable_devices.push_back({
+                    std::move(device.name), std::move(id), L"\xE8EA", {}, false, true});
+            }
+            return places;
+        };
+        spec.on_open_native_folder = [&](std::wstring id) {
+            native_folder = std::move(id);
+            use_windows = true;
+        };
+    }
     bool active_prompt = false;
     HWND picker = nullptr;
     std::shared_ptr<PendingValidation> pending;
@@ -499,12 +553,18 @@ wire::Response ShowBridgePicker(const wire::Request& request, HWND owner, DWORD 
             }
             return ui::PickerSubmitReply{true, false, {}};
         }
+        if (outcome->error) return ui::PickerSubmitReply{false, true,
+            format::FileOperationErrorText(HRESULT_FROM_WIN32(outcome->error))};
         return ui::PickerSubmitReply{false, true, l10n::Get(I::PickerSubmitFailed)};
     };
     ui::FilePickerResult result;
     const bool picked = !*cancelled && ui::ShowFilePicker(owner, spec, dark, accent, result);
     if (*cancelled) return Response(request, wire::Status::Cancelled);
-    if (use_windows) return Response(request, wire::Status::UseNative);
+    if (use_windows) {
+        auto reply = Response(request, wire::Status::UseNative);
+        if (!native_folder.empty()) reply.paths.emplace_back(native_folder.begin(), native_folder.end());
+        return reply;
+    }
     if (!picker) return Response(request, wire::Status::Unsupported, ERROR_NOT_SUPPORTED);
     return picked && accepted ? std::move(*accepted) : Response(request, wire::Status::Cancelled);
 }

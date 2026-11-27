@@ -103,7 +103,7 @@ void FillNetworkLocationsView(AppState& s, app::Tab& tab) {
             app::NetworkLocationKey(item.path), !item.shell_link);
     for (const auto& device : load->lan.devices)
         add(device.name, app::LanDeviceUnc(device), l10n::Get(l10n::StringId::NetworkLanDevices) + L"  " +
-            (device.model.empty() ? device.host : device.model));
+            (!device.service_unc.empty() ? device.service_unc : device.model.empty() ? device.host : device.model));
     const auto recent_list = s.core.network_recent->Snapshot();
     for (const auto& recent : recent_list.Items())
         add(app::NetworkLocationKey(recent.path), recent.path, l10n::Get(l10n::StringId::NetworkRecentVisits));
@@ -202,7 +202,7 @@ void ShowConnectServer(AppState& s) {
     spec.confirm_text = l10n::Get(l10n::StringId::ConnectServerConnect);
     spec.preview = [](const std::wstring& text) {
         const auto address = app::ParseServerAddress(text, true);
-        const bool valid = address.kind == app::ServerAddressKind::Server || address.kind == app::ServerAddressKind::Share;
+        const bool valid = app::IsBrowsableServerAddress(address.kind);
         return ui::ConnectServerPreview{valid, text.empty() ? std::wstring{} : valid ? address.unc :
             l10n::Get(l10n::StringId::ConnectServerInvalidAddress)};
     };
@@ -212,7 +212,7 @@ void ShowConnectServer(AppState& s) {
         std::vector<ui::ConnectServerSuggestion> out;
         const auto add = [&](const std::wstring& path, const std::wstring& hint) {
             const auto parsed = app::ParseServerAddress(path);
-            if (parsed.kind != app::ServerAddressKind::Server && parsed.kind != app::ServerAddressKind::Share) return;
+            if (!app::IsBrowsableServerAddress(parsed.kind)) return;
             if (!text.empty() && !StrStrIW(path.c_str(), text.c_str())) return;
             if (std::none_of(out.begin(), out.end(), [&](const auto& item) { return app::SameNetworkLocation(item.path, path); }))
                 out.push_back({path, hint});
@@ -225,7 +225,7 @@ void ShowConnectServer(AppState& s) {
     const auto result = ui::ShowConnectServerDialog(s.hwnd, spec, s.darkMode, s.accentColor);
     if (!result.accepted || !IsWindow(s.hwnd) || s.exit_requested || s.core.exiting) return;
     const auto address = app::ParseServerAddress(result.text, true);
-    if (address.kind != app::ServerAddressKind::Server && address.kind != app::ServerAddressKind::Share) return;
+    if (!app::IsBrowsableServerAddress(address.kind)) return;
     NavigateTo(s, address.unc);
     if (auto* tab = ActiveTab(s); result.pin && tab && app::SameNetworkLocation(tab->current_path, address.unc))
         tab->pending_network_pin = address.unc;

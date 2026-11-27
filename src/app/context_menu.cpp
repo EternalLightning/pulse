@@ -30,7 +30,7 @@ constexpr const wchar_t* kGlyphCopy = L"\xE8C8";
 constexpr const wchar_t* kGlyphPaste = L"\xE77F";
 constexpr const wchar_t* kGlyphDelete = L"\xE74D";
 constexpr const wchar_t* kGlyphRename = L"\xE8AC";
-constexpr const wchar_t* kGlyphProperties = L"\xE946";
+constexpr auto kGlyphProperties = ui::command_icons::kPropertiesGlyph;
 constexpr const wchar_t* kGlyphTerminal = L"\xE756";
 constexpr const wchar_t* kGlyphLink = L"\xE71B";
 constexpr const wchar_t* kGlyphUndo = L"\xE7A7";
@@ -126,11 +126,11 @@ std::vector<ui::FluentMenuItem> BuildItemMenu(bool can_undo, const std::wstring&
 
     if (folder)
         items.push_back(Item(CmdOpenInNewTab, l10n::Get(l10n::StringId::OpenNewTab).c_str(), kGlyphOpenInNewTab));
-    items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), kGlyphLink, L"Ctrl+Shift+C"));
+    items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), ui::command_icons::kCopyPathGlyph, L"Ctrl+Shift+C"));
     items.push_back(Item(CmdOpenTerminal, l10n::Get(l10n::StringId::OpenTerminalHere).c_str(), kGlyphTerminal));
     items.push_back(Item(CmdProperties, l10n::Get(l10n::StringId::Properties).c_str(), kGlyphProperties, L"Alt+Enter"));
     items.back().separator_after = true;
-    items.push_back(Item(CmdPinWorkspace, l10n::Get(l10n::StringId::PinWorkspace).c_str(), kGlyphFolder));
+    items.push_back(Item(CmdPinWorkspace, l10n::Get(l10n::StringId::PinWorkspace).c_str(), L"\xE718"));
     items.push_back(Item(CmdPinNetwork, l10n::Get(l10n::StringId::PinNetwork).c_str(), kGlyphLink));
     items.back().separator_after = true;
     items.push_back(Item(CmdTags, l10n::Get(l10n::StringId::TagsEllipsis).c_str(), kGlyphTag));
@@ -238,7 +238,7 @@ std::vector<ui::FluentMenuItem> BuildRecycleItemMenu(bool can_undo,
     items.push_back(Item(CmdRestoreRecycle, l10n::Get(l10n::StringId::Restore).c_str(), kGlyphUndo));
     items.push_back(Item(CmdDelete, l10n::Get(l10n::StringId::PermanentDelete).c_str(), kGlyphDelete, L"Del"));
     items.back().separator_after = true;
-    items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), kGlyphLink, L"Ctrl+Shift+C"));
+    items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), ui::command_icons::kCopyPathGlyph, L"Ctrl+Shift+C"));
     items.back().separator_after = true;
     items.push_back(UndoItem(can_undo, undo_label));
     return items;
@@ -265,15 +265,18 @@ std::vector<ui::FluentMenuItem> BuildRecyclePlaceMenu(bool can_empty) {
 
 
 std::vector<ui::FluentMenuItem> BuildBackgroundMenu(bool can_paste, bool can_undo,
-                                                    const std::wstring& undo_label) {
+                                                    const std::wstring& undo_label,
+                                                    bool can_paste_shortcut) {
     std::vector<ui::FluentMenuItem> items;
-    auto create = Item(CmdNewMenu, l10n::Get(l10n::StringId::New).c_str(), kGlyphNewFile);
+    auto create = Item(CmdNewMenu, l10n::Get(l10n::StringId::New).c_str(), ui::command_icons::kNewItemGlyph);
     create.children = BuildNewMenu();
     create.live_update = true;
     items.push_back(std::move(create));
     items.back().separator_after = true;
     items.push_back(Item(CmdPaste, l10n::Get(l10n::StringId::Paste).c_str(), kGlyphPaste, L"Ctrl+V", can_paste));
-    items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), kGlyphLink, L"Ctrl+Shift+C"));
+    if (can_paste_shortcut)
+        items.push_back(Item(CmdPasteShortcut, l10n::Get(l10n::StringId::PasteShortcut).c_str(), kGlyphLink));
+    items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), ui::command_icons::kCopyPathGlyph, L"Ctrl+Shift+C"));
     items.back().separator_after = true;
     items.push_back(Item(CmdSelectAll, l10n::Get(l10n::StringId::SelectAll).c_str(), kGlyphSelectAll, L"Ctrl+A"));
     items.push_back(Item(CmdInvertSelection, l10n::Get(l10n::StringId::InvertSelection).c_str(), kGlyphInvert, L"Ctrl+I"));
@@ -281,7 +284,7 @@ std::vector<ui::FluentMenuItem> BuildBackgroundMenu(bool can_paste, bool can_und
     items.back().separator_after = true;
     items.push_back(Item(CmdOpenTerminal, l10n::Get(l10n::StringId::OpenTerminalHere).c_str(), kGlyphTerminal));
     items.back().separator_after = true;
-    items.push_back(Item(CmdPinWorkspace, l10n::Get(l10n::StringId::PinWorkspace).c_str(), kGlyphFolder));
+    items.push_back(Item(CmdPinWorkspace, l10n::Get(l10n::StringId::PinWorkspace).c_str(), L"\xE718"));
     items.push_back(Item(CmdPinNetwork, l10n::Get(l10n::StringId::PinNetwork).c_str(), kGlyphLink));
     items.back().separator_after = true;
     items.push_back(UndoItem(can_undo, undo_label));
@@ -297,7 +300,7 @@ std::vector<ui::FluentMenuItem> BuildBreadcrumbMenu(bool filesystem, bool drive)
     items.push_back(Item(CmdOpenInNewTab, l10n::Get(l10n::StringId::OpenNewTab).c_str(), kGlyphOpenInNewTab));
     items.push_back(Item(CmdOpen, l10n::Get(l10n::StringId::Open).c_str(), kGlyphOpen));
     items.back().separator_after = true;
-    items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), kGlyphLink));
+    items.push_back(Item(CmdCopyPath, l10n::Get(l10n::StringId::CopyPath).c_str(), ui::command_icons::kCopyPathGlyph));
     if (filesystem) {
         if (!drive) {
             items.push_back(Item(CmdCopy, l10n::Get(l10n::StringId::Copy).c_str(), kGlyphCopy));
@@ -335,7 +338,8 @@ void AppendBackgroundViewCommands(std::vector<ui::FluentMenuItem>& items,
     auto sort = Item(CmdNone, l10n::Get(l10n::StringId::SortBy).c_str(), L"\xE8CB", nullptr, options.can_sort);
     sort.children = BuildSortMenu(options);
     auto group = Item(CmdNone, l10n::Get(l10n::StringId::GroupBy).c_str(), L"\xF168", nullptr, options.can_sort);
-    group.children = BuildGroupingMenu(options.group_mode, options.group_direction, options.can_sort);
+    group.children = BuildGroupingMenu(options.group_mode, options.group_direction, options.can_sort,
+        options.file_groups_collapsed);
     auto refresh = Item(CmdRefresh, l10n::Get(l10n::StringId::Refresh).c_str(), L"\xE72C", L"F5");
     refresh.separator_after = true;
     items.insert(items.begin(), { std::move(view), std::move(sort), std::move(group), std::move(refresh) });
@@ -395,8 +399,17 @@ std::vector<ui::FluentMenuItem> BuildSplitMenu(int current_preset, const Command
 }
 
 std::vector<ui::FluentMenuItem> BuildGroupingMenu(ui::GroupMode mode,
-                                                ui::SortDirection direction, bool enabled) {
-    return ui::BuildFileGroupingChoices(mode, direction, CmdGroupAuto, CmdGroupAscending, CmdGroupDescending, enabled);
+                                                ui::SortDirection direction, bool enabled,
+                                                std::optional<bool> collapsed) {
+    auto items = ui::BuildFileGroupingChoices(mode, direction, CmdGroupAuto, CmdGroupAscending, CmdGroupDescending, enabled);
+    if (collapsed) {
+        items.back().separator_after = true;
+        items.push_back(Item(CmdExpandFileGroups, l10n::Get(l10n::StringId::FileGroupsExpandAll).c_str(),
+            L"\xE70D", nullptr, enabled && *collapsed));
+        items.push_back(Item(CmdCollapseFileGroups, l10n::Get(l10n::StringId::FileGroupsCollapseAll).c_str(),
+            L"\xE70E", nullptr, enabled && !*collapsed));
+    }
+    return items;
 }
 
 std::vector<ui::FluentMenuItem> BuildViewMenu(ui::ViewMode current_mode, bool details_panel) {

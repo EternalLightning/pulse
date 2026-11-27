@@ -1516,9 +1516,10 @@ void TestLiveAddressSearch() {
     state->appPrefs.persist = false;
     state->searchHistory.persist = false;
     state->places.persist = false;
-    auto& pane = *state->window_tabs.NewTab(L"C:\\live-search-test").FocusedPane();
+    const auto origin = fs::NormalizePath(L"C:\\live-search-test");
+    auto& pane = *state->window_tabs.NewTab(origin).FocusedPane();
     state->pane = &pane;
-    pane.view.current_path = L"C:\\live-search-test";
+    pane.view.current_path = origin;
     state->hwnd = CreateWindowExW(0, L"STATIC", L"", WS_POPUP,
         0, 0, 400, 100, nullptr, nullptr, nullptr, nullptr);
     state->hwndAddressEdit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD,
@@ -1570,20 +1571,19 @@ void TestLiveAddressSearch() {
           L"live search: clear fixture has an outstanding query to cancel");
     type(L"");
     TickAddressSearch(*state, state->addressLiveDue);
-    Check(pane.view.current_path == L"C:\\live-search-test" && !state->addressSearching &&
+    Check(pane.view.current_path == origin && state->addressSearching && state->addressEditing &&
           !state->addressLiveDue && !state->addressHistoryDue &&
           !state->pendingIndexSearches.contains(cleared_generation) &&
           state->searchHistory.entries.size() == history_count,
-          L"live search: clearing restores the origin, cancels the query and saves no empty history");
+          L"live search: clearing restores the origin, cancels the query and keeps editing without saving empty history");
     const auto restored_snapshot = pane.view.snapshot;
     const auto restored_generation = pane.view.pending_generation;
     index::SearchResult late;
     late.hits.push_back({L"C:\\live-search-test\\late.txt", L"late.txt", false});
     DeliverIndexSearchResult(*state, cleared_generation, std::move(late));
-    Check(pane.view.current_path == L"C:\\live-search-test" &&
+    Check(pane.view.current_path == origin &&
           pane.view.snapshot == restored_snapshot && pane.view.pending_generation == restored_generation,
           L"live search: a cancelled late response cannot replace the restored directory");
-    state->addressSearching = state->addressEditing = true;
     type(L"cancel-on-context-change");
     Check(state->addressLiveDue != 0, L"live search: changed-context fixture has a pending debounce");
     pane.view.current_path = L"C:\\other";
@@ -3299,6 +3299,71 @@ void TestSnapshotStorePutKeepsWorkerGeneration() {
     snap = store.Peek(L"C:\\pulse-gen");
     Check(snap && snap->front().name == L"a.txt",
           L"snapshot: worker Update after dirty GetOrStart still applies");
+}
+
+void TestSnapshotStoreOversized() {
+    constexpr auto small_path = L"C:\\cache-small";
+    constexpr auto large_path = L"C:\\cache-oversized";
+    constexpr auto next_path = L"C:\\cache-next";
+    auto small = std::make_shared<std::vector<fs::DirEntry>>(1);
+    small->front().name = L"a.txt";
+    auto large = std::make_shared<std::vector<fs::DirEntry>>(*small);
+    size_t small_bytes = 0;
+    {
+        fs::SnapshotStore measured(2, 0);
+        measured.Update(small_path, 1, small);
+        small_bytes = measured.ResidentBytes();
+        auto& entry = large->front();
+        size_t large_bytes = sizeof(std::vector<fs::DirEntry>) +
+            large->capacity() * sizeof(fs::DirEntry);
+        for (auto field : {&fs::DirEntry::name, &fs::DirEntry::full_path, &fs::DirEntry::shell_id,
+                           &fs::DirEntry::recycle_path, &fs::DirEntry::change_type_text,
+                           &fs::DirEntry::change_old_path, &fs::DirEntry::link_target}) {
+            auto& value = entry.*field;
+            value.reserve(512);
+            large_bytes += (value.capacity() + 1) * sizeof(wchar_t);
+        }
+        measured.Put(small_path, large);
+        Check(measured.ResidentBytes() == large_bytes,
+              L"snapshot: resident bytes include capacity of all seven owned strings");
+    }
+    const fs::DirectoryIdentity identity{1, 2, 3};
+    const fs::DirectoryIdentity replacement{1, 2, 4};
+    fs::SnapshotStore store(4, small_bytes);
+    store.Update(small_path, 1, small);
+    store.Update(large_path, 7, large, identity);
+    Check(store.Peek(small_path) == small && !store.Peek(large_path) &&
+          store.ResidentBytes() == small_bytes && large.use_count() == 1,
+          L"snapshot: over-budget Update leaves listing live with its caller and keeps fitting data");
+
+    store.MarkDirty(large_path);
+    store.Update(large_path, 6, small, replacement);
+    uint64_t generation = 0;
+    const auto first_hit = store.GetOrStart(small_path, generation);
+    store.Update(next_path, 8, small, identity);
+    Check(first_hit == small && generation == 1 && !store.Peek(small_path) &&
+          store.Peek(next_path) == small &&
+          store.IsDirty(large_path) && !store.Peek(large_path) &&
+          fs::SameDirectoryIdentity(store.Identity(large_path), identity),
+          L"snapshot: stale result and byte eviction preserve oversized listing metadata");
+    fs::DirectoryIdentity observed_identity;
+    Check(!store.GetOrStart(large_path, generation, &observed_identity) && generation == 7 &&
+          fs::SameDirectoryIdentity(observed_identity, identity) && !store.IsDirty(large_path),
+          L"snapshot: cache miss preserves generation and identity and consumes dirty flag");
+
+    Check(store.Put(next_path, large) == 8 && !store.Peek(next_path) &&
+          store.ResidentBytes() == 0 && large.use_count() == 1 &&
+          fs::SameDirectoryIdentity(store.Identity(next_path), identity),
+          L"snapshot: over-budget Put drops the old payload and keeps worker generation and identity");
+    store.Update(next_path, 9, small, replacement);
+    Check(store.Peek(next_path) == small && store.ResidentBytes() == small_bytes &&
+          fs::SameDirectoryIdentity(store.Identity(next_path), replacement),
+          L"snapshot: a later fitting listing re-enters the cache");
+    store.Update(next_path, 10, large, identity);
+    Check(!store.Peek(next_path) && store.ResidentBytes() == 0 &&
+          !store.GetOrStart(next_path, generation, &observed_identity) && generation == 10 &&
+          fs::SameDirectoryIdentity(observed_identity, identity),
+          L"snapshot: over-budget Update replaces stale cached data and refreshes metadata");
 }
 
 void TestDataObject() {
@@ -6278,6 +6343,14 @@ int RunSelfTest1B2() {
         return g_fail ? 1 : 0;
     }
 
+    if (GetEnvironmentVariableW(L"PULSE_SELFTEST_CASE", test_case, ARRAYSIZE(test_case)) &&
+        wcscmp(test_case, L"snapshot-store") == 0) {
+        TestSnapshotStorePutKeepsWorkerGeneration();
+        TestSnapshotStoreOversized();
+        if (g_log) { fclose(g_log); g_log = nullptr; }
+        return g_fail ? 1 : 0;
+    }
+
     TestDetailsPreviewInteraction();
     TestBreadcrumb();
     TestThisPcEnumeration();
@@ -6305,6 +6378,7 @@ int RunSelfTest1B2() {
     TestSnapshotPatch();
     TestSnapshotPatchBatch();
     TestSnapshotStorePutKeepsWorkerGeneration();
+    TestSnapshotStoreOversized();
     TestDataObject();
     TestClipboardText();
     TestUniqueName();

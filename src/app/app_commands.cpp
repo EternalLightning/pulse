@@ -50,6 +50,7 @@
 #include "link_resolve.h"
 #include "resource.h"
 #include "../ops/clipboard.h"
+#include "app_drop_shortcuts.h"
 #include "../ipc/ctx_menu_util.h"
 #include "app_file_picker.h"
 #include <windows.h>
@@ -72,7 +73,7 @@ using namespace pulse;
 namespace pulse {
 void OpenFileInCurrentView(AppState& s, const std::wstring& path) {
     ui::PaneViewModel pane;
-    if (s.pane) app::FillPaneViewModel(pane, *s.pane, &s.places);
+    if (s.pane) FillAppPaneViewModel(s, pane, *s.pane);
     if (!pane.snapshot || pane.content_results || (!pane.filter_map && !pane.filter_text.empty())) {
         s.ops.OpenWith(path);
         return;
@@ -626,6 +627,14 @@ static std::wstring SelectedShortcutTarget(const app::Tab* tab) {
     return tab->EntryAt(static_cast<size_t>(tab->selected_index)).link_target;
 }
 
+static std::optional<bool> FileGroupCollapseState(AppState& s) {
+    if (!s.pane) return std::nullopt;
+    ui::PaneViewModel pane;
+    FillAppPaneViewModel(s, pane, *s.pane);
+    if (!pane.date_groups || pane.date_groups->empty()) return std::nullopt;
+    return pane.file_groups_collapsed;
+}
+
 void DispatchMenuCommand(AppState& s, int cmd) {
     if (const auto* tab = ActiveTab(s); tab && BuildCommandContext(s).shell_selection) {
         if (cmd == app::CmdProperties) {
@@ -698,6 +707,22 @@ void DispatchMenuCommand(AppState& s, int cmd) {
             SetGroup(s, tab->group_mode, cmd == app::CmdGroupAscending
                 ? ui::SortDirection::Asc : ui::SortDirection::Desc);
         break;
+    case app::CmdExpandFileGroups:
+    case app::CmdCollapseFileGroups: {
+        auto* tab = ActiveTab(s);
+        const auto collapsed = FileGroupCollapseState(s);
+        const bool collapse = cmd == app::CmdCollapseFileGroups;
+        if (!tab || !collapsed || *collapsed == collapse) break;
+        if (s.renameIndex >= 0) HideRenameOverlay(s, false);
+        tab->file_groups_collapsed = collapse;
+        if (collapse) tab->ClearSelection();
+        tab->scroll_y = 0.0f;
+        CancelScrollAnimation(s);
+        s.scrollTargetY = tab->scroll_y;
+        s.hitTestVmValid = false;
+        InvalidateRect(s.hwnd, nullptr, FALSE);
+        break;
+    }
     case app::CmdExtract: ExtractArchiveSelection(s, false); return;
     case app::CmdExtractAll: ExtractArchiveSelection(s, true); return;
     case app::CmdRefresh:
@@ -796,7 +821,7 @@ void DispatchMenuCommand(AppState& s, int cmd) {
     case app::CmdOpenRecycle: NavigateTo(s, app::MakeRecyclePath()); break;
     case app::CmdSelectAll: {
         app::Tab* tab = ActiveTab(s);
-        if (!tab) break;
+        if (!tab || tab->file_groups_collapsed) break;
         std::vector<int> matches;
         app::CollectFilterMatches(*tab, &s.places, matches);
         tab->SelectIndices(matches);
@@ -805,7 +830,7 @@ void DispatchMenuCommand(AppState& s, int cmd) {
     }
     case app::CmdInvertSelection: {
         app::Tab* tab = ActiveTab(s);
-        if (!tab) break;
+        if (!tab || tab->file_groups_collapsed) break;
         std::vector<int> matches;
         app::CollectFilterMatches(*tab, &s.places, matches);
         tab->InvertIndices(matches);
@@ -813,7 +838,7 @@ void DispatchMenuCommand(AppState& s, int cmd) {
         break;
     }
     case app::CmdSelectWildcard:
-        ShowWildcardSelect(s);
+        if (const auto* tab = ActiveTab(s); tab && !tab->file_groups_collapsed) ShowWildcardSelect(s);
         break;
     case app::CmdProperties: {
         if (auto* tab = ActiveTab(s); tab && IsArchiveView(tab->current_path)) {
@@ -1358,6 +1383,8 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     view_options.folder_sort = s.appPrefs.folder_sort_mode;
     view_options.group_mode = tab->group_mode;
     view_options.group_direction = tab->group_direction;
+    if (tab->view_mode == ui::ViewMode::Details)
+        view_options.file_groups_collapsed = FileGroupCollapseState(s);
     view_options.details_panel = s.showDetailsPanel;
     view_options.can_sort = kind != L"starred" && kind != L"recent";
     view_options.indexed_search = (kind == L"search" || kind == L"saved-search") && !tab->content_results;
@@ -1390,9 +1417,12 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
 
     std::wstring undoLabel = s.ops.UndoLabel();
     bool canPaste = CanPasteIntoCurrent(s);
+    const uint32_t clipboard_sequence = GetClipboardSequenceNumber();
+    const bool can_paste_shortcut = !tab->net_readonly && app::IsShortcutFileSystemPath(workspace_path) &&
+        s.clipboard_availability.CopiedPathsAvailable(clipboard_sequence);
     const auto recent_changes_path = app::RecentChangesMenuPath(*tab, true);
     const auto terminal_path = app::TerminalMenuPath(*tab, true);
-    auto base_items = app::BuildBackgroundMenu(canPaste, s.ops.CanUndo(), undoLabel);
+    auto base_items = app::BuildBackgroundMenu(canPaste, s.ops.CanUndo(), undoLabel, can_paste_shortcut);
     if (terminal_path.empty())
         std::erase_if(base_items, [](const auto& item) { return item.command == app::CmdOpenTerminal; });
     app::AppendRecentChangesCommand(base_items, recent_changes_path, s.appPrefs.change_tracking_enabled);
@@ -1407,6 +1437,10 @@ void ShowBackgroundContextMenu(AppState& s, POINT screen_pt) {
     s.context_menu.CloseMenu();
     if (HandleShellMenuCommand(s, cmd)) return;
     if (HandleQuickAccessCommand(s, cmd, quick_paths)) return;
+    if (cmd == app::CmdPasteShortcut) {
+        QueuePasteShortcuts(s, workspace_path, clipboard_sequence);
+        return;
+    }
     if (cmd == app::CmdViewRecentChanges) { OpenChangeView(s, recent_changes_path); return; }
     if (cmd == app::CmdPinWorkspace) { ToggleWorkspacePin(s, workspace_path); return; }
     if (cmd == app::CmdOpenTerminal) {
@@ -1751,6 +1785,7 @@ void SetViewMode(AppState& s, ui::ViewMode mode, bool direct_manipulation) {
             [&](int view) { return s.renderer.ItemRectInPane(old_pane, bounds, view); },
             [&](int view) { return old_pane.SourceIndex(view); });
     tab->view_mode = mode;
+    tab->file_groups_collapsed = false;
     ++tab->view_mode_revision;
     ++tab->view_generation;
     tab->scroll_x = 0.0f;
@@ -1834,7 +1869,7 @@ void ShowGroupDropdown(AppState& s) {
         s.renderer.NewButtonWidthPx(width-left < 600*s.scale),left,(s.pane ? s.pane->filter_expand : 0.0f),false,false,s.appPrefs.toolbar_order);
     POINT anchor{static_cast<LONG>(layout.group.left),static_cast<LONG>(layout.group.bottom)};
     ClientToScreen(s.hwnd,&anchor);
-    const auto items = app::BuildGroupingMenu(tab->group_mode,tab->group_direction,true);
+    const auto items = app::BuildGroupingMenu(tab->group_mode, tab->group_direction, true, FileGroupCollapseState(s));
     RECT toggle{static_cast<LONG>(layout.group.left), static_cast<LONG>(layout.group.top),
         static_cast<LONG>(layout.group.right), static_cast<LONG>(layout.group.bottom)};
     MapWindowPoints(s.hwnd, nullptr, reinterpret_cast<POINT*>(&toggle), 2);

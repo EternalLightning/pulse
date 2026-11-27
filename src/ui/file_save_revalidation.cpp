@@ -5,6 +5,7 @@
 #include "file_save_revalidation.h"
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 
 namespace pulse::ui {
@@ -17,7 +18,8 @@ std::wstring Native(const std::wstring& path) {
     return path.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + path.substr(2) : L"\\\\?\\" + path;
 }
 bool Cancelled(const std::function<bool()>& cancelled) { return cancelled && cancelled(); }
-DWORD Query(const std::wstring& path, Metadata& metadata, bool* absent = nullptr, bool allow_missing_parent = false) {
+DWORD Query(const std::wstring& path, Metadata& metadata, bool allow_legacy_identity,
+    bool* absent = nullptr, bool allow_missing_parent = false) {
     if (absent) *absent = false;
     struct Handle {
         HANDLE value;
@@ -31,18 +33,37 @@ DWORD Query(const std::wstring& path, Metadata& metadata, bool* absent = nullptr
         return error;
     }
     FILE_BASIC_INFO basic{};
-    if (!GetFileInformationByHandleEx(handle.value, FileBasicInfo, &basic, sizeof(basic))) return GetLastError();
-    if (basic.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return ERROR_NOT_SUPPORTED;
-    FILE_ID_INFO identity{};
-    if (!GetFileInformationByHandleEx(handle.value, FileIdInfo, &identity, sizeof(identity))) return GetLastError();
-    metadata.attributes = basic.FileAttributes;
-    metadata.identity.volume = identity.VolumeSerialNumber;
-    std::copy_n(identity.FileId.Identifier, metadata.identity.file.size(), metadata.identity.file.begin());
-    metadata.identity.creation_time = basic.CreationTime.QuadPart;
+    const bool have_basic = GetFileInformationByHandleEx(handle.value, FileBasicInfo, &basic, sizeof(basic)) != FALSE;
+    DWORD error = have_basic ? ERROR_SUCCESS : GetLastError();
+    if (have_basic) {
+        if (basic.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return ERROR_NOT_SUPPORTED;
+        FILE_ID_INFO identity{};
+        if (GetFileInformationByHandleEx(handle.value, FileIdInfo, &identity, sizeof(identity))) {
+            metadata.attributes = basic.FileAttributes;
+            metadata.identity.creation_time = basic.CreationTime.QuadPart;
+            metadata.identity.volume = identity.VolumeSerialNumber;
+            std::copy_n(identity.FileId.Identifier, metadata.identity.file.size(), metadata.identity.file.begin());
+            return ERROR_SUCCESS;
+        }
+        error = GetLastError();
+    }
+    if (!allow_legacy_identity || (error != ERROR_INVALID_PARAMETER && error != ERROR_NOT_SUPPORTED &&
+        error != ERROR_INVALID_FUNCTION && error != ERROR_INVALID_LEVEL)) return error;
+    BY_HANDLE_FILE_INFORMATION legacy{};
+    if (!GetFileInformationByHandle(handle.value, &legacy)) return GetLastError();
+    if (legacy.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return ERROR_NOT_SUPPORTED;
+    const auto index = (static_cast<ULONGLONG>(legacy.nFileIndexHigh) << 32) | legacy.nFileIndexLow;
+    if (!index) return ERROR_NOT_SUPPORTED;
+    metadata.attributes = have_basic ? basic.FileAttributes : legacy.dwFileAttributes;
+    metadata.identity.creation_time = have_basic ? basic.CreationTime.QuadPart : static_cast<LONGLONG>(
+        (static_cast<ULONGLONG>(legacy.ftCreationTime.dwHighDateTime) << 32) | legacy.ftCreationTime.dwLowDateTime);
+    metadata.identity.volume = legacy.dwVolumeSerialNumber;
+    std::memcpy(metadata.identity.file.data(), &index, sizeof(index));
+    metadata.identity.legacy = true;
     return ERROR_SUCCESS;
 }
-DWORD Parent(const std::wstring& path, Metadata& value) {
-    const DWORD error = Query(path, value);
+DWORD Parent(const std::wstring& path, Metadata& value, bool allow_legacy_identity) {
+    const DWORD error = Query(path, value, allow_legacy_identity);
     return error ? error : (value.attributes & FILE_ATTRIBUTE_DIRECTORY) ? ERROR_SUCCESS : ERROR_DIRECTORY;
 }
 struct Observation {
@@ -51,15 +72,16 @@ struct Observation {
     std::optional<SaveObjectIdentity> target;
 };
 DWORD Observe(const std::wstring& path, const std::wstring& parent,
-              const SaveObjectIdentity* expected_parent, const std::function<bool()>& cancelled, Observation& out, bool caller_validates_access, bool no_test = false, bool require_parent = false) {
+              const SaveObjectIdentity* expected_parent, const std::function<bool()>& cancelled, Observation& out,
+              bool caller_validates_access, bool no_test, bool require_parent, bool allow_legacy_identity) {
     if (Cancelled(cancelled)) return ERROR_CANCELLED;
     Metadata first;
-    DWORD error = Parent(parent, first);
+    DWORD error = Parent(parent, first, allow_legacy_identity);
     if (no_test && !require_parent && (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)) {
         out.parent_exists = false;
         auto ancestor = std::filesystem::path(parent).parent_path();
         while (!ancestor.empty()) {
-            error = Parent(ancestor.wstring(), first);
+            error = Parent(ancestor.wstring(), first, allow_legacy_identity);
             if (!error) break;
             if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return error;
             const auto next = ancestor.parent_path();
@@ -73,7 +95,7 @@ DWORD Observe(const std::wstring& path, const std::wstring& parent,
     if (Cancelled(cancelled)) return ERROR_CANCELLED;
     Metadata target;
     bool absent = false;
-    error = Query(path, target, &absent, no_test && !require_parent);
+    error = Query(path, target, allow_legacy_identity, &absent, no_test && !require_parent);
     // Only a missing-path error from opening the target is absence. Even that code
     // from a metadata/identity query on an open handle remains a real failure.
     if (error && !absent) return error;
@@ -85,7 +107,7 @@ DWORD Observe(const std::wstring& path, const std::wstring& parent,
     if (Cancelled(cancelled)) return ERROR_CANCELLED;
     if (no_test && !out.parent_exists) { out.parent = first.identity; return Cancelled(cancelled) ? ERROR_CANCELLED : ERROR_SUCCESS; }
     Metadata last;
-    error = Parent(parent, last);
+    error = Parent(parent, last, allow_legacy_identity);
     if (error) return error;
     if (last.identity != first.identity) return ERROR_FILE_INVALID;
     if (Cancelled(cancelled)) return ERROR_CANCELLED;
@@ -111,8 +133,10 @@ SaveRevalidationResult CaptureSaveConfirmation(const SaveTargetRequest& request,
     snapshot.caller_validates_access_ = request.caller_validates_access;
     snapshot.no_test_file_create_ = request.no_test_file_create;
     snapshot.require_existing_parent_ = request.require_existing_save_parent;
+    snapshot.allow_legacy_identity_ = request.allow_legacy_identity;
     Observation observed;
-    const DWORD error = Observe(snapshot.path_, snapshot.parent_, nullptr, cancelled, observed, snapshot.caller_validates_access_, snapshot.no_test_file_create_, snapshot.require_existing_parent_);
+    const DWORD error = Observe(snapshot.path_, snapshot.parent_, nullptr, cancelled, observed,
+        snapshot.caller_validates_access_, snapshot.no_test_file_create_, snapshot.require_existing_parent_, snapshot.allow_legacy_identity_);
     if (error) return Failed(error);
     snapshot.parent_identity_ = observed.parent;
     snapshot.parent_exists_ = observed.parent_exists;
@@ -127,7 +151,8 @@ SaveRevalidationResult CaptureSaveConfirmation(const SaveTargetRequest& request,
 SaveRevalidationResult RevalidateSaveConfirmation(const SaveConfirmationSnapshot& snapshot, const std::function<bool()>& cancelled) {
     if (snapshot.path_.empty() || snapshot.parent_.empty()) return Failed(ERROR_INVALID_PARAMETER);
     Observation observed;
-    const DWORD error = Observe(snapshot.path_, snapshot.parent_, snapshot.parent_exists_ ? &snapshot.parent_identity_ : nullptr, cancelled, observed, snapshot.caller_validates_access_, snapshot.no_test_file_create_, snapshot.require_existing_parent_);
+    const DWORD error = Observe(snapshot.path_, snapshot.parent_, snapshot.parent_exists_ ? &snapshot.parent_identity_ : nullptr,
+        cancelled, observed, snapshot.caller_validates_access_, snapshot.no_test_file_create_, snapshot.require_existing_parent_, snapshot.allow_legacy_identity_);
     if (error) return Failed(error);
     SaveRevalidationResult result;
     result.error = ERROR_SUCCESS;

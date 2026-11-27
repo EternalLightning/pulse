@@ -12,6 +12,7 @@
 #include "../common/text_format.h"
 #include "../ipc/shell_query_client.h"
 #include "../fs/shell_namespace.h"
+#include "../fs/drive_kind.h"
 #include <shlobj.h>
 #include <set>
 #include <thread>
@@ -19,7 +20,9 @@
 
 namespace pulse::app {
 namespace {
-std::pair<uint64_t, uint64_t> ReadDriveMetadata(ui::HomeCardView& card) {
+using DriveCapacity = std::pair<uint64_t, uint64_t>;
+
+std::optional<DriveCapacity> ReadDriveMetadata(ui::HomeCardView& card, UINT type) {
     using I = l10n::StringId;
     wchar_t name[MAX_PATH + 1]{};
     if (card.group == 2) {
@@ -33,20 +36,26 @@ std::pair<uint64_t, uint64_t> ReadDriveMetadata(ui::HomeCardView& card) {
             if (ipc::QueryShell(request, result) && SUCCEEDED(result.error) && !result.text.empty())
                 card.label = std::move(result.text);
         }
-    } else if (GetVolumeInformationW(card.path.c_str(), name, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0) && name[0])
-        card.label = std::wstring(name) + L" (" + card.path.substr(0, 2) + L")";
-    else card.label = l10n::Get(I::LocalDisk) + L" (" + card.path.substr(0, 2) + L")";
+    } else {
+        const BOOL volume = GetVolumeInformationW(card.path.c_str(), name, MAX_PATH,
+            nullptr, nullptr, nullptr, nullptr, 0);
+        if (!volume && fs::DriveHasNoMedia(type, GetLastError())) return std::nullopt;
+        card.label = (volume && name[0] ? std::wstring(name) : l10n::Get(I::LocalDisk)) +
+            L" (" + card.path.substr(0, 2) + L")";
+    }
     ULARGE_INTEGER available{}, total{}, free{};
-    if (GetDiskFreeSpaceExW(card.path.c_str(), &available, &total, &free) && total.QuadPart) {
+    const BOOL got_capacity = GetDiskFreeSpaceExW(card.path.c_str(), &available, &total, &free);
+    if (!got_capacity && fs::DriveHasNoMedia(type, GetLastError())) return std::nullopt;
+    if (got_capacity && total.QuadPart) {
         card.used_ratio = static_cast<float>(static_cast<double>(total.QuadPart - std::min(total.QuadPart, free.QuadPart)) / static_cast<double>(total.QuadPart));
         wchar_t capacity[160]{};
         swprintf_s(capacity, l10n::Get(I::HomeDriveSpaceFormat).c_str(),
             format::ByteSize(free.QuadPart).c_str(), format::ByteSize(total.QuadPart).c_str());
         card.detail = capacity;
-        return {total.QuadPart, std::min(total.QuadPart, available.QuadPart)};
+        return DriveCapacity{total.QuadPart, std::min(total.QuadPart, available.QuadPart)};
     }
     card.detail = l10n::Get(I::HomeCapacityUnavailable);
-    return {};
+    return DriveCapacity{};
 }
 }
 void HomeCatalog::State::RebuildQuickAccess() {
@@ -115,6 +124,7 @@ void HomeCatalog::Refresh(const model::HomeQuickAccessPrefs& prefs) {
             std::vector<ui::HomeCardView> cards;
             std::array<ui::HomeCardView, model::kHomeQuickAccessItemCount> quick_access_cards;
             std::unordered_map<std::wstring, std::pair<uint64_t, uint64_t>> drive_capacity;
+            DWORD drives_without_media = 0;
             const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
             const struct { const KNOWNFOLDERID* id; I label; const wchar_t* glyph; int bit; } libraries[] = {
                 {&FOLDERID_Desktop, I::Desktop, L"\xE7F4", 0},
@@ -166,8 +176,14 @@ void HomeCatalog::Refresh(const model::HomeQuickAccessPrefs& prefs) {
                 card.group = type == DRIVE_REMOTE ? 2 : 1;
                 card.glyph = L"\xE7F1";
                 card.label = std::wstring(root, 2);
-                if (type != DRIVE_REMOTE) drive_capacity[card.path] = ReadDriveMetadata(card);
-                else card.detail = l10n::Get(I::HomeLoading);
+                if (type != DRIVE_REMOTE) {
+                    const auto capacity = ReadDriveMetadata(card, type);
+                    if (!capacity) {
+                        drives_without_media |= 1u << i;
+                        continue;
+                    }
+                    drive_capacity[card.path] = *capacity;
+                } else card.detail = l10n::Get(I::HomeLoading);
                 cards.push_back(std::move(card));
             }
             // Publish local content before contacting network providers, which may be slow or offline.
@@ -182,6 +198,7 @@ void HomeCatalog::Refresh(const model::HomeQuickAccessPrefs& prefs) {
                     published_locations = true;
                 }
                 state->drive_capacity = drive_capacity;
+                state->drives_without_media = drives_without_media;
                 for (auto& card : state->cards) {
                     for (const auto& [root, label] : state->label_updates) {
                         if (path::EqualInsensitive(path::StripExtendedPathPrefix(card.path), root))
@@ -199,7 +216,7 @@ void HomeCatalog::Refresh(const model::HomeQuickAccessPrefs& prefs) {
             for (auto& card : cards) {
                 if (!current()) break;
                 if (card.group != 2) continue;
-                drive_capacity[card.path] = ReadDriveMetadata(card);
+                drive_capacity[card.path] = ReadDriveMetadata(card, DRIVE_REMOTE).value_or(DriveCapacity{});
                 publish(false);
             }
             if (SUCCEEDED(com)) CoUninitialize();
@@ -230,6 +247,8 @@ void HomeCatalog::FillDriveLabels(SidebarModel& sidebar) const {
     std::lock_guard lock(state_->mutex);
     // Keep published drive metadata usable while a newer refresh waits on network I/O.
     for (auto& drive : sidebar.drives) {
+        const wchar_t letter = drive.is_drive ? fs::DriveLetterOf(drive.path) : 0;
+        drive.drive_without_media = letter && (state_->drives_without_media & (1u << (letter - L'A')));
         for (const auto& card : state_->cards) {
             if (card.group != 0 && path::EqualInsensitive(
                     path::StripExtendedPathPrefix(drive.path), card.path)) {

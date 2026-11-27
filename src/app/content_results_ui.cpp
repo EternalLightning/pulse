@@ -100,7 +100,7 @@ bool RefreshContentResults(AppState& s) {
             tab->content_revision=store.Revision();
             tab->search_total=store.Count(); tab->file_count=store.Count(); tab->directory_count=0;
             tab->loading=tab->search_content_active && !store.Count();
-            tab->view_row_cache.reset(); tab->view_filter_map.reset();
+            tab->view_row_cache.reset();
 
             if(store.Error()) {
                 tab->SetBannerTitle(app::BannerType::SearchIncomplete, l10n::Get(l10n::StringId::SearchIncomplete));

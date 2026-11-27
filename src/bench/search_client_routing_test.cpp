@@ -4,7 +4,9 @@
 // Existing third-party notices and license terms remain applicable.
 
 #include "../index/index_client.h"
+#include "../common/command_line.h"
 #include "../common/localization.h"
+#include "../common/user_storage.h"
 #include "../index/network_agent_client.h"
 #include "../index/index_search_response.h"
 #include "../index/live_filename_search.h"
@@ -93,8 +95,32 @@ struct IndexClientTestAccess {
 };
 struct SearchClientRoutingTestPeer {
     static void SetRoots(NetworkAgentClient& client, const std::vector<NetworkRootInfo>& roots) {
-        std::lock_guard lock(client.mu_); client.roots_ = roots;
+        std::lock_guard lock(client.mu_);
+        client.roots_ = std::make_shared<const std::vector<NetworkRootInfo>>(roots);
     }
+    static void StartStatus(NetworkAgentClient& client, HWND window, UINT message) {
+        client.Start(window, message, 0, [](NetworkAgentClient& transport) -> std::optional<std::vector<NetworkRootInfo>> {
+            const int progress = status_progress;
+            if (progress < 0) {
+                std::lock_guard lock(transport.request_mu_);
+                ++status_reads;
+                status_blocked = true;
+                WaitForSingleObject(transport.cancel_, 4000);
+                return std::nullopt;
+            }
+            ++status_reads;
+            if (!progress) return std::vector<NetworkRootInfo>{};
+            NetworkRootInfo root;
+            root.path = L"\\\\fixture\\indexed";
+            root.building = true;
+            root.progress = static_cast<uint32_t>(progress);
+            return std::vector<NetworkRootInfo>{root};
+        });
+    }
+    static void RefreshStatus() { NetworkAgentClient::RefreshRootsSoon(); }
+    static inline std::atomic<int> status_progress{0};
+    static inline std::atomic<unsigned> status_reads{0};
+    static inline std::atomic<bool> status_blocked{false};
     static void Initialize(NetworkAgentClient& client, HWND window, UINT message) {
         client.notify_ = window; client.search_msg_ = message; client.running_ = true;
     }
@@ -121,6 +147,107 @@ void Check(bool ok, const char* label) {
 bool Posted(HWND window, UINT message, uint32_t id) {
     MSG msg{};
     return PeekMessageW(&msg, window, message, message, PM_REMOVE) && msg.wParam == id;
+}
+
+void StartupIndexGate() {
+    using namespace pulse::index;
+    const auto id = std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64());
+    const auto root = std::filesystem::absolute(std::filesystem::path(L"bench_data") / (L"index-startup-" + id));
+    std::filesystem::create_directories(root);
+    pulse::storage::OverrideDefaultRootForTesting(root.wstring());
+    wchar_t executable[32768]{};
+    if (!GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable))) {
+        Check(false, "resolve isolated startup fixture");
+        return;
+    }
+    auto command = pulse::QuoteWindowsArgument(executable) + L" --startup-index-gate-child";
+    STARTUPINFOW startup{sizeof(startup)};
+    PROCESS_INFORMATION child{};
+    const bool started = CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE,
+        CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup, &child) != FALSE;
+    Check(started, "start an isolated migration stand-in suspended");
+    if (!started) return;
+    const auto migration = std::make_shared<StartupIndexMigration>(child.hProcess);
+    const std::wstring pipe = L"\\\\.\\pipe\\PulseIndex.Test.StartupGate." + id;
+    IndexClient first, second;
+    first.Start(nullptr, 0, 0, pipe, migration);
+    second.Start(nullptr, 0, 0, pipe, migration);
+    Query queued;
+    queued.session_id = 1;
+    second.SearchAsync(queued, 17);
+    Check(!migration->Ready() && !first.Connected() && !second.Connected() &&
+          IndexClientTestAccess::Pending(second, 2),
+          "windows start and accept searches while the migration child is still suspended");
+    const auto start = GetTickCount64();
+    first.Stop();
+    Check(GetTickCount64() - start < 1000 && WaitForSingleObject(child.hProcess, 0) == WAIT_TIMEOUT,
+          "a closing window releases its wait without terminating or joining the migration child");
+    if (ResumeThread(child.hThread) == static_cast<DWORD>(-1)) {
+        Check(false, "resume owned migration stand-in");
+        TerminateProcess(child.hProcess, 1);
+    }
+    CloseHandle(child.hThread);
+    const auto deadline = GetTickCount64() + 3000;
+    while (!migration->Ready() && GetTickCount64() < deadline) Sleep(10);
+    Check(migration->Ready() && migration->Error().empty() && IndexClientTestAccess::Pending(second, 2),
+          "migration completion releases the other window and retains its queued search");
+    second.Stop();
+}
+
+void SharedNetworkStatus(HWND main, HWND popup) {
+    using pulse::index::NetworkAgentClient;
+    using Peer = pulse::index::SearchClientRoutingTestPeer;
+    constexpr UINT message = WM_APP + 203;
+    const auto notified = [&](HWND window) { return Posted(window, message, 0); };
+    const auto wait_for = [](auto predicate) {
+        const auto deadline = GetTickCount64() + 2500;
+        while (!predicate()) {
+            if (GetTickCount64() >= deadline) return false;
+            Sleep(10);
+        }
+        return true;
+    };
+    NetworkAgentClient first, second;
+    Peer::StartStatus(first, main, message);
+    Check(wait_for([] { return Peer::status_reads >= 1; }), "first network client starts the shared status poller");
+    Peer::StartStatus(second, popup, message);
+    Sleep(1350);
+    Check(Peer::status_reads == 1 && !notified(main) && !notified(popup),
+          "two idle clients share one slower poller without empty status notifications");
+
+    Peer::status_progress = 10;
+    Peer::RefreshStatus();
+    const bool first_notified = wait_for([&] { return notified(main); });
+    const bool second_notified = wait_for([&] { return notified(popup); });
+    Check(first_notified && second_notified && first.Roots().size() == 1 && second.Roots().size() == 1,
+          "refresh wakes the idle poller and sends the new root to both windows");
+    first.Stop();
+    const auto before_progress = Peer::status_reads.load();
+    Check(wait_for([&] { return Peer::status_reads > before_progress; }) && !notified(popup),
+          "active indexing keeps the fast interval and unchanged progress stays quiet");
+
+    Peer::status_progress = 50;
+    const bool progress_posted = wait_for([&] { return notified(popup); });
+    const auto updated = second.Roots();
+    Check(progress_posted && !notified(main) && updated.size() == 1 && updated.front().progress == 50,
+          "progress reaches the remaining window after the original client leaves");
+    Peer::StartStatus(first, main, message);
+    const auto cached = first.Roots();
+    Check(notified(main) && cached.size() == 1 && cached.front().progress == 50,
+          "a new subscriber receives the current shared status immediately");
+
+    second.Stop();
+    Peer::status_progress = 0;
+    Peer::RefreshStatus();
+    Check(wait_for([&] { return notified(main); }) && first.Roots().empty() && !notified(popup),
+          "removal of the final root clears the active window's snapshot");
+    Peer::status_progress = -1;
+    Peer::RefreshStatus();
+    const bool in_flight = wait_for([] { return Peer::status_blocked.load(); });
+    const auto before_stop = GetTickCount64();
+    first.Stop();
+    Check(in_flight && GetTickCount64() - before_stop < 2000 && !notified(main),
+          "closing the final subscriber cancels an in-flight status read");
 }
 
 void WriterIdle() {
@@ -407,7 +534,12 @@ void Exercise(const char* name, HWND main, HWND popup) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--startup-index-gate-child") return 0;
     pulse::l10n::Initialize(nullptr, L"zh-CN");
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--startup-index-gate") {
+        StartupIndexGate();
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && std::wstring_view(argv[1]) == L"--transport-liveness-only")
         return pulse::index::RunIndexClientIoRegressions();
     if (argc == 2 && std::wstring_view(argv[1]) == L"--writer-idle-only") {
@@ -421,6 +553,7 @@ int wmain(int argc, wchar_t** argv) {
         if (argc == 2 && std::wstring_view(argv[1]) == L"--live-pages-only") LivePagination();
         else if (argc == 2 && std::wstring_view(argv[1]) == L"--live-only") LiveSearch(main);
         else if (argc == 2 && std::wstring_view(argv[1]) == L"--boundaries-only") Boundaries(main);
+        else if (argc == 2 && std::wstring_view(argv[1]) == L"--network-status-only") SharedNetworkStatus(main, popup);
         else {
             Exercise<pulse::index::IndexClient, pulse::index::IndexClientTestAccess>("index", main, popup);
             Exercise<pulse::index::NetworkAgentClient, pulse::index::SearchClientRoutingTestPeer>("network", main, popup);

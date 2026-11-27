@@ -14,6 +14,8 @@
 #include <string_view>
 #include <unordered_map>
 
+namespace pulse::ui::command_icons { enum class Icon; }
+
 namespace pulse::ui::fluent {
 
 inline constexpr float kMenuSeparatorHeight = 5.0f;
@@ -55,6 +57,7 @@ enum class MenuPictogram {
     LayoutFour,
 };
 
+command_icons::Icon PaneLayoutIcon(MenuPictogram kind);
 
 struct MotionSpec {
     float duration_ms = 0.0f;
@@ -155,6 +158,9 @@ struct ListRowSpec {
     bool drop_target = false;
 };
 
+void FillLeadingSelectionIndicator(ID2D1DeviceContext* dc, ID2D1Brush* brush,
+                                   const D2D1_RECT_F& bounds, float scale);
+
 struct SidebarItemSpec {
     D2D1_RECT_F bounds{};
     std::wstring_view text;
@@ -172,6 +178,7 @@ struct SidebarItemSpec {
     bool suppress_text = false;
     bool section_title = false; // Root rows share the section-header text style.
     bool skip_glyph = false;
+    bool show_selection_indicator = false;
     float trailing_reserve = 0.0f;
     D2D1_COLOR_F icon_color{};
     D2D1_COLOR_F tag_color{};
@@ -403,7 +410,9 @@ public:
                         IDWriteTextFormat* format, const D2D1_COLOR_F& color,
                         HorizontalAlignment alignment = HorizontalAlignment::Left);
     void DrawGlyph(std::wstring_view glyph, const D2D1_RECT_F& bounds,
-                   const D2D1_COLOR_F& color);
+                   const D2D1_COLOR_F& color, bool monochrome = true, float slot_dip = 18.0f);
+    bool DrawCommandSvg(command_icons::Icon icon, const D2D1_RECT_F& bounds,
+                        const D2D1_COLOR_F& color, bool monochrome, float slot_dip);
     bool DrawSvgResource(int resource_id, const D2D1_RECT_F& bounds,
                          const D2D1_COLOR_F* foreground = nullptr,
                          D2D1_SIZE_F viewport = {24.0f, 24.0f}, float opacity = 1.0f);
@@ -518,9 +527,9 @@ private:
     void DrawTextWithBrush(std::wstring_view text, const D2D1_RECT_F& bounds,
                            IDWriteTextFormat* format, BrushId brush,
                            HorizontalAlignment alignment = HorizontalAlignment::Left);
-    bool DrawRenameResource(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color);
     void DrawGlyphWithFormat(std::wstring_view glyph, const D2D1_RECT_F& bounds,
-                             const D2D1_COLOR_F& color, IDWriteTextFormat* format);
+                             const D2D1_COLOR_F& color, IDWriteTextFormat* format,
+                             bool monochrome = true, float slot_dip = 0.0f);
     void DrawCheckMark(const D2D1_RECT_F& bounds, const D2D1_COLOR_F& color);
     void DrawArc(D2D1_POINT_2F center, float radius, float start_degrees,
                  float span_degrees, float stroke_width, const D2D1_COLOR_F& color);

@@ -10,6 +10,7 @@ param(
     [string]$SourceDir = '.',
     [string[]]$Targets = @('pulse'),
     [switch]$Configure,
+    [switch]$EnsureConfiguration,
     [switch]$Clean,
     [switch]$EnableSelfTests,
     [switch]$ArchitectureFixtures,
@@ -58,20 +59,42 @@ try {
     }
     New-Item -ItemType Directory -Path $build -Force | Out-Null
     $cache = Join-Path $build 'CMakeCache.txt'
-    if ($Configure -or $Clean -or !(Test-Path -LiteralPath $cache)) {
-        $config = @('-S', $source, '-B', $build, '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
-            "-DCMAKE_MAKE_PROGRAM=$($tools.ninja)", '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded',
-            ('-DPULSE_WITH_SELFTEST=' + $(if ($EnableSelfTests) {'ON'} else {'OFF'})),
-            ('-DPULSE_BUILD_ARCHITECTURE_FIXTURES=' + $(if ($ArchitectureFixtures) {'ON'} else {'OFF'})))
-        & $tools.cmake @config @CMakeArgs
-        if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
-    } else {
-        $text = Get-Content -LiteralPath $cache -Raw
-        $cachedCmake = [regex]::Match($text, '(?m)^CMAKE_COMMAND:INTERNAL=(.+)$').Groups[1].Value.Trim().Replace('/','\')
-        $cachedNinja = [regex]::Match($text, '(?m)^CMAKE_MAKE_PROGRAM:[^=]+=(.+)$').Groups[1].Value.Trim().Replace('/','\')
-        $cachedSource = [regex]::Match($text, '(?m)^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$').Groups[1].Value.Trim().Replace('/','\')
+    $settings = [ordered]@{
+        CMAKE_BUILD_TYPE = 'Release'
+        CMAKE_MSVC_RUNTIME_LIBRARY = 'MultiThreaded'
+        PULSE_WITH_SELFTEST = if ($EnableSelfTests) { 'ON' } else { 'OFF' }
+        PULSE_BUILD_ARCHITECTURE_FIXTURES = if ($ArchitectureFixtures) { 'ON' } else { 'OFF' }
+    }
+    $needsConfigure = $Configure -or $Clean -or !(Test-Path -LiteralPath $cache)
+    if (!$needsConfigure) {
+        $cacheText = Get-Content -LiteralPath $cache -Raw
+        $cachedCmake = [regex]::Match($cacheText, '(?m)^CMAKE_COMMAND:INTERNAL=(.+)$').Groups[1].Value.Trim().Replace('/','\')
+        $cachedNinja = [regex]::Match($cacheText, '(?m)^CMAKE_MAKE_PROGRAM:[^=]+=(.+)$').Groups[1].Value.Trim().Replace('/','\')
+        $cachedSource = [regex]::Match($cacheText, '(?m)^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)$').Groups[1].Value.Trim().Replace('/','\')
         if ($cachedSource -ne $source) { throw 'This build directory belongs to another source tree. Use its SourceDir or a different BuildDir.' }
-        if ($cachedCmake -ne $tools.cmake -or $cachedNinja -ne $tools.ninja) { throw 'This cache uses another toolchain. Reconfigure with -Configure, or use -Clean for a damaged cache.' }
+        $toolchainChanged = $cachedCmake -ne $tools.cmake -or $cachedNinja -ne $tools.ninja
+        if ($EnsureConfiguration) {
+            $needsConfigure = $toolchainChanged -or $CMakeArgs.Count -gt 0 -or
+                $cacheText -cnotmatch '(?m)^CMAKE_GENERATOR:INTERNAL=Ninja\r?$' -or
+                !(Test-Path -LiteralPath (Join-Path $build 'build.ninja') -PathType Leaf)
+            foreach ($setting in $settings.GetEnumerator()) {
+                $expected = [regex]::Escape($setting.Value)
+                if ($cacheText -cnotmatch "(?m)^$($setting.Key):[^=\r\n]+=$expected\r?$") {
+                    $needsConfigure = $true
+                    break
+                }
+            }
+        } elseif ($toolchainChanged) {
+            throw 'This cache uses another toolchain. Reconfigure with -Configure, or use -Clean for a damaged cache.'
+        }
+    }
+    if ($needsConfigure) {
+        $config = @('-S', $source, '-B', $build, '-G', 'Ninja', "-DCMAKE_MAKE_PROGRAM=$($tools.ninja)")
+        $definitions = @($settings.GetEnumerator() | ForEach-Object { "-D$($_.Key)=$($_.Value)" })
+        & $tools.cmake @config @definitions @CMakeArgs
+        if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed' }
+    } elseif ($EnsureConfiguration) {
+        Write-Host "Reusing CMake configuration: $build"
     }
     & $tools.cmake --build $build --parallel $Parallel --target @Targets
     if ($LASTEXITCODE -ne 0) { throw 'Build failed' }

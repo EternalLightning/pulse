@@ -11,20 +11,23 @@
 
 namespace pulse::ui {
 
+class MainRenderer;
+
 class FilePickerTree {
 public:
     struct Target {
         std::wstring directory;
         bool pulse_folder = false;
+        bool native_folder = false;
     };
 
     ~FilePickerTree();
     void Initialize(HWND window, model::FileVisibility visibility, bool pulse_folder, const PickerPlacesLoader& load_places);
     void Layout(D2D1_RECT_F bounds, float scale, bool animate);
-    void Navigate(std::wstring_view directory, bool animate);
+    void MarkInitialDirectory(std::wstring_view directory, bool animate);
     bool ApplyListing(UINT_PTR token, bool animate);
     const std::shared_ptr<const model::PlacesCatalog>& Catalog() const { return catalog_; }
-    bool Draw(Compositor& compositor, fluent::Painter& painter, const Theme& theme,
+    bool Draw(Compositor& compositor, MainRenderer& renderer, fluent::Painter& painter, const Theme& theme,
               bool enabled, bool focused, bool high_contrast,
               std::optional<D2D1_POINT_2F> pointer, uint64_t now, bool animate);
     void Focus(bool animate);
@@ -44,6 +47,8 @@ private:
     struct Node {
         std::wstring label;
         std::wstring glyph;
+        D2D1_COLOR_F icon_color{};
+        bool use_path_icon = false;
         Target target;
         Node* parent = nullptr;
         std::vector<std::unique_ptr<Node>> children;
@@ -58,7 +63,7 @@ private:
         bool loaded = false;
         bool failed = false;
 
-        bool Expandable() const { return !target.pulse_folder && !pinned && !shortcut && (!loaded || !children.empty()); }
+        bool Expandable() const { return !target.pulse_folder && !target.native_folder && !pinned && !shortcut && (!loaded || !children.empty()); }
     };
 
     Node& AddRoot(Group group, PickerPlace place);
@@ -74,6 +79,7 @@ private:
     void DragScrollbar(float y, bool high_contrast);
     void Fetch(Node& node);
     void Toggle(Node& node, bool animate);
+    Target Activate(Node& node);
     void RebuildRows(bool animate);
     void AppendRows(Node& node);
     void SyncPath(bool animate);
@@ -97,7 +103,7 @@ private:
     float scale_ = 1.0f, offset_ = 0.0f, drag_offset_ = 0.0f, content_height_ = 0.0f;
     float last_draw_offset_ = 0.0f;
     model::FileVisibility visibility_;
-    bool pulse_folder_ = false, navigated_ = false, reveal_ = false;
+    bool pulse_folder_ = false, mark_initial_directory_ = false, resolving_initial_directory_ = false;
     bool pressed_disclosure_ = false;
     bool dragging_ = false;
 };

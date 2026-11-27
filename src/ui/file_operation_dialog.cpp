@@ -8,6 +8,7 @@
 #include "dialog_keyboard.h"
 #include "../ops/operation_presentation.h"
 #include "../common/localization.h"
+#include "../common/display_path.h"
 #include "../common/text_format.h"
 #include "typography.h"
 #include "window_helpers.h"
@@ -28,6 +29,57 @@
 #include <tuple>
 
 namespace pulse::ui {
+namespace {
+std::wstring SummarizeDeletePath(std::wstring path) {
+    path = pulse::path::FriendlyPathText(path);
+    std::replace(path.begin(), path.end(), L'\n', L' ');
+    std::replace(path.begin(), path.end(), L'\r', L' ');
+    std::replace(path.begin(), path.end(), L'\t', L' ');
+    return path;
+}
+}
+
+ConfirmDialogSpec BuildDeleteConfirmationSpec(const ops::DeleteConfirmation& confirmation) {
+    const auto* pending = &confirmation;
+    using I = l10n::StringId;
+    ConfirmDialogSpec spec;
+    spec.title = l10n::Get(I::DeleteConfirmTitle);
+    spec.confirm_text = l10n::Get(I::PermanentDelete);
+    spec.cancel_text = l10n::Get(I::Cancel);
+    spec.danger = true;
+    spec.cancel_is_default = true;
+    spec.fit_to_work_area = true;
+    spec.message = l10n::Get(I::DeleteIrreversible);
+    uint64_t permanent = 0, recyclable = 0;
+    for (const auto& target : pending->plan.targets) {
+        if (target.disposition == ops::DeleteDisposition::Permanent) ++permanent;
+        else if (target.disposition == ops::DeleteDisposition::Recyclable ||
+            target.disposition == ops::DeleteDisposition::RecycleRequested) ++recyclable;
+    }
+    wchar_t count[256]{};
+    swprintf_s(count, l10n::Get(I::DeleteCountFormat).c_str(),
+        static_cast<unsigned long long>(pending->plan.targets.size()),
+        static_cast<unsigned long long>(permanent), static_cast<unsigned long long>(recyclable));
+    spec.message += L"\n\n" + std::wstring(count);
+    if (permanent && recyclable) spec.message += L"\n" + l10n::Get(I::DeleteMixedWarning);
+    std::vector<std::wstring> reasons;
+    for (const auto& target : pending->plan.targets) {
+        if (!target.reason.empty() && std::find(reasons.begin(), reasons.end(), target.reason) == reasons.end()) reasons.push_back(target.reason);
+    }
+    for (const auto& reason : reasons) spec.message += L"\n" + reason;
+    spec.message += L"\n\n" + l10n::Get(I::DeletePathHeading);
+    const size_t shown = std::min<size_t>(5, pending->plan.targets.size());
+    for (size_t i = 0; i < shown; ++i)
+        spec.rows.push_back({SummarizeDeletePath(pending->plan.targets[i].path), true});
+    if (shown < pending->plan.targets.size()) {
+        wchar_t more[128]{};
+        swprintf_s(more, l10n::Get(I::DeleteMoreFormat).c_str(),
+            static_cast<unsigned long long>(pending->plan.targets.size() - shown));
+        spec.note = more;
+    }
+    return spec;
+}
+
 #ifdef PULSE_UI_TEST_HOOKS
 bool InspectDialogPixels(Compositor& compositor, DialogPixelInspection& inspection) {
     auto* dc = compositor.Dc();
@@ -348,14 +400,16 @@ public:
         wc.hbrBackground = nullptr;
         if (!GetClassInfoExW(wc.hInstance, kConflictClass, &wc)) RegisterClassExW(&wc);
 
-        const int width = static_cast<int>(480 * scale_);
-        const int height = static_cast<int>(428 * scale_);
+        const int width = Width();
+        const int height = Height();
+        MONITORINFO monitor{sizeof(monitor)};
+        GetMonitorInfoW(MonitorFromWindow(owner_, MONITOR_DEFAULTTOPRIMARY), &monitor);
         hwnd_ = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, kConflictClass, l10n::Get(l10n::StringId::OpConflictTitle).c_str(),
             WS_POPUP | WS_SYSMENU,
-            CW_USEDEFAULT, CW_USEDEFAULT, width, height, owner, nullptr,
+            monitor.rcWork.left, monitor.rcWork.top, width, height, owner, nullptr,
             wc.hInstance, this);
         if (!hwnd_) return result_;
-        pulse::ui::CenterOwnedWindow(hwnd_, owner_, width, height);
+        pulse::ui::CenterOwnedWindow(hwnd_, owner_, Width(), Height());
         ModalOwnerScope modal(owner_);
         modal_owner_ = modal.DisabledOwner();
         ShowDialogWithFade(hwnd_);
@@ -373,6 +427,9 @@ public:
     }
 
 private:
+    int Width() const { return static_cast<int>(std::ceil(480.0f * scale_)); }
+    int Height() const { return static_cast<int>(std::ceil((details_ ? 538.0f : 428.0f) * scale_)); }
+
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
         auto* self = reinterpret_cast<ConflictWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
         if (message == WM_NCCREATE) {
@@ -417,10 +474,7 @@ private:
 
     void ToggleDetails() {
         details_ = !details_;
-        RECT window{};
-        GetWindowRect(hwnd_, &window);
-        const int target = static_cast<int>((details_ ? 538 : 428) * scale_);
-        SetWindowPos(hwnd_, nullptr, 0, 0, window.right - window.left, target,
+        SetWindowPos(hwnd_, nullptr, 0, 0, Width(), Height(),
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOOWNERZORDER);
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
@@ -434,13 +488,13 @@ private:
         state.pressed = pressed_ == index + 1;
         state.focused = focus_ == index;
         const bool high_contrast = IsHighContrast();
-        D2D1_COLOR_F fill = high_contrast ? theme.fill_input : dark_ ? HexColor(state.hovered ? 0x474747 : 0x3A3A3A, 0.92f)
-                                  : HexColor(state.hovered ? 0xE4E4E4 : 0xEEEEEE, 0.92f);
+        const bool highlighted = state.hovered || state.focused;
+        const D2D1_COLOR_F fill = high_contrast ? theme.fill_input : dark_ ? HexColor(highlighted ? 0x474747 : 0x3A3A3A, 0.92f)
+                                  : HexColor(highlighted ? 0xE4E4E4 : 0xEEEEEE, 0.92f);
         painter_.FillRoundedRect(bounds, 10 * scale_, fill);
         painter_.StrokeRoundedRect(bounds, 10 * scale_,
-            high_contrast ? (state.focused || state.hovered ? theme.accent : theme.text) :
-                state.focused ? WithAlpha(theme.accent, 0.35f) : theme.stroke_card,
-            state.focused ? 1.5f : 1.0f);
+            high_contrast ? (highlighted ? theme.accent : theme.text) : theme.stroke_card,
+            high_contrast && state.focused ? 1.5f : 1.0f);
         const auto icon = Rect(scale_, 32, 133 + index * 66.0f, 34, 34);
         painter_.FillRoundedRect(icon, 17 * scale_, high_contrast ? theme.fill_input : icon_color);
         if (high_contrast) painter_.StrokeRoundedRect(icon, 17 * scale_, theme.text, scale_);
@@ -563,8 +617,7 @@ private:
 #endif
         case WM_GETMINMAXINFO: {
             auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
-            info->ptMinTrackSize = {static_cast<LONG>(std::ceil(480.0f * scale_)),
-                static_cast<LONG>(std::ceil((details_ ? 538.0f : 428.0f) * scale_))};
+            info->ptMinTrackSize = {Width(), Height()};
             return 0;
         }
         case WM_NCHITTEST:
@@ -584,8 +637,8 @@ private:
             painter_.SetScale(scale_);
             const auto* suggested = reinterpret_cast<RECT*>(lparam);
             SetWindowPos(hwnd_, nullptr, suggested->left, suggested->top,
-                         suggested->right - suggested->left, suggested->bottom - suggested->top,
-                         SWP_NOZORDER | SWP_NOOWNERZORDER);
+                         Width(), Height(), SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+            InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
         case WM_MOUSEMOVE: {

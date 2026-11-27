@@ -192,7 +192,7 @@ int PlainTextBackendTest() {
                 Check(segment.rc.left >= address.left && segment.rc.right <= address.right &&
                     typography::MeasureLine(&compositor, compositor.AddressFormat(), segment.text) <= width_available + 0.5f,
                     "fitted breadcrumb ink and padding remain within the segment bounds");
-                const float x = std::min((segment.rc.left + segment.rc.right) * 0.5f, address.right - 29 * scale);
+                const float x = (segment.rc.left + segment.rc.right) * 0.5f;
                 const auto hit = renderer.HitTest(breadcrumb_vm, bounds, x, (segment.rc.top + segment.rc.bottom) * 0.5f);
                 Check(x >= segment.rc.left && hit.region == HitTestResult::BreadcrumbSegment &&
                     hit.index == static_cast<int>(i) && hit.path == segment.path,
@@ -202,12 +202,16 @@ int PlainTextBackendTest() {
                     Check(hit.label == segment.full_text, "truncated breadcrumb hit testing retains its full tooltip label");
                 }
             }
+            const auto edit_hit = renderer.HitTest(breadcrumb_vm, bounds,
+                address.right - 4 * scale, (address.top + address.bottom) * 0.5f);
+            Check(edit_hit.region == HitTestResult::AddressBar, "address bar leaves room to click into text editing");
             if (path == long_path) Check(truncated, "long UNC breadcrumb exercises actual end ellipsis");
         }
         breadcrumb_vm.pane.path = long_path;
         const auto breadcrumb_bounds = D2D1::RectF(0, 0, 900 * scale, 620 * scale);
         const auto draw_breadcrumb_frame = [&](bool editing) {
             breadcrumb_vm.address_editing = editing;
+            breadcrumb_vm.address_path_animation = editing ? 1.0f : 0.0f;
             const auto* stats = compositor.GetLumaTextStats();
             const auto before = stats ? stats->draw_calls : 0;
             dc->BeginDraw();

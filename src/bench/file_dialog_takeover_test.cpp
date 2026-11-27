@@ -5,13 +5,18 @@
 #include "../app/native_file_dialog_adapter.h"
 #include "../app/file_picker_places.h"
 #include "../app/file_picker_tabs.h"
+#include "../app/session.h"
 #include "../app/link_resolve.h"
 #include "../common/file_dialog_bridge_bypass.h"
+#include "../common/display_path.h"
 #include "../common/windows_compat.h"
 #include "../common/localization.h"
 #include "../common/picker_user_storage.h"
+#include "../common/shell_id.h"
 #include "../common/user_storage.h"
+#include "../fs/device_source.h"
 #include "../ipc/picker_client.h"
+#include "../shell_bridge/file_dialog_client_state.h"
 #include "../shell_bridge/file_dialog_wrapper.h"
 
 #include <ole2.h>
@@ -244,6 +249,151 @@ bool LocalPickerCase(const std::filesystem::path& folder) {
         IsWindowEnabled(owner) && !FindWindowW(L"PulseFilePicker", title);
     DestroyWindow(owner);
     return passed;
+}
+
+bool PickerBreadcrumbCase(const std::filesystem::path& parent) {
+    const auto child = parent / L"测试目录";
+    if (!std::filesystem::create_directory(child)) return false;
+    pulse::ui::FilePickerSpec spec;
+    spec.mode = pulse::ui::PickerMode::Folder;
+    spec.initial_path = child.wstring();
+    spec.software_device = true;
+    std::atomic_int directory_step = 0;
+    spec.on_snapshot = [&](const pulse::ui::FilePickerSnapshot& state) {
+        if (directory_step == 0 && state.directory == child.wstring()) directory_step = 1;
+        else if (directory_step == 1 && state.directory != child.wstring() &&
+            child.wstring().starts_with(state.directory)) directory_step = 2;
+        else if (directory_step == 2 && state.directory == child.wstring()) directory_step = 3;
+    };
+    bool clicked_crumb = false, typed_path = false, escaped = false, navigated = false;
+    std::jthread driver;
+    spec.on_ready = [&](HWND picker) {
+        driver = std::jthread([&, picker] {
+            const UINT dpi = pulse::compat::WindowDpi(picker);
+            const auto tap = [&](int x) {
+                const auto point = MAKELPARAM(x, MulDiv(72, dpi, 96));
+                PostMessageW(picker, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                PostMessageW(picker, WM_LBUTTONUP, 0, point);
+            };
+            HWND address = nullptr;
+            if (WaitFor([&] {
+                    address = FindFilename(picker, child.c_str());
+                    return directory_step == 1 && address;
+                }, 4000)) {
+                tap(MulDiv(177, dpi, 96));
+                clicked_crumb = WaitFor([&] { return directory_step == 2 && !IsWindowVisible(address); }, 4000);
+                RECT bounds{};
+                GetClientRect(picker, &bounds);
+                const int blank = bounds.right - MulDiv(22, dpi, 96);
+                if (clicked_crumb) {
+                    tap(blank);
+                    if (WaitFor([&] { return IsWindowVisible(address); }, 2000)) {
+                        SendMessageW(address, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(child.c_str()));
+                        PostMessageW(address, WM_KEYDOWN, VK_RETURN, 1);
+                        typed_path = WaitFor([&] { return directory_step == 3 && !IsWindowVisible(address); }, 4000);
+                    }
+                }
+                if (typed_path) {
+                    tap(blank);
+                    if (WaitFor([&] { return IsWindowVisible(address); }, 2000)) {
+                        PostMessageW(address, WM_KEYDOWN, VK_ESCAPE, 1);
+                        escaped = WaitFor([&] { return !IsWindowVisible(address) && IsWindowVisible(picker); }, 2000);
+                    }
+                }
+            }
+            if (escaped) {
+                const auto at = [&](const std::filesystem::path& path) {
+                    return WaitFor([&] { return FindFilename(picker, path.c_str()); }, 3000);
+                };
+                tap(MulDiv(104, dpi, 96));
+                if (at(parent)) {
+                    tap(MulDiv(35, dpi, 96));
+                    if (at(child)) {
+                        tap(MulDiv(137, dpi, 96)); // Refresh keeps the Forward destination.
+                        tap(MulDiv(70, dpi, 96));
+                        navigated = WaitFor([&] {
+                            if (FindFilename(picker, parent.c_str())) return true;
+                            tap(MulDiv(70, dpi, 96));
+                            return false;
+                        }, 3000);
+                    }
+                }
+                if (navigated) {
+                    PostMessageW(picker, WM_SYSKEYDOWN, VK_LEFT, 1);
+                    navigated = at(child);
+                }
+                if (navigated) {
+                    PostMessageW(picker, WM_SYSKEYDOWN, VK_RIGHT, 1);
+                    navigated = at(parent);
+                }
+            }
+            PostMessageW(picker, WM_CLOSE, 0, 0);
+        });
+    };
+    pulse::ui::FilePickerResult result;
+    const bool picked = pulse::ui::ShowFilePicker(nullptr, spec, true, {0.20f, 0.50f, 0.85f, 1.0f}, result);
+    if (driver.joinable()) driver.join();
+    if (!clicked_crumb || !typed_path || !escaped) std::printf("[DIAG] directory step=%d crumb=%d text=%d escape=%d\n",
+        directory_step.load(), clicked_crumb, typed_path, escaped);
+    std::printf("[%s] Picker crumb navigates directly, blank area edits, and Escape restores breadcrumbs\n",
+        clicked_crumb && typed_path && escaped ? "PASS" : "FAIL");
+    std::printf("[%s] Picker navigation supports Up, Back, Forward and Alt+arrows and keeps history across Refresh\n",
+        navigated ? "PASS" : "FAIL");
+    return !picked && clicked_crumb && typed_path && escaped && navigated;
+}
+
+bool PickerRecentCase(const std::filesystem::path& folder) {
+    using namespace pulse;
+    const auto start = folder / L"recent-picker-start";
+    const auto target = folder / L"recent-item.txt";
+    if (!std::filesystem::create_directory(start)) return false;
+    std::ofstream(target) << "recent fixture";
+    auto catalog = std::make_shared<model::PlacesCatalog>();
+    catalog->persist = false;
+    catalog->RecordRecent(target.wstring(), model::PlaceItemKind::File);
+    ui::FilePickerSpec spec;
+    spec.initial_path = start.wstring();
+    spec.software_device = true;
+    spec.load_places = [catalog](const auto&) {
+        ui::PickerPlaces places;
+        places.catalog = catalog;
+        places.quick_access.push_back({l10n::Get(l10n::StringId::Recent), model::MakeRecentPath(), L"\xE823"});
+        return places;
+    };
+    std::atomic_bool selected_real_path = false;
+    spec.on_snapshot = [&](const ui::FilePickerSnapshot& snapshot) {
+        if (snapshot.directory == start.wstring() && snapshot.selections == std::vector<std::wstring>{target.wstring()})
+            selected_real_path = true;
+    };
+    std::jthread driver;
+    spec.on_ready = [&](HWND picker) {
+        driver = std::jthread([&, picker] {
+            const UINT dpi = compat::WindowDpi(picker);
+            const auto tap = [&](int x, int y) {
+                const auto point = MAKELPARAM(MulDiv(x, dpi, 96), MulDiv(y, dpi, 96));
+                PostMessageW(picker, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                PostMessageW(picker, WM_LBUTTONUP, 0, point);
+            };
+            const auto recent = l10n::Get(l10n::StringId::Recent);
+            if (WaitFor([&] {
+                    if (FindFilename(picker, recent.c_str())) return true;
+                    tap(75, 114);
+                    return false;
+                }, 3500)) {
+                tap(320, 350);
+                PostMessageW(picker, WM_KEYDOWN, VK_HOME, 1);
+                if (WaitFor([&] { return selected_real_path.load(); }, 3000)) {
+                    PostMessageW(picker, WM_KEYDOWN, VK_RETURN, 1);
+                    if (WaitFor([&] { return !IsWindow(picker); }, 2000)) return;
+                }
+            }
+            PostMessageW(picker, WM_CLOSE, 0, 0);
+        });
+    };
+    ui::FilePickerResult selection;
+    const bool picked = ui::ShowFilePicker(nullptr, spec, true, {0.20f, 0.50f, 0.85f, 1.0f}, selection);
+    if (driver.joinable()) driver.join();
+    return picked && selected_real_path && selection.paths == std::vector<std::wstring>{target.wstring()};
 }
 
 int WatchNativeFixture(DWORD source_process) {
@@ -505,6 +655,8 @@ bool WatcherCase(const std::wstring& folder, NativeCase test, CancelInput cancel
 class DialogEventProbe final : public Microsoft::WRL::RuntimeClass<
     Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>, IFileDialogEvents> {
 public:
+    ComPtr<IShellItem> expected_native_folder;
+    bool reached_native_folder = false;
     bool Candidate() const { return candidate_; }
     bool OnCallerThread() const { return caller_thread_; }
     unsigned Attempts() const { return attempts_; }
@@ -526,9 +678,16 @@ public:
         return ++attempts_ == 1 ? S_FALSE : S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnFolderChanging(IFileDialog*, IShellItem*) override { return S_OK; }
-    HRESULT STDMETHODCALLTYPE OnFolderChange(IFileDialog*) override {
+    HRESULT STDMETHODCALLTYPE OnFolderChange(IFileDialog* dialog) override {
         caller_thread_ &= GetCurrentThreadId() == thread_;
         ++folder_changes_;
+        if (expected_native_folder) {
+            ComPtr<IShellItem> folder;
+            int order = 1;
+            if (SUCCEEDED(dialog->GetFolder(&folder)) &&
+                SUCCEEDED(folder->Compare(expected_native_folder.Get(), SICHINT_CANONICAL, &order)) && !order)
+                reached_native_folder = true;
+        }
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE OnSelectionChange(IFileDialog*) override { return S_OK; }
@@ -540,6 +699,75 @@ private:
     bool candidate_ = true, caller_thread_ = true;
     unsigned attempts_ = 0, folder_changes_ = 0;
 };
+
+int PortableHandoffCase(const std::filesystem::path& directory, const std::filesystem::path& executable) {
+    using namespace pulse::shell_bridge;
+    if (FAILED(OleInitialize(nullptr))) return 2;
+    struct OleDone { ~OleDone() { OleUninitialize(); } } ole;
+    const auto devices = pulse::fs::MakeShellDeviceSource()->ListDevices();
+    if (devices.size() != 1) {
+        std::puts("[SKIP] portable handoff fixture requires one accessible Shell device");
+        return 77;
+    }
+    constexpr wchar_t title[] = L"Pulse fixture - portable-device Open";
+    const auto system = LoadLibraryExW(L"comdlg32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!system) return 2;
+    struct LibraryDone { HMODULE module; ~LibraryDone() { FreeLibrary(module); } } library{system};
+    using Entry = HRESULT (WINAPI*)(REFCLSID, REFIID, void**);
+    const auto entry = std::bit_cast<Entry>(GetProcAddress(system, "DllGetClassObject"));
+    const auto sink = Microsoft::WRL::Make<DialogEventProbe>();
+    ComPtr<IClassFactory> factory;
+    ComPtr<IFileOpenDialog> native, dialog;
+    ComPtr<IShellItem> initial;
+    GUID client{};
+    DWORD cookie = 0;
+    FileDialogBridgeServices services;
+    services.executable = executable.wstring();
+    constexpr auto options = FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT;
+    if (!entry || !sink || FAILED(entry(CLSID_FileOpenDialog, IID_PPV_ARGS(&factory))) ||
+        FAILED(factory->CreateInstance(nullptr, IID_PPV_ARGS(&native))) ||
+        FAILED(WrapNativeFileDialog(DialogFactory::Open, native.Get(), services, IID_PPV_ARGS(&dialog))) ||
+        FAILED(pulse::shell_id::CreateItem(devices.front().id, IID_PPV_ARGS(&sink->expected_native_folder))) ||
+        FAILED(SHCreateItemFromParsingName(directory.c_str(), nullptr, IID_PPV_ARGS(&initial))) ||
+        FAILED(CoCreateGuid(&client)) || FAILED(dialog->SetClientGuid(client)) ||
+        FAILED(dialog->SetFolder(initial.Get())) || FAILED(dialog->SetTitle(title)) ||
+        FAILED(dialog->SetOptions(options)) || FAILED(dialog->Advise(sink.Get(), &cookie))) return 2;
+    std::atomic_bool done{false};
+    bool entered_pulse = false, entered_windows = false;
+    std::jthread input([&] {
+        WaitFor([&] {
+            if (done) return true;
+            if (const auto wnd = Find(L"#32770", title, GetCurrentProcessId())) {
+                entered_windows = true;
+                return true;
+            }
+            if (const auto wnd = Find(L"PulseFilePicker", title); wnd && IsWindowEnabled(wnd)) {
+                if (!entered_pulse) {
+                    const auto point = MAKELPARAM(MulDiv(65, GetDpiForWindow(wnd), 96),
+                                                  MulDiv(115, GetDpiForWindow(wnd), 96));
+                    PostMessageW(wnd, WM_LBUTTONDOWN, MK_LBUTTON, point);
+                    PostMessageW(wnd, WM_LBUTTONUP, 0, point);
+                    entered_pulse = true;
+                }
+                PostMessageW(wnd, WM_KEYDOWN, VK_END, 1);
+                PostMessageW(wnd, WM_KEYDOWN, VK_RETURN, 1);
+            }
+            return false;
+        }, 11000);
+        if (const auto wnd = Find(L"#32770", title, GetCurrentProcessId())) PostMessageW(wnd, WM_CLOSE, 0, 0);
+        if (const auto wnd = Find(L"PulseFilePicker", title)) PostMessageW(wnd, WM_CLOSE, 0, 0);
+    });
+    const auto shown = dialog->Show(nullptr);
+    done = true;
+    input.join();
+    dialog->Unadvise(cookie);
+    dialog->ClearClientData();
+    const bool passed = entered_pulse && entered_windows && sink->reached_native_folder &&
+        shown == HRESULT_FROM_WIN32(ERROR_CANCELLED);
+    std::printf("[%s] chosen portable-device row opens that exact folder in the Windows Open dialog (picker=%d native=%d folder=%d)\n",
+        passed ? "PASS" : "FAIL", entered_pulse, entered_windows, sink->reached_native_folder);
+    return passed ? 0 : 1;
+}
 
 bool BridgeEventCase(const std::filesystem::path& directory, const std::filesystem::path& pulse,
                      bool expect_fallback = false) {
@@ -601,6 +829,129 @@ bool BridgeEventCase(const std::filesystem::path& directory, const std::filesyst
     if (!passed) std::printf("[DIAG] show=%08lx picker=%d native=%d attempts=%u candidate=%d caller=%d folders=%u\n",
         static_cast<unsigned long>(shown), saw_picker, saw_native, sink->Attempts(), sink->Candidate(),
         sink->OnCallerThread(), sink->FolderChanges());
+    return passed;
+}
+
+bool BridgeDirectoryMemory(const std::filesystem::path& directory) {
+    using namespace pulse::shell_bridge;
+    const auto target = directory / L"last-used";
+    if (!std::filesystem::create_directory(target)) return false;
+    const auto selected = target / L"sample.txt";
+    std::ofstream(selected) << "fixture";
+    const FileDialogClientState state(false);
+    state.Clear(nullptr);
+    struct Cleanup {
+        const FileDialogClientState& state;
+        ~Cleanup() { state.Clear(nullptr); }
+    } cleanup{state};
+    const auto system = LoadLibraryExW(L"comdlg32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    using Entry = HRESULT (WINAPI*)(REFCLSID, REFIID, void**);
+    const auto entry = system ? std::bit_cast<Entry>(GetProcAddress(system, "DllGetClassObject")) : nullptr;
+    ComPtr<IClassFactory> factory;
+    ComPtr<IShellItem> initial;
+    if (!entry || FAILED(entry(CLSID_FileOpenDialog, IID_PPV_ARGS(&factory))) ||
+        FAILED(SHCreateItemFromParsingName(directory.c_str(), nullptr, IID_PPV_ARGS(&initial)))) return false;
+
+    const auto run = [&](bool force, bool accept, const std::filesystem::path& expected) {
+        bool invoked = false;
+        FileDialogBridgeServices services;
+        services.run_bridge = [&](const wire::Message& message, HWND, HANDLE) {
+            const auto& request = std::get<wire::Request>(message.body);
+            invoked = request.initial_directory == expected.u16string();
+            wire::Response result;
+            result.operation = request.operation;
+            result.status = accept ? wire::Status::Accepted : wire::Status::Cancelled;
+            if (accept) result.paths.push_back(selected.u16string());
+            return wire::Message{message.request_id, std::move(result)};
+        };
+        ComPtr<IFileOpenDialog> native, dialog;
+        constexpr auto options = FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_FILEMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT;
+        if (FAILED(factory->CreateInstance(nullptr, IID_PPV_ARGS(&native))) ||
+            FAILED(WrapNativeFileDialog(DialogFactory::Open, native.Get(), services, IID_PPV_ARGS(&dialog))) ||
+            FAILED(dialog->SetOptions(options)) || FAILED(dialog->SetDefaultFolder(initial.Get())) ||
+            (force && FAILED(dialog->SetFolder(initial.Get())))) return false;
+        return dialog->Show(nullptr) == (accept ? S_OK : HRESULT_FROM_WIN32(ERROR_CANCELLED)) && invoked;
+    };
+    return run(true, true, directory) && run(false, false, target) &&
+        run(true, false, directory) && run(false, false, target);
+}
+
+enum class ProviderDialogCase { SaveNew, SaveReplace, Open };
+
+bool ProviderDialog(const std::filesystem::path& directory, const std::filesystem::path& pulse, ProviderDialogCase test) {
+    using namespace pulse::shell_bridge;
+    const bool open = test == ProviderDialogCase::Open;
+    const bool overwrite = test == ProviderDialogCase::SaveReplace;
+    const auto title = open ? L"Pulse fixture - provider open" : L"Pulse fixture - provider save";
+    const auto filename = open ? L"provider-save.txt" : L"provider-save";
+    const auto system = LoadLibraryExW(L"comdlg32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    using Entry = HRESULT (WINAPI*)(REFCLSID, REFIID, void**);
+    const auto entry = system ? std::bit_cast<Entry>(GetProcAddress(system, "DllGetClassObject")) : nullptr;
+    ComPtr<IClassFactory> factory;
+    ComPtr<IFileDialog> native, dialog;
+    ComPtr<IShellItem> initial;
+    GUID client{};
+    FileDialogBridgeServices services;
+    services.executable = pulse.wstring();
+    const COMDLG_FILTERSPEC filters[] = {{L"Text files", L"*.txt"}};
+    constexpr auto common = FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR | FOS_DONTADDTORECENT;
+    const auto options = common | (open ? FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST : FOS_OVERWRITEPROMPT | FOS_NOREADONLYRETURN);
+    if (!entry || FAILED(entry(open ? CLSID_FileOpenDialog : CLSID_FileSaveDialog, IID_PPV_ARGS(&factory))) ||
+        FAILED(factory->CreateInstance(nullptr, IID_PPV_ARGS(&native))) ||
+        FAILED(WrapNativeFileDialog(open ? DialogFactory::Open : DialogFactory::Save, native.Get(), services, IID_PPV_ARGS(&dialog))) ||
+        FAILED(SHCreateItemFromParsingName(directory.c_str(), nullptr, IID_PPV_ARGS(&initial))) ||
+        FAILED(CoCreateGuid(&client)) || FAILED(dialog->SetClientGuid(client)) ||
+        FAILED(dialog->SetFolder(initial.Get())) || FAILED(dialog->SetTitle(title)) || FAILED(dialog->SetOptions(options)) ||
+        FAILED(dialog->SetFileTypes(1, filters)) || (!open && FAILED(dialog->SetDefaultExtension(L"txt"))) ||
+        FAILED(dialog->SetFileName(filename))) return false;
+    std::atomic_bool finished = false;
+    bool saw_native = false, picker_clicked = false, confirmed = false;
+    std::jthread click([&] {
+        WaitFor([&] {
+            if (finished) return true;
+            if (const HWND native = Find(L"#32770", title, GetCurrentProcessId())) {
+                saw_native = true;
+                PostMessageW(native, WM_CLOSE, 0, 0);
+                return true;
+            }
+            const HWND picker = Find(L"PulseFilePicker", title);
+            const HWND confirmation = FindWindowW(L"PulseConfirmWindow", nullptr);
+            if (picker && confirmation && GetWindow(confirmation, GW_OWNER) == picker && IsWindowVisible(confirmation)) {
+                if (!confirmed) confirmed = ClickPickerButton(confirmation, 60, 30, true);
+            } else if (picker && IsWindowEnabled(picker) && !confirmed && FindFilename(picker, filename)) {
+                picker_clicked = ClickPickerButton(picker, 45, 30, true);
+            }
+            return false;
+        }, 12000);
+        if (const HWND picker = Find(L"PulseFilePicker", title)) PostMessageW(picker, WM_CLOSE, 0, 0);
+    });
+    const auto hr = dialog->Show(nullptr);
+    finished = true;
+    click.join();
+    ComPtr<IShellItem> item;
+    PWSTR path = nullptr;
+    const auto expected = directory / L"provider-save.txt";
+    const bool returned = picker_clicked && !saw_native && confirmed == overwrite && hr == S_OK &&
+        dialog->GetResult(&item) == S_OK && item->GetDisplayName(SIGDN_FILESYSPATH, &path) == S_OK &&
+        path && _wcsicmp(path, expected.c_str()) == 0 && std::filesystem::exists(expected) == (overwrite || open);
+    bool passed = false;
+    if (returned) {
+        const std::string content = test == ProviderDialogCase::SaveNew ? "written by the caller" : "replaced by the caller";
+        bool written = true;
+        if (!open) {
+            std::ofstream stream(std::filesystem::path(path), std::ios::binary | std::ios::trunc);
+            stream << content;
+            stream.close();
+            written = stream.good();
+        }
+        std::ifstream saved(std::filesystem::path(path), std::ios::binary);
+        const std::string readback{std::istreambuf_iterator<char>(saved), {}};
+        passed = written && readback == content;
+    }
+    CoTaskMemFree(path);
+    dialog->ClearClientData();
+    if (!passed) std::printf("[DIAG] provider %s hr=%08lx clicked=%d native=%d confirmed=%d returned=%d\n",
+        open ? "open" : "save", static_cast<unsigned long>(hr), picker_clicked, saw_native, confirmed, returned);
     return passed;
 }
 
@@ -834,7 +1185,7 @@ bool ShortcutLocationCase(const std::filesystem::path& target) {
 bool SidebarCase(const std::filesystem::path& folder, bool with_tabs) {
     using namespace pulse;
     const auto first = (folder / L"First").wstring(), second = (folder / L"Second").wstring();
-    const auto cloud = (folder / L"Cloud").wstring(), network = (folder / L"Network").wstring();
+    const auto cloud = (folder / L"First" / L"Cloud").wstring(), network = (folder / L"Network").wstring();
     for (const auto* path : {&first, &second, &cloud, &network}) std::filesystem::create_directory(*path);
     const auto config = (folder / L"config").wstring();
     storage::OverrideDefaultRootForTesting(config);
@@ -844,6 +1195,9 @@ bool SidebarCase(const std::filesystem::path& folder, bool with_tabs) {
         "quick_access_order": ["C:\\Second pin", "C:\\First pin"],
         "networks": [{"name":"Saved share","unc":"\\\\test-server\\test-share"}]
     })";
+    app::WindowSessionSnapshot preferences;
+    preferences.quick_access_hidden = 1u << static_cast<unsigned>(app::BuiltinQuickAccess::Desktop);
+    if (!app::SaveSessionPreferences(preferences)) return false;
     const auto places = app::LoadFilePickerPlaces([] { return false; });
     if (places.quick_access.size() < 2 || places.quick_access[0].directory != L"C:\\Second pin" ||
         places.quick_access[1].directory != L"C:\\First pin" || places.network.empty() ||
@@ -851,6 +1205,13 @@ bool SidebarCase(const std::filesystem::path& folder, bool with_tabs) {
         std::puts("[DIAG] saved quick access order or network location missing");
         return false;
     }
+    const auto main_quick_access = app::BuildQuickAccessGroup(app::BuildQuickAccessDefaults(), places.catalog.get(),
+        static_cast<uint32_t>(preferences.quick_access_hidden));
+    std::vector<std::wstring> expected, actual;
+    for (const auto& entry : main_quick_access.items)
+        if (!entry.path.empty() && entry.path != model::MakeRecyclePath()) expected.push_back(path::FriendlyPathText(entry.path));
+    for (const auto& entry : places.quick_access) actual.push_back(entry.directory);
+    if (actual != expected || std::ranges::find(actual, model::MakeRecentPath()) == actual.end()) return false;
 
     const auto opened = (folder / L"Workspace").wstring();
     std::filesystem::create_directory(opened);
@@ -903,14 +1264,20 @@ bool SidebarCase(const std::filesystem::path& folder, bool with_tabs) {
     ui::FilePickerSpec spec;
     spec.title = L"Pulse fixture - picker sidebar";
     spec.software_device = true;
+    if (with_tabs) spec.initial_path = network;
     std::atomic_bool snapshot_ok = false;
     spec.load_places = [&](const auto&) {
         auto tabs = app::ReadPickerTabs(source);
         snapshot_ok = with_tabs ? tabs.size() == 1 && tabs[0].label == L"打开的项目" && tabs[0].directory == opened
             : tabs.empty();
-        return ui::PickerPlaces{.onedrive = {{L"OneDrive account", cloud, L"\xE753"}}, .open_tabs = std::move(tabs),
+        ui::PickerPlaces result{.onedrive = {{L"OneDrive account", cloud, L"\xE753"}}, .open_tabs = std::move(tabs),
             .quick_access = {{L"First pin", first, L"\xE8B7"}, {L"Second pin", second, L"\xE8B7"}},
             .network = {{L"Saved share", network, L"\xE968"}}};
+        if (with_tabs) for (int i = 0; i < 24; ++i) {
+            const auto label = L"Extra pin " + std::to_wstring(i);
+            result.quick_access.push_back({label, (folder / label).wstring(), L"\xE8B7"});
+        }
+        return result;
     };
     bool navigated = false;
     std::thread driver;
@@ -920,17 +1287,32 @@ bool SidebarCase(const std::filesystem::path& folder, bool with_tabs) {
             const auto at = [=](int x, int y) {
                 return MAKELPARAM(std::lround(x * scale), std::lround(y * scale));
             };
-            const auto click = [&](int y) {
-                const auto point = at(75, y);
+            const auto click = [&](int x, int y) {
+                const auto point = at(x, y);
                 PostMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON, point);
                 PostMessageW(window, WM_LBUTTONUP, 0, point);
             };
             const auto key = [&](WPARAM value) { PostMessageW(window, WM_KEYDOWN, value, 1); };
-            navigated = WaitFor([&] {
+            const bool initial_directory_loaded =
+                !with_tabs || WaitFor([&] { return FindFilename(window, network.c_str()); }, 3500);
+            navigated = initial_directory_loaded && WaitFor([&] {
                 if (FindFilename(window, with_tabs ? opened.c_str() : first.c_str())) return true;
-                click(157); // 100 DIP list origin, 30 DIP account and 12 DIP divider.
+                click(75, 157); // 100 DIP list origin, 30 DIP account and 12 DIP divider.
                 return false;
             }, 3500);
+            if (with_tabs && !navigated) std::puts("[DIAG] Initial folder did not leave the top sidebar rows accessible");
+            if (navigated && !with_tabs) {
+                click(320, 200);
+                key(VK_HOME);
+                key(VK_RETURN);
+                navigated = WaitFor([&] { return FindFilename(window, cloud.c_str()); }, 2000);
+                if (navigated) {
+                    click(75, 136); // Focus the sidebar through the group divider without choosing a row.
+                    key(VK_RETURN);
+                    navigated = WaitFor([&] { return FindFilename(window, first.c_str()); }, 2000);
+                }
+                if (!navigated) std::puts("[DIAG] Sidebar cursor did not stay on the Quick Access pin after opening its child");
+            }
             if (navigated) {
                 key(VK_HOME);
                 key(VK_RETURN);
@@ -972,10 +1354,30 @@ bool SidebarCase(const std::filesystem::path& folder, bool with_tabs) {
 int wmain(int argc, wchar_t** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     const std::wstring_view mode = argc == 4 ? argv[1] : L"";
+    if (mode == L"--portable-handoff") return PortableHandoffCase(argv[3], argv[2]);
     if (mode == L"--read-picker-tabs") {
         const auto source = reinterpret_cast<HWND>(static_cast<UINT_PTR>(std::wcstoull(argv[2], nullptr, 10)));
         const auto tabs = pulse::app::ReadPickerTabs(source);
         return tabs.size() == 1 && tabs[0].label == L"打开的项目" && tabs[0].directory == argv[3] ? 0 : 1;
+    }
+    if (mode == L"--provider-save") {
+        const auto fixture = std::filesystem::absolute(argv[3]) /
+            (L"Pulse-save-fixture-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+        if (!std::filesystem::create_directory(fixture)) return 2;
+        const auto ole = OleInitialize(nullptr);
+        const auto pulse = std::filesystem::absolute(argv[2]);
+        const bool created = SUCCEEDED(ole) && ProviderDialog(fixture, pulse, ProviderDialogCase::SaveNew);
+        const bool replaced = created && ProviderDialog(fixture, pulse, ProviderDialogCase::SaveReplace);
+        const bool opened = replaced && ProviderDialog(fixture, pulse, ProviderDialogCase::Open);
+        if (SUCCEEDED(ole)) OleUninitialize();
+        std::error_code error;
+        std::filesystem::remove(fixture / L"provider-save.txt", error);
+        const bool cleaned = !error && std::filesystem::remove(fixture, error);
+        std::printf("[%s] Caller writes and reads a new file through the Pulse picker result\n", created ? "PASS" : "FAIL");
+        std::printf("[%s] Pulse confirms overwrite and the caller writes the replacement\n", replaced ? "PASS" : "FAIL");
+        std::printf("[%s] Caller opens the replaced file through the Pulse picker result\n", opened ? "PASS" : "FAIL");
+        std::printf("[%s] Remove the isolated save fixture\n", cleaned ? "PASS" : "FAIL");
+        return created && replaced && opened && cleaned ? 0 : 1;
     }
     if (mode == L"--browser-save-fixture" || mode == L"--browser-open-fixture") {
         wchar_t* end = nullptr;
@@ -1013,6 +1415,7 @@ int wmain(int argc, wchar_t** argv) {
     const bool host_only = argc == 3 && wcscmp(argv[2], L"--host-only") == 0;
     const bool events_only = argc == 3 && wcscmp(argv[2], L"--events-only") == 0;
     const bool local_only = argc == 3 && wcscmp(argv[2], L"--local-only") == 0;
+    const bool memory_only = argc == 3 && wcscmp(argv[2], L"--client-state-only") == 0;
     const bool sidebar_only = argc == 3 && wcscmp(argv[2], L"--sidebar-only") == 0;
     const bool shortcut_location_only = argc == 3 && wcscmp(argv[2], L"--shortcut-location-only") == 0;
     const std::wstring_view focus_argument = argc == 3 ? argv[2] : L"";
@@ -1024,12 +1427,19 @@ int wmain(int argc, wchar_t** argv) {
     if (argc != 2 && !watcher_only && !save_only && !overwrite_only && !stop_only && !switch_only && !terminate_only && !fallback_only &&
         !custom_open_only && !host_only && !sidebar_only && !local_only && !focus_only &&
         !accept_focus_only && !save_focus_only && !bridge_focus_only &&
-        !shortcut_location_only && !events_only) return 2;
+        !shortcut_location_only && !events_only && !memory_only) return 2;
     pulse::l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
     const auto folder = std::filesystem::absolute(argv[1]) /
         (L"picker-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
     if (!std::filesystem::create_directories(folder)) return 2;
     std::ofstream(folder / L"sample.txt") << "fixture";
+    if (memory_only) {
+        const auto ole = OleInitialize(nullptr);
+        const bool passed = SUCCEEDED(ole) && BridgeDirectoryMemory(folder);
+        if (SUCCEEDED(ole)) OleUninitialize();
+        std::printf("[%s] Fresh dialogs restore the accepted directory and honor an explicit folder override\n", passed ? "PASS" : "FAIL");
+        return passed ? 0 : 1;
+    }
     if (events_only) {
         const auto ole = OleInitialize(nullptr);
         const auto executable = std::filesystem::absolute(argv[0]);
@@ -1094,10 +1504,11 @@ int wmain(int argc, wchar_t** argv) {
     if (local_only) {
         const auto ole = OleInitialize(nullptr);
         const bool passed = SUCCEEDED(ole) && LocalPickerCase(folder);
+        const bool address = SUCCEEDED(ole) && PickerBreadcrumbCase(folder);
         if (SUCCEEDED(ole)) OleUninitialize();
         std::printf("[%s] Internal picker runs in-process, accepts a folder and restores its modal owner\n",
             passed ? "PASS" : "FAIL");
-        return passed ? 0 : 1;
+        return passed && address ? 0 : 1;
     }
     if (focus_only) {
         const auto pulse = std::filesystem::absolute(argv[0]).parent_path() / L"Pulse.exe";
@@ -1124,12 +1535,17 @@ int wmain(int argc, wchar_t** argv) {
         return passed ? 0 : 1;
     }
     if (sidebar_only) {
+        const auto ole = OleInitialize(nullptr);
+        const bool recent = SUCCEEDED(ole) && PickerRecentCase(folder);
+        if (SUCCEEDED(ole)) OleUninitialize();
+        std::printf("[%s] Recent submits the real file path while the caller keeps its filesystem folder\n", recent ? "PASS" : "FAIL");
         const bool tabs = SidebarCase(folder, true);
-        std::printf("[%s] Current folder tabs appear between OneDrive and Quick Access and navigate by mouse and keyboard\n",
+        std::printf("[%s] Sidebar opens at the top with an offscreen initial folder, and open tabs navigate by mouse and keyboard\n",
             tabs ? "PASS" : "FAIL");
         const bool empty = SidebarCase(folder, false);
-        std::printf("[%s] Special tabs leave no group or gap before Quick Access\n", empty ? "PASS" : "FAIL");
-        return tabs && empty ? 0 : 1;
+        std::printf("[%s] Quick Access keeps its position and cursor when the file pane opens a child folder\n",
+            empty ? "PASS" : "FAIL");
+        return recent && tabs && empty ? 0 : 1;
     }
     if (fallback_only) {
         const bool fallback = WatcherCase(folder.wstring(), NativeCase::ExplicitFallback);

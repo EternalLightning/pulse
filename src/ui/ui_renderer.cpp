@@ -7,6 +7,7 @@
 #include "legacy_icons.h"
 #include "fluent_svg_cache.h"
 #include "ui_renderer.h"
+#include "breadcrumb_layout.h"
 #include "../common/frame_profile.h"
 #include "command_icons.h"
 #include "toolbar_layout.h"
@@ -49,8 +50,7 @@ MainRenderer::~MainRenderer() {
     thumbnail_cache_.SetDeviceContext(nullptr);
 }
 
-void MainRenderer::SetCompositor(Compositor* comp) {
-    ClearFluentSvgRasterCache(this);
+void MainRenderer::ResetSurfaceTransitions() {
     details_open_motion_ = {};
     terminal_mode_motion_ = {};
     details_motion_window_width_ = 0;
@@ -65,6 +65,18 @@ void MainRenderer::SetCompositor(Compositor* comp) {
     for (auto& surface : item_reflow_surfaces_) surface.Reset();
     list_hover_layouts_ = {};
     for (auto& surface : view_mode_transitions_) surface.Reset();
+    surface_animating_ = false;
+}
+
+void MainRenderer::ReleaseHiddenWindowResources() {
+    preview_handler_.Hide();
+    ResetSurfaceTransitions();
+    if (compositor_) compositor_->DiscardFrameCopy();
+}
+
+void MainRenderer::SetCompositor(Compositor* comp) {
+    ClearFluentSvgRasterCache(this);
+    ResetSurfaceTransitions();
     hover_tracks_.clear();
     RefreshMotionPreferences();
     paneHeaderStroke_.reset();
@@ -231,44 +243,10 @@ float MainRenderer::NewButtonWidthPx(bool compact) const {
 
 void MainRenderer::BreadcrumbLayout(const PaneViewModel& vm, float w,
                                     std::vector<BreadcrumbPlaced>& out) const {
-    out.clear();
-    auto segments = SplitBreadcrumb(vm.path, vm.header_text);
-    if (segments.empty()) return;
-    D2D1_RECT_F addr = AddressBarRect(w);
-    const float segPad = 8.0f * scale_;
-    const float chevronW = 14.0f * scale_;
-    const float avail = std::max(0.0f, addr.right - addr.left - 2 * margin_);
-
-    IDWriteFactory2* dwrite = compositor_ ? compositor_->DwriteFactory() : nullptr;
-    IDWriteTextFormat* fmt = compositor_ ? compositor_->AddressFormat() : nullptr;
-
-    std::vector<float> widths(segments.size(), 0.0f);
-    float total = 0.0f;
-    for (size_t i = 0; i < segments.size(); ++i) {
-        widths[i] = MeasureLayoutText(compositor_, dwrite, fmt, segments[i].text) + segPad * 2;
-        total += widths[i] + (i ? chevronW : 0.0f);
-    }
-    // Collapse leading segments until the rest fits (last segment always kept).
-    size_t first = 0;
-    while (total > avail && first + 1 < segments.size()) {
-        total -= widths[first] + chevronW;
-        ++first;
-    }
-
-    float x = addr.left + margin_;
-    for (size_t i = first; i < segments.size(); ++i) {
-        if (i > first) x += chevronW;
-        BreadcrumbPlaced p;
-        const float segment_width = std::max(0.0f, std::min(widths[i], addr.right - margin_ - x));
-        if (segment_width <= 0.0f) break;
-        p.rc = D2D1::RectF(x, addr.top + 2 * scale_, x + segment_width, addr.bottom - 2 * scale_);
-        p.full_text = segments[i].text;
-        p.text = FitEndEllipsis(p.full_text, std::max(0.0f, segment_width - 2 * segPad),
-            [&](const std::wstring& value) { return MeasureLayoutText(compositor_, dwrite, fmt, value); });
-        p.path = segments[i].path;
-        out.push_back(p);
-        x += widths[i];
-    }
+    auto bounds = AddressBarRect(w);
+    // Reserve room to click into the text editor, even for long paths.
+    bounds.right -= (std::max)(0.0f, 28.0f * scale_ - margin_);
+    LayoutBreadcrumbs(compositor_, bounds, scale_, margin_, vm.path, vm.header_text, out);
 }
 void MainRenderer::DrawTextRect(ID2D1DeviceContext* dc, IDWriteTextFormat* fmt,
     ID2D1SolidColorBrush* br, std::wstring_view text, float x, float y, float w, float h,

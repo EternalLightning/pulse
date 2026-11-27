@@ -76,6 +76,7 @@ void Snapshot(HWND dialog, const std::filesystem::path& output) {
 
 int wmain(int argc, wchar_t** argv) {
     const bool title_only = argc == 2 && std::wcscmp(argv[1], L"--title-style-only") == 0;
+    const bool conflict_only = argc == 2 && std::wcscmp(argv[1], L"--conflict-only") == 0;
     compat::EnableDpiAwareness();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     l10n::Initialize(GetModuleHandleW(nullptr), L"en-US");
@@ -94,7 +95,7 @@ int wmain(int argc, wchar_t** argv) {
         l10n::SetLanguage(language);
         for (const bool dark : {false, true}) {
             for (const int dpi : {96, 144, 168, 192}) {
-                if (!title_only && dpi > 144) continue;
+                if (!title_only && !conflict_only && dpi > 144) continue;
                 const float fixture_scale = dpi / 96.0f;
                 const auto theme = ui::MakeTheme(dark, ui::HexColor(0x0078D4));
                 const auto suffix = std::wstring(language) + (dark ? L"-dark-" : L"-light-") +
@@ -105,7 +106,14 @@ int wmain(int argc, wchar_t** argv) {
                     SendMessageW(dialog, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), reinterpret_cast<LPARAM>(&rect));
                 };
                 auto timer = ArmModal(L"PulseFileConflictWindow", [&](HWND dialog) {
-                    set_dpi(dialog, 480, 428);
+                    // Windows can suggest a rectangle based on the previous
+                    // monitor's window size during an owner-monitor transition.
+                    set_dpi(dialog, 284, 258);
+                    RECT client{};
+                    GetClientRect(dialog, &client);
+                    Check(client.right == static_cast<LONG>(std::ceil(480 * fixture_scale)) &&
+                        client.bottom == static_cast<LONG>(std::ceil(428 * fixture_scale)),
+                        "conflict client fits the full fixed layout after a DPI change");
                     const float scale = fixture_scale;
                     Check((GetWindowLongPtrW(dialog, GWL_STYLE) & WS_THICKFRAME) == 0,
                         "conflict fixed layout has no resize frame");
@@ -144,6 +152,7 @@ int wmain(int argc, wchar_t** argv) {
                 KillTimer(nullptr, timer);
                 Check(modal_seen && choice.apply_to_all && choice.choice == ops::ConflictChoice::Cancel,
                     "keyboard checkbox preserves apply-all result on cancel");
+                if (conflict_only) continue;
 
                 timer = ArmModal(L"PulseConfirmWindow", [&](HWND dialog) {
                     set_dpi(dialog, 380, 220);

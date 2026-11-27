@@ -123,6 +123,7 @@ TerminalSurface::~TerminalSurface() { Stop(); }
 void TerminalSurface::Start(HWND hwnd, const std::wstring& directory, bool isolated,
                             ops::TerminalShell shell, const std::wstring& pwsh_path) {
     Stop();
+    powershell_ = shell != ops::TerminalShell::CommandPrompt;
     terminal_ = vterm_new(rows_, columns_);
     if (!terminal_) {
         status_ = ops::TerminalProcess::Status::Failed;
@@ -200,7 +201,7 @@ void TerminalSurface::ResetCaret() {
 }
 
 void TerminalSurface::FollowDirectory(const std::wstring& directory) {
-    if (!preferences_.follow_directory || pulse::path::EqualInsensitive(pane_directory_, directory)) return;
+    if (!powershell_ || !preferences_.follow_directory || pulse::path::EqualInsensitive(pane_directory_, directory)) return;
     pane_directory_ = directory;
     requested_directory_ = directory;
     ApplyDirectory();
@@ -283,7 +284,7 @@ void TerminalSurface::SendKey(VTermKey key, VTermModifier modifiers) {
     if (!terminal_) return;
     prompt_ready_ = false;
     awaiting_prompt_ = key == VTERM_KEY_ENTER;
-    if (awaiting_prompt_ && !last_prompt_.empty()) command_pending_ = true;
+    if (awaiting_prompt_) command_pending_ = true;
     ResetScroll();
     vterm_keyboard_key(terminal_, key, modifiers);
 }
@@ -516,7 +517,6 @@ void TerminalSurface::Draw(Compositor& compositor, const Theme& theme, const D2D
     const int first_row = history_count - static_cast<int>(std::ceil(offset_ / cell_height_));
     const int selection_start = HasSelection() ? (std::min)(anchor_, active_) : -1;
     const int selection_end = HasSelection() ? (std::max)(anchor_, active_) : -1;
-    const auto selection_background = BlendOver(theme.fill_selected, theme.bg);
     const auto color = [&](VTermColor value) {
         vterm_screen_convert_color_to_rgb(screen_, &value);
         return D2D1::ColorF(value.rgb.red / 255.0f, value.rgb.green / 255.0f, value.rgb.blue / 255.0f);
@@ -529,8 +529,7 @@ void TerminalSurface::Draw(Compositor& compositor, const Theme& theme, const D2D
             const auto cell = Cell(row, col);
             if (cell.chars[0] == kWideContinuation) { ++col; continue; }
             const int index = row * columns_ + col;
-            const bool selected = index >= selection_start && index <= selection_end;
-            const bool plain = !selected && !cell.attrs.reverse && !cell.attrs.underline &&
+            const bool plain = !cell.attrs.reverse && !cell.attrs.underline &&
                 !cell.attrs.strike && !cell.attrs.conceal && VTERM_COLOR_IS_DEFAULT_BG(&cell.bg);
             int count = (std::max)(1, static_cast<int>(cell.width));
             std::wstring text;
@@ -540,8 +539,7 @@ void TerminalSurface::Draw(Compositor& compositor, const Theme& theme, const D2D
             if (plain && cell.chars[0] < 128 && !cell.chars[1]) {
                 for (; col + count < columns_; ++count) {
                     const auto next = Cell(row, col + count);
-                    if ((index + count >= selection_start && index + count <= selection_end) ||
-                        next.chars[0] >= 128 || next.chars[1] || next.width != 1 ||
+                    if (next.chars[0] >= 128 || next.chars[1] || next.width != 1 ||
                         next.attrs.bold != cell.attrs.bold || next.attrs.conceal ||
                         next.attrs.reverse || next.attrs.underline || next.attrs.strike ||
                         !VTERM_COLOR_IS_DEFAULT_BG(&next.bg) || !vterm_color_is_equal(&cell.fg, &next.fg)) break;
@@ -552,24 +550,48 @@ void TerminalSurface::Draw(Compositor& compositor, const Theme& theme, const D2D
             const auto rc = D2D1::RectF(x, y, x + static_cast<float>(count) * cell_width_, y + cell_height_);
             auto fg = high_contrast || VTERM_COLOR_IS_DEFAULT_FG(&cell.fg) ? theme.text : color(cell.fg);
             const auto bg = high_contrast || VTERM_COLOR_IS_DEFAULT_BG(&cell.bg) ? theme.bg : color(cell.bg);
-            const auto surface = selected ? theme.fill_selected : cell.attrs.reverse ? fg : bg;
-            if (selected || cell.attrs.reverse || (!high_contrast && !VTERM_COLOR_IS_DEFAULT_BG(&cell.bg))) {
+            const auto surface = cell.attrs.reverse ? fg : bg;
+            if (cell.attrs.reverse || (!high_contrast && !VTERM_COLOR_IS_DEFAULT_BG(&cell.bg))) {
                 brush->SetColor(surface);
                 dc->FillRectangle(rc, brush.get());
             }
             if (cell.attrs.reverse) fg = bg;
-            if (selected) fg = high_contrast ? theme.text_selected : ReadableConsoleInk(fg, selection_background);
-            else if (!high_contrast && (cell.attrs.reverse ||
+            const auto original_ink = fg;
+            if (!high_contrast && (cell.attrs.reverse ||
                 !VTERM_COLOR_IS_DEFAULT_FG(&cell.fg) || !VTERM_COLOR_IS_DEFAULT_BG(&cell.bg)))
                 fg = ReadableConsoleInk(fg, surface);
-            brush->SetColor(fg);
-            if (!text.empty() && text.find_first_not_of(L' ') != std::wstring::npos)
-                dc->DrawText(text.data(), static_cast<UINT32>(text.size()),
-                    cell.attrs.bold && bold_.get() ? bold_.get() : normal_.get(), rc, brush.get(),
-                    D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
-            if (cell.attrs.underline || cell.attrs.strike) {
-                const float line = cell.attrs.underline ? rc.bottom - 2.0f * scale : rc.top + cell_height_ * 0.55f;
-                dc->DrawLine({rc.left, line}, {rc.right, line}, brush.get(), scale);
+            const bool has_text = text.find_first_not_of(L' ') != std::wstring::npos;
+            const auto draw = [&](D2D1_COLOR_F ink) {
+                brush->SetColor(ink);
+                if (has_text)
+                    dc->DrawText(text.data(), static_cast<UINT32>(text.size()),
+                        cell.attrs.bold && bold_.get() ? bold_.get() : normal_.get(), rc, brush.get(),
+                        D2D1_DRAW_TEXT_OPTIONS_CLIP, typography::MeasuringMode());
+                if (cell.attrs.underline || cell.attrs.strike) {
+                    const float line = cell.attrs.underline ? rc.bottom - 2.0f * scale : rc.top + cell_height_ * 0.55f;
+                    dc->DrawLine({rc.left, line}, {rc.right, line}, brush.get(), scale);
+                }
+            };
+            if (selection_start < 0 || selection_end < index || selection_start >= index + count) {
+                draw(fg);
+            } else {
+                const int first = (std::max)(index, selection_start) - index;
+                const int end = cell.width > 1 ? count : (std::min)(index + count, selection_end + 1) - index;
+                const float left = x + first * cell_width_;
+                const float right = x + end * cell_width_;
+                const auto highlight = D2D1::RectF(left, rc.top, right, rc.bottom);
+                brush->SetColor(theme.fill_selected);
+                dc->FillRectangle(highlight, brush.get());
+                // Keep DirectWrite's run and origin fixed as the selection moves.
+                const auto draw_part = [&](float start, float stop, D2D1_COLOR_F ink) {
+                    dc->PushAxisAlignedClip(D2D1::RectF(start, rc.top, stop, rc.bottom), D2D1_ANTIALIAS_MODE_ALIASED);
+                    draw(ink);
+                    dc->PopAxisAlignedClip();
+                };
+                if (first) draw_part(rc.left, left, fg);
+                draw_part(left, right, high_contrast ? theme.text_selected :
+                    ReadableConsoleInk(original_ink, BlendOver(theme.fill_selected, surface)));
+                if (end < count) draw_part(right, rc.right, fg);
             }
             col += count;
         }

@@ -112,6 +112,7 @@ void OpsManager::RunBasicShellOperation(const OpRequest& req, uint64_t task_id,
             }
             else if (rename_identity) item.expected_identity = *rename_identity;
             else if (continuation_identities && i < continuation_identities->size()) item.expected_identity = (*continuation_identities)[i];
+            else item.expected_identity = source_references[i].identity;
         }
         operation.items.push_back(item);
         ShellCompletion result;
@@ -123,7 +124,9 @@ void OpsManager::RunBasicShellOperation(const OpRequest& req, uint64_t task_id,
             return SamePath(value.source, item.source) && SUCCEEDED(value.hr) && !value.skipped;
         });
         if (found != result.shell_items.end()) {
-            auto reference = FileObjectReference::Open(found->destination);
+            auto destination = fs::NormalizePath(found->destination);
+            if (destination == fs::NormalizePath(item.destination)) destination = item.destination;
+            auto reference = FileObjectReference::Open(destination);
             if (req.folder_metadata && req.type == OpType::CreateFolder) {
                 HANDLE folder = CreateFileW(found->destination.c_str(), FILE_WRITE_ATTRIBUTES,
                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
@@ -138,7 +141,7 @@ void OpsManager::RunBasicShellOperation(const OpRequest& req, uint64_t task_id,
             }
             completed.sources.push_back(req.sources[i]);
             if (req.is_undo) completed.undo_produced_identities.push_back(item.expected_identity);
-            destinations.push_back(found->destination);
+            destinations.push_back(std::move(destination));
             identities.push_back(reference.identity);
             references.push_back(std::move(reference));
         } else if (SUCCEEDED(failure) && !cancelled) failure = E_FAIL;
@@ -506,16 +509,15 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
             }
             operation.items.clear();
         }
-        ipc::ShellOperationItem source{entry.source, entry.destination, {}, {}};
+        ipc::ShellOperationItem source{entry.source, entry.destination, entry.source_identity.identity, {}};
         if (item.choice == ConflictChoice::Replace) {
             source.expected_destination_identity = item.target_identity.identity;
             // Even SHARE_DELETE keeps a removed target pending until close, blocking Shell replacement.
             // Keep the confirmed ID for the Shell callback, but release our target handle before mutation.
             item.target_identity.handle.reset();
         }
-        if (req.is_undo) {
-            source.expected_identity = entry.source_identity.identity;
-            if (!source.expected_identity.Valid()) { fail(ERROR_FILE_INVALID, entry.source); outcome.items.push_back(state); continue; }
+        if (req.is_undo && !source.expected_identity.Valid()) {
+            fail(ERROR_FILE_INVALID, entry.source); outcome.items.push_back(state); continue;
         }
         operation.items.push_back(source);
         ShellCompletion result;
@@ -614,6 +616,7 @@ void OpsManager::RunTransfer(const OpRequest& req, uint64_t task_id,
         status.active = false; ++status.completed_ops; status.completed_items = processed; status.total_items = work.size();
         status.phase = cancelled() ? OpPhase::Cancelled : FAILED(failure) ? OpPhase::Failed : OpPhase::Completed;
         status.failure_hr = cancelled() ? S_OK : failure; status.failed_path = failed_path;
+        status.transferred_bytes = completed_bytes;
         status.locked_path = locks.path; status.lock_owners = locks.owners;
         status.lock_retry_available = lock_retry_.has_value();
         status.last_error = FAILED(failure) && !cancelled() ? format::FileOperationErrorText(failure) + L" | " + failed_path : L"";

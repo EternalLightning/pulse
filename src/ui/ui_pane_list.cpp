@@ -1456,7 +1456,7 @@ void MainRenderer::DrawSinglePane(const WindowViewModel& vm, const PaneViewModel
                     dc->PushAxisAlignedClip(rows_viewport, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
                     if (view_transition.Pending()) item_reflow_surfaces_[painting_pane_].Reset();
                     DrawListItems(pane, x, y, w, listH, theme, vm.hover_region, vm.hover_control_index, focused || !split);
-                    if ((!pane.loading || pane.is_changes) && pane.EntryCount() == 0 &&
+                    if ((!pane.loading || pane.is_changes) && pane.EntryCount() == 0 && !pane.file_groups_collapsed &&
                         !item_reflow_surfaces_[painting_pane_].Pending())
                         DrawPaneEmptyState(vm, pane, rows_viewport, pane_index, theme);
                     dc->PopAxisAlignedClip();
@@ -1748,7 +1748,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             [](const DateGroup& group, int first) { return group.first < first; });
     };
     auto& view_transition = view_mode_transitions_[painting_pane_];
-    const bool animate_items = !view_transition.Pending() && motion_enabled_ && !IsHighContrast() && (vm.is_file_system || vm.is_query_search) &&
+    const bool animate_items = !vm.file_groups_collapsed && !view_transition.Pending() && motion_enabled_ && !IsHighContrast() && (vm.is_file_system || vm.is_query_search) &&
         (!vm.loading || vm.search_retaining_results) && !vm.is_recent &&
         !vm.is_changes && vm.rename_index < 0 && !vm.marquee_active &&
         motion_last - motion_first < 512;
@@ -1804,11 +1804,10 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
         if (vm.view_mode == ViewMode::Details && vm.date_groups) {
             for (auto it = first_group_at(motion_first); it != vm.date_groups->end() && it->first <= motion_last; ++it) {
                 const auto& group = *it;
-                const auto first = layout.ItemRect(group.first);
+                const auto header = layout.GroupHeaderRect(static_cast<size_t>(it - vm.date_groups->begin()));
                 const auto key = L"group:" + std::to_wstring(static_cast<int>(group.mode)) + L":" +
                     std::to_wstring(group.bucket) + L":" + group.label;
-                motion_slots.push_back({key, {first.left, first.top - kDateGroupHeaderDip * scale_,
-                    first.right, first.top}, -1});
+                motion_slots.push_back({key, header, -1});
             }
         }
     }
@@ -1861,7 +1860,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                 });
         }
     }
-    if (entryCount == 0) return;
+    if (entryCount == 0 && !vm.file_groups_collapsed) return;
 
     if (detailsView && vm.date_groups) {
         const l10n::StringId bucket_labels[] = {
@@ -1870,16 +1869,22 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
             l10n::StringId::DateEarlierThisMonth, l10n::StringId::DateOlder};
         // A header exiting from an earlier position may still be visible during reflow.
         const bool moving_headers = reflow.Pending();
-        const auto first_group = moving_headers ? vm.date_groups->begin() : first_group_at(startIdx);
-        const auto last_group = moving_headers ? vm.date_groups->end() : first_group_at(endIdx + 1);
+        const float group_height = kDateGroupHeaderDip * scale_;
+        const auto collapsed_group_at = [&](float offset) {
+            const size_t index = static_cast<size_t>(std::max(0.0f, offset) / group_height);
+            return vm.date_groups->begin() + std::min(index, vm.date_groups->size());
+        };
+        const auto first_group = vm.file_groups_collapsed ? collapsed_group_at(vm.scroll_y) :
+            moving_headers ? vm.date_groups->begin() : first_group_at(startIdx);
+        const auto last_group = vm.file_groups_collapsed ? collapsed_group_at(vm.scroll_y + h + group_height) :
+            moving_headers ? vm.date_groups->end() : first_group_at(endIdx + 1);
         for (auto it = first_group; it != last_group; ++it) {
             const auto& group = *it;
-            const D2D1_RECT_F first = layout.ItemRect(group.first);
-            const float top = first.top - kDateGroupHeaderDip * scale_;
-            if (!moving_headers && (first.top < y || top > y + h)) continue;
+            const auto header_bounds = layout.GroupHeaderRect(static_cast<size_t>(it - vm.date_groups->begin()));
+            const float top = header_bounds.top;
+            if (!moving_headers && (header_bounds.bottom < y || top > y + h)) continue;
             const auto key = L"group:" + std::to_wstring(static_cast<int>(group.mode)) + L":" +
                 std::to_wstring(group.bucket) + L":" + group.label;
-            const auto header_bounds = D2D1::RectF(first.left, top, first.right, first.top);
             if (moving_headers && !reflow.ShouldPaint(key, header_bounds)) continue;
             reflow.Paint(dc, key, header_bounds, [&] {
             wchar_t count[48]{};
@@ -1890,8 +1895,8 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                 ? bucket_labels[std::min<size_t>(group.bucket, 5)]
                 : group.bucket == 0 ? l10n::StringId::TypeFolder : l10n::StringId::TypeFile;
             const std::wstring title = (group.label.empty() ? l10n::Get(label_id) : group.label) + L"  " + count;
-            const D2D1_RECT_F text = D2D1::RectF(first.left + 8.0f * scale_,
-                top + 6.0f * scale_, first.right - 8.0f * scale_, first.top - 4.0f * scale_);
+            const D2D1_RECT_F text = D2D1::RectF(header_bounds.left + 8.0f * scale_,
+                top + 6.0f * scale_, header_bounds.right - 8.0f * scale_, header_bounds.bottom - 4.0f * scale_);
             MakeBrush(dc, theme.text, brText_);
             DrawTextEndEllipsis(compositor_, theme.bg, dc, compositor_->DwriteFactory(), compositor_->TextFormat(), brText_.get(),
                 title, text.left, text.top, std::max(0.0f, text.right - text.left), text.bottom - text.top);
@@ -2006,9 +2011,7 @@ void MainRenderer::DrawListItems(const PaneViewModel& vm, float x, float y, floa
                 row_theme.radius_control * scale_);
             if (pane_focused && (detailsView || vm.view_mode == ViewMode::List)) {
                 MakeBrush(dc, row_theme.accent, brAccent_);
-                const float indicator_h = std::min(18*scale_, std::max(0.0f, sel.bottom-sel.top-8*scale_));
-                FillRoundedRect(dc, brAccent_.get(), sel.left + scale_,
-                    (sel.top+sel.bottom-indicator_h)*0.5f, 2*scale_, indicator_h, scale_);
+                fluent::FillLeadingSelectionIndicator(dc, brAccent_.get(), sel, scale_);
             } else if (iconGrid) {
                 const float indicator_w = std::min(48.0f * scale_,
                     std::max(0.0f, sel.right - sel.left - 16.0f * scale_));

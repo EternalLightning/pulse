@@ -353,7 +353,7 @@ public:
 
     bool CanUndo() const;
     std::wstring UndoLabel() const;   // "撤销移动 xxx" etc; empty if none
-    void Undo();
+    uint64_t Undo();
 
     OpStatus Status() const;
     // Session-only task snapshots; reading and clearing never touch the filesystem.

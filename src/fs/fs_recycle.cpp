@@ -11,6 +11,7 @@
 #include <shellapi.h>
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <string_view>
 #include <vector>
 
@@ -71,6 +72,34 @@ DirEntry ToDirEntry(const RecycleItem& item) {
     return entry;
 }
 
+bool ReadRecycleMetadata(const std::wstring& index_path, RecycleItem& out) {
+    out = {};
+    const std::wstring name = path::FileNameOf(index_path);
+    if (name.size() < 3 || name[0] != L'$' || (name[1] != L'I' && name[1] != L'i'))
+        return false;
+    out.index_path = index_path;
+    HANDLE handle = CreateFileW(index_path.c_str(), GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size{};
+    if (!GetFileSizeEx(handle, &size) || size.QuadPart < 24 || size.QuadPart > 64 * 1024) {
+        CloseHandle(handle);
+        return false;
+    }
+    std::vector<BYTE> buf(static_cast<size_t>(size.QuadPart));
+    DWORD read = 0;
+    const BOOL ok = ReadFile(handle, buf.data(), static_cast<DWORD>(buf.size()), &read, nullptr);
+    CloseHandle(handle);
+    return ok && ParseIndexBytes(buf.data(), read, out);
+}
+
+void SetPayloadAttributes(RecycleItem& item, DWORD attrs, DWORD size_high, DWORD size_low) {
+    item.is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    if (!item.is_dir && item.size == 0)
+        item.size = (static_cast<uint64_t>(size_high) << 32) | size_low;
+}
+
 } // namespace
 
 bool QueryRecycleBinInfo(RecycleBinInfo& out) {
@@ -102,27 +131,7 @@ std::wstring RecycleIndexPath(const std::wstring& content_path) {
 }
 
 bool ReadRecycleIndex(const std::wstring& index_path, RecycleItem& out) {
-    out = {};
-    const std::wstring name = path::FileNameOf(index_path);
-    if (name.size() < 3 || name[0] != L'$' || (name[1] != L'I' && name[1] != L'i'))
-        return false;
-    out.index_path = index_path;
-    HANDLE handle = CreateFileW(index_path.c_str(), GENERIC_READ,
-                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (handle == INVALID_HANDLE_VALUE) return false;
-    LARGE_INTEGER size{};
-    if (!GetFileSizeEx(handle, &size) || size.QuadPart < 24 || size.QuadPart > 64 * 1024) {
-        CloseHandle(handle);
-        return false;
-    }
-    std::vector<BYTE> buf(static_cast<size_t>(size.QuadPart));
-    DWORD read = 0;
-    const BOOL ok = ReadFile(handle, buf.data(), static_cast<DWORD>(buf.size()), &read, nullptr);
-    CloseHandle(handle);
-    if (!ok || read < 24) return false;
-    if (!ParseIndexBytes(buf.data(), read, out)) return false;
-
+    if (!ReadRecycleMetadata(index_path, out)) return false;
     std::wstring r_name = path::FileNameOf(index_path);
     if (r_name.size() >= 2) r_name[1] = (r_name[1] == L'I') ? L'R' : L'r';
     const size_t slash = index_path.find_last_of(L'\\');
@@ -131,13 +140,7 @@ bool ReadRecycleIndex(const std::wstring& index_path, RecycleItem& out) {
     WIN32_FILE_ATTRIBUTE_DATA attrs{};
     if (!GetFileAttributesExW(out.content_path.c_str(), GetFileExInfoStandard, &attrs))
         return false; // An orphan $I record is not a restorable recycle item.
-    out.is_dir = (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-    if (!out.is_dir && out.size == 0) {
-        ULARGE_INTEGER bytes;
-        bytes.HighPart = attrs.nFileSizeHigh;
-        bytes.LowPart = attrs.nFileSizeLow;
-        out.size = bytes.QuadPart;
-    }
+    SetPayloadAttributes(out, attrs.dwFileAttributes, attrs.nFileSizeHigh, attrs.nFileSizeLow);
     return true;
 }
 
@@ -181,32 +184,67 @@ bool EnumerateRecycleBinAtRoot(const std::wstring& recycle_root, std::vector<Dir
     return complete && error == ERROR_NO_MORE_FILES;
 }
 
-void EnumerateRecycleBin(std::vector<DirEntry>& out, RecycleBinInfo* info) {
+bool EnumerateRecycleViewAtRoot(const std::wstring& recycle_root, std::vector<DirEntry>& out,
+                                const std::function<bool()>& cancelled) {
+    if (cancelled && cancelled()) return false;
+    const std::wstring sid = CurrentUserSidString();
+    if (sid.empty()) return false;
+    const std::wstring prefix = NormalizePath(recycle_root) + L"\\" + sid + L"\\";
+    WIN32_FIND_DATAW data{};
+    const HANDLE handle = FindFirstFileExW((prefix + L"*").c_str(), FindExInfoBasic,
+        &data, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+    if (handle == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    const std::unique_ptr<void, decltype(&FindClose)> find(handle, FindClose);
+    bool complete = true;
+    do {
+        if (cancelled && cancelled()) return false;
+        const std::wstring_view name(data.cFileName);
+        if (name.size() < 3 || name[0] != L'$') continue;
+        if (name[1] == L'I' || name[1] == L'i') {
+            if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) complete = false;
+            continue;
+        }
+        if (name[1] != L'R' && name[1] != L'r') continue;
+        auto payload = prefix;
+        payload.append(name);
+        RecycleItem item;
+        if (!ReadRecycleMetadata(RecycleIndexPath(payload), item)) {
+            complete = false;
+            continue;
+        }
+        item.content_path = std::move(payload);
+        SetPayloadAttributes(item, data.dwFileAttributes, data.nFileSizeHigh, data.nFileSizeLow);
+        out.push_back(ToDirEntry(item));
+    } while (FindNextFileW(find.get(), &data));
+    return GetLastError() == ERROR_NO_MORE_FILES && complete;
+}
+
+bool EnumerateRecycleBin(std::vector<DirEntry>& out, RecycleBinInfo& info,
+                         const std::function<bool()>& cancelled) {
     out.clear();
-    if (info) QueryRecycleBinInfo(*info);
+    info = {};
     const DWORD drives = GetLogicalDrives();
     bool complete = drives != 0;
     for (int i = 0; i < 26; ++i) {
         if ((drives & (1u << i)) == 0) continue;
+        if (cancelled && cancelled()) return false;
         wchar_t root[4] = { static_cast<wchar_t>(L'A' + i), L':', L'\\', 0 };
         const UINT type = GetDriveTypeW(root);
         if (type != DRIVE_FIXED && type != DRIVE_REMOVABLE) continue;
         if (IsRemoteLikeDrive(root)) continue;
-        const std::wstring bin = NormalizePath(std::wstring(root) + L"$Recycle.Bin");
-        if (!EnumerateRecycleBinAtRoot(bin, out)) complete = false;
+        if (!EnumerateRecycleViewAtRoot(std::wstring(root) + L"$Recycle.Bin", out, cancelled))
+            complete = false;
     }
-    if (!info) return;
-    uint64_t enum_bytes = 0;
-    for (const auto& entry : out) enum_bytes += entry.size;
-    const uint64_t enum_items = out.size();
-    // Use the same live, current-user items as the list, including after clear.
-    // If a volume could not be read, retain Shell's occupancy instead.
+    if (cancelled && cancelled()) return false;
     if (complete) {
-        info->valid = true;
-        info->items = enum_items;
-        info->bytes = enum_bytes;
-        return;
+        info.valid = true;
+        info.items = out.size();
+        for (const auto& entry : out) info.bytes += entry.size;
     }
+    return true;
 }
 
 } // namespace pulse::fs

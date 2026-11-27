@@ -274,6 +274,8 @@ enum class StringId : UINT {
     DateOlder = IDS_DATE_OLDER,
     DateGroupCountFormat = IDS_DATE_GROUP_COUNT_FORMAT,
     DateGroupOneFormat = IDS_DATE_GROUP_ONE_FORMAT,
+    FileGroupsExpandAll = IDS_FILE_GROUPS_EXPAND_ALL,
+    FileGroupsCollapseAll = IDS_FILE_GROUPS_COLLAPSE_ALL,
     SettingsWindowEffect = IDS_SETTINGS_WINDOW_EFFECT,
     SettingsWindowEffectDesc = IDS_SETTINGS_WINDOW_EFFECT_DESC,
     EffectNone = IDS_EFFECT_NONE,

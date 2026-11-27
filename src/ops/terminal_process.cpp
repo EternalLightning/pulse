@@ -68,7 +68,8 @@ std::wstring SystemShellPath(TerminalShell shell) {
 }
 
 std::wstring ShellCommand(const std::wstring& shell, TerminalShell kind, const std::wstring& marker, bool isolated) {
-    if (kind == TerminalShell::CommandPrompt) return L"\"" + shell + L"\" /D";
+    if (kind == TerminalShell::CommandPrompt)
+        return L"\"" + shell + L"\" /D /K \"prompt $E]0;" + marker + L"$T$E\\$P$G\"";
     // The title change is converted by ConHost into an OSC sequence. A new
     // title on each prompt lets the front end defer folder changes safely.
     std::wstring command = L"\"" + shell + L"\" -NoLogo -NoExit";
@@ -148,6 +149,7 @@ struct TerminalProcess::State {
     std::condition_variable output_drained;
     Handle wake;
     HWND owner = nullptr;
+    HANDLE running_job = nullptr;
     UINT_PTR notification_id = 0;
     bool posted = false;
     bool stopping = false;
@@ -262,7 +264,12 @@ struct TerminalProcess::State {
         }
 
         if (launched) {
-            SetStatus(Status::Running);
+            {
+                std::lock_guard lock(mutex);
+                running_job = job.value;
+                status = Status::Running;
+                NotifyLocked();
+            }
             const HANDLE waits[] = {shell_process.value, wake.value};
             for (;;) {
                 if (WaitForMultipleObjects(ARRAYSIZE(waits), waits, FALSE, INFINITE) != WAIT_OBJECT_0 + 1) break;
@@ -277,6 +284,10 @@ struct TerminalProcess::State {
                     size = next;
                 }
             }
+        }
+        {
+            std::lock_guard lock(mutex);
+            running_job = nullptr;
         }
         if (job.value) job.Reset();
         else if (shell_process.value && WaitForSingleObject(shell_process.value, 0) == WAIT_TIMEOUT)
@@ -299,6 +310,14 @@ struct TerminalProcess::State {
 TerminalProcess::~TerminalProcess() { Stop(); }
 
 bool TerminalProcess::Supported() { return ConPty{}.Available(); }
+
+bool TerminalProcess::HasChildProcesses() const {
+    if (!state_) return false;
+    std::lock_guard lock(state_->mutex);
+    JOBOBJECT_BASIC_ACCOUNTING_INFORMATION info{};
+    return state_->running_job && QueryInformationJobObject(state_->running_job,
+        JobObjectBasicAccountingInformation, &info, sizeof(info), nullptr) && info.ActiveProcesses > 1;
+}
 
 bool TerminalProcess::Start(HWND window, std::wstring directory, std::wstring marker, COORD size, bool isolated,
                             TerminalShell shell, std::wstring pwsh_path) {

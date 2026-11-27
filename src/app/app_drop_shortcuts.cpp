@@ -6,6 +6,7 @@
 #include "app_drop_shortcuts.h"
 #include "app_internal.h"
 #include "../common/localization.h"
+#include "../ops/clipboard.h"
 
 namespace pulse {
 namespace {
@@ -16,17 +17,20 @@ void ShowShortcutDropError(AppState& state, const app::ShortcutDropResult& resul
     state.notification_toast.ShowError(state.hwnd, l10n::Get(l10n::StringId::CannotCreateShortcut),
         result.failed_source + L"\n" + error);
 }
-} // namespace
-
-bool QueueDropShortcuts(AppState& state, const std::vector<std::wstring>& sources,
-    const std::wstring& destination) {
-    if (!app::CanCreateDropShortcuts(sources, destination) || !state.shortcut_drop_mailbox) return false;
+bool QueueShortcuts(AppState& state, const std::vector<std::wstring>& sources,
+    const std::wstring& destination, uint32_t clipboard_sequence = 0) {
+    if (!state.shortcut_drop_mailbox) return false;
     const auto mailbox = state.shortcut_drop_mailbox;
     const auto format = l10n::Get(l10n::StringId::ShortcutNameFormat);
     bool accepted = false;
     try {
-        accepted = state.worker.EnqueueIo([mailbox, sources, destination, format] {
-            mailbox->Publish(app::CreateDropShortcuts(sources, destination, format));
+        accepted = state.worker.EnqueueIo([mailbox, sources, destination, format, clipboard_sequence] {
+            ops::ClipboardData clipboard;
+            if (clipboard_sequence &&
+                (ops::ReadClipboardForPaste(clipboard_sequence, clipboard) != S_OK || clipboard.cut))
+                return;
+            mailbox->Publish(app::CreateDropShortcuts(
+                clipboard_sequence ? clipboard.paths : sources, destination, format));
         });
     } catch (...) {}
     if (!accepted) {
@@ -36,6 +40,17 @@ bool QueueDropShortcuts(AppState& state, const std::vector<std::wstring>& source
         ShowShortcutDropError(state, failure);
     }
     return accepted;
+}
+} // namespace
+
+bool QueueDropShortcuts(AppState& state, const std::vector<std::wstring>& sources,
+    const std::wstring& destination) {
+    return app::CanCreateDropShortcuts(sources, destination) && QueueShortcuts(state, sources, destination);
+}
+
+bool QueuePasteShortcuts(AppState& state, const std::wstring& destination, uint32_t sequence) {
+    return sequence && app::IsShortcutFileSystemPath(destination) &&
+        QueueShortcuts(state, {}, destination, sequence);
 }
 
 void HandleDropShortcutsResult(AppState& state, WPARAM identity) {

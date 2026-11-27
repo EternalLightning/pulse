@@ -92,6 +92,7 @@ public:
     // Menus sample the rendered frame without a desktop capture or per-frame
     // copy. Capture only when a menu is about to open, not after every Present.
     bool CaptureFrame();
+    void DiscardFrameCopy() { frame_copy_.reset(); }
     ID2D1Bitmap1* FrameCopy() const { return frame_copy_.get(); }
     IDWriteFactory2* DwriteFactory() const { return dwriteFactory_.get(); }
     HWND Hwnd() const { return hwnd_; }

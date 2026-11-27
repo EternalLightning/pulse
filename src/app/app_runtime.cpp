@@ -371,6 +371,24 @@ void PostWorkerResult(AppState& s, app::WorkResult res) {
     }
     PostMessageW(s.hwnd, WM_WORKER_RESULT, 0, 0);
 }
+
+bool QueueViewProjection(AppState& s, std::function<bool()> work) {
+    if (!s.hwnd) return false;
+    const auto changed = std::make_shared<bool>(false);
+    return s.worker.EnqueueIo([changed, work = std::move(work)] { *changed = work(); },
+        [changed, hwnd = s.hwnd] {
+            if (*changed) PostMessageW(hwnd, WM_WORKER_RESULT, 0, 0);
+        }, app::WorkerPool::IoLane::Local);
+}
+
+static app::SubmitViewProjection ProjectionSubmitter(AppState& s) {
+    return [&s](std::function<bool()> work) { return QueueViewProjection(s, std::move(work)); };
+}
+
+void FillAppPaneViewModel(AppState& s, ui::PaneViewModel& out, const app::Pane& pane) {
+    app::FillPaneViewModel(out, pane, &s.places, ProjectionSubmitter(s));
+}
+
 D2D1_RECT_F FocusedPaneRect(const AppState& s) {
     D2D1_RECT_F content = s.renderer.ContentRect(
         static_cast<float>(s.compositor.Width()), static_cast<float>(s.compositor.Height()));
@@ -801,7 +819,7 @@ void FillPaneSlots(AppState& s, ui::WindowViewModel& vm) {
             // BuildWindowViewModel already populated the focused pane. Reuse
             // it instead of rebuilding all snapshot-derived data twice.
             if (slot.focused) slot.pane = vm.pane;
-            else app::FillPaneViewModel(slot.pane, *p, &s.places);
+            else FillAppPaneViewModel(s, slot.pane, *p);
             slot.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden,
                 s.ctxMenuPrefs.BuiltinOrder(app::BuiltinMenuSurface::RowButtons));
             if (app::Tab* tab = p->ActiveTab()) {
@@ -959,12 +977,13 @@ void ApplyRecycleOccupancy(AppState& s) {
     });
 }
 
-void RequestRecycleOccupancy(AppState& s) {
+void RequestRecycleOccupancy(AppState& s, uint64_t listing_generation) {
     const HWND hwnd = s.hwnd;
     auto info = std::make_shared<fs::RecycleBinInfo>();
-    s.worker.EnqueueIo([info] { fs::QueryRecycleBinInfo(*info); }, [info, hwnd] {
+    s.worker.EnqueueIo([info] { fs::QueryRecycleBinInfo(*info); }, [info, hwnd, listing_generation] {
         auto payload = std::make_unique<fs::RecycleBinInfo>(*info);
-        if (hwnd && PostMessageW(hwnd, WM_RECYCLE_INFO, 0, reinterpret_cast<LPARAM>(payload.get())))
+        if (hwnd && PostMessageW(hwnd, WM_RECYCLE_INFO, static_cast<WPARAM>(listing_generation),
+                                reinterpret_cast<LPARAM>(payload.get())))
             payload.release();
     });
 }
@@ -1582,6 +1601,60 @@ static void FillStatusVm(AppState& s, ui::WindowViewModel& vm) {
     }
 }
 
+static void PublishReadyPaneProjections(AppState& s) {
+    const bool any_ready = std::any_of(Panes(s).begin(), Panes(s).end(), [](const auto& pane) {
+        const auto* tab = pane->ActiveTab();
+        return tab && app::PaneProjectionReady(*tab);
+    });
+    if (!any_ready) return;
+    const auto content = s.renderer.ContentRect(
+        static_cast<float>(s.compositor.Width()), static_cast<float>(s.compositor.Height()));
+    std::vector<std::pair<app::Pane*, D2D1_RECT_F>> panes;
+    if (Root(s)) app::LayoutSplitTree(*Root(s), content, 8.0f * s.scale, panes);
+    else panes.emplace_back(s.pane, content);
+    const auto submit = ProjectionSubmitter(s);
+    for (const auto& [pane, bounds] : panes) {
+        auto* tab = pane->ActiveTab();
+        if (!tab || !app::PaneProjectionReady(*tab)) continue;
+        ui::PaneViewModel before;
+        app::FillPaneViewModel(before, *pane, &s.places, submit);
+        if (!app::PaneProjectionReady(*tab)) continue;
+        app::SyncPaneProjection(*tab, &s.places, submit, true);
+        ui::PaneViewModel after;
+        app::FillPaneViewModel(after, *pane, &s.places, submit);
+        if (tab->pending_view_projection) continue;
+
+        const auto reveal = std::exchange(tab->projection_reveal_selection, std::nullopt);
+        if (pane == s.pane && reveal && reveal->first == tab->selection_revision &&
+            reveal->second == tab->scroll_y && after.ViewIndex(tab->selected_index) >= 0) {
+            EnsureRowVisible(s, *tab, tab->selected_index);
+            s.scrollTargetY = tab->scroll_y;
+            continue;
+        }
+        const float previous_scroll = tab->scroll_y;
+        const float maximum = s.renderer.MaxScrollForPane(after, bounds);
+        float target = previous_scroll;
+        if (previous_scroll > 0.0f && !before.projection_loading && before.EntryCount()) {
+            const auto [first, last] = s.renderer.VisibleRangeInPane(before, bounds);
+            const auto viewport = s.renderer.PaneListRect(before, bounds);
+            for (int row = first; row <= last; ++row) {
+                const auto item = s.renderer.ItemRectInPane(before, bounds, row);
+                if (item.bottom <= viewport.top || item.top >= viewport.bottom) continue;
+                const int next = after.ViewIndex(before.SourceIndex(row));
+                if (next < 0) continue;
+                target += s.renderer.ItemRectInPane(after, bounds, next).top - item.top;
+                break;
+            }
+        }
+        tab->scroll_y = std::clamp(target, 0.0f, maximum);
+        if (pane == s.pane) {
+            const float delta = tab->scroll_y - previous_scroll;
+            s.scrollTargetY = std::clamp(s.scrollTargetY + delta, 0.0f, maximum);
+            if (s.keyboardScroll) s.keyboardScrollFrom.y += delta;
+        }
+    }
+}
+
 void PrepareViewState(AppState& s) {
     s.hitTestVmValid = false;
     if (s.hwnd) {
@@ -1601,6 +1674,7 @@ void PrepareViewState(AppState& s) {
         }
     });
     SyncColumnStrips(s);
+    PublishReadyPaneProjections(s);
 
     const auto* tab = ActiveTab(s);
     std::wstring kind, rest;
@@ -1662,7 +1736,7 @@ ui::WindowViewModel BuildVm(AppState& s, bool include_status) {
     ui::WindowViewModel vm = app::BuildWindowViewModel(*s.pane, s.sidebar,
         s.pane->focused, s.maximized, s.darkMode, &s.places, s.sidebarCollapsedMask,
         s.sidebarHiddenMask, s.starredExpanded, &s.sidebarOrder,
-        s.sidebarQuickAccessHiddenMask, include_status);
+        s.sidebarQuickAccessHiddenMask, include_status, ProjectionSubmitter(s));
     vm_profile.Mark(profile::VmPhase::Base);
     vm.details_motion_sampled = true;
     vm.pane.row_action_mask = app::RowActionMask(s.ctxMenuPrefs.builtin_hidden,
@@ -2467,7 +2541,7 @@ void QueueVisibleTagDiscovery(AppState& s) {
     s.tagAdsLastLastRow = last;
 
     ui::PaneViewModel pane;
-    app::FillPaneViewModel(pane, *s.pane, &s.places);
+    FillAppPaneViewModel(s, pane, *s.pane);
     std::vector<std::pair<std::wstring, uint64_t>> paths;
     constexpr size_t kPendingPathLimit = 256;
     for (int view_row = first; view_row < std::min(last, static_cast<int>(pane.EntryCount())); ++view_row) {

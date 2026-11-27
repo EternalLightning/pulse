@@ -25,6 +25,8 @@ std::atomic<int> volume_calls{0};
 HANDLE entered[2]{};
 HANDLE release_query[2]{};
 bool include_network_drive = false;
+bool include_card_reader = false;
+bool card_inserted = false;
 HANDLE network_entered = nullptr;
 HANDLE release_network = nullptr;
 
@@ -33,14 +35,23 @@ void Check(bool passed, const char* message) {
     failures += !passed;
 }
 
-DWORD WINAPI TestLogicalDrives() { return (1u << 2) | (include_network_drive ? 1u << 25 : 0); }
-UINT WINAPI TestDriveType(LPCWSTR root) { return root[0] == L'Z' ? DRIVE_REMOTE : DRIVE_FIXED; }
+DWORD WINAPI TestLogicalDrives() {
+    return (1u << 2) | (include_network_drive ? 1u << 25 : 0) | (include_card_reader ? 1u << 17 : 0);
+}
+UINT WINAPI TestDriveType(LPCWSTR root) {
+    return root[0] == L'R' ? DRIVE_REMOVABLE : root[0] == L'Z' ? DRIVE_REMOTE : DRIVE_FIXED;
+}
 HRESULT WINAPI TestKnownFolder(REFKNOWNFOLDERID, DWORD, HANDLE, PWSTR* path) {
     *path = nullptr;
     return E_FAIL;
 }
-BOOL WINAPI TestVolumeInfo(LPCWSTR, LPWSTR label, DWORD count, LPDWORD,
+BOOL WINAPI TestVolumeInfo(LPCWSTR root, LPWSTR label, DWORD count, LPDWORD,
                           LPDWORD, LPDWORD, LPWSTR, DWORD) {
+    if (root[0] == L'R') {
+        if (card_inserted) { wcscpy_s(label, count, L"SD card"); return TRUE; }
+        SetLastError(ERROR_NOT_READY);
+        return FALSE;
+    }
     volume_thread.store(GetCurrentThreadId());
     const int call = volume_calls.fetch_add(1);
     if (call < 2) {
@@ -49,6 +60,46 @@ BOOL WINAPI TestVolumeInfo(LPCWSTR, LPWSTR label, DWORD count, LPDWORD,
     }
     wcsncpy_s(label, count, call == 0 ? L"old" : L"new", _TRUNCATE);
     return TRUE;
+}
+
+void CardReaderChecks() {
+    using namespace pulse;
+    include_card_reader = true;
+    app::HomeCatalog catalog;
+    app::SidebarModel sidebar;
+    app::SidebarEntry reader;
+    reader.is_drive = true;
+    reader.path = L"R:\\";
+    sidebar.drives.push_back(std::move(reader));
+    ui::PaneViewModel pane;
+    pane.is_home = true;
+    const auto refresh = [&] {
+        catalog.Refresh();
+        const auto deadline = GetTickCount64() + 3000;
+        while (catalog.Loading() && GetTickCount64() < deadline) Sleep(1);
+        catalog.FillDriveLabels(sidebar);
+        catalog.Fill(pane);
+    };
+    const auto has_card = [&] {
+        return std::any_of(pane.home_cards.begin(), pane.home_cards.end(),
+            [](const auto& card) { return card.path == L"R:\\"; });
+    };
+    refresh();
+    Check(!catalog.Loading() && sidebar.drives.front().drive_without_media && !has_card() &&
+        app::SidebarDriveMask(sidebar) == (1u << 17),
+        "empty card reader is hidden while its drive letter remains available to the refresh detector");
+    card_inserted = true;
+    refresh();
+    Check(!catalog.Loading() && !sidebar.drives.front().drive_without_media && has_card() &&
+        sidebar.drives.front().label == L"SD card (R:)",
+        "inserting media reveals the same drive letter in both models");
+    card_inserted = false;
+    refresh();
+    Check(!catalog.Loading() && sidebar.drives.front().drive_without_media && !has_card() &&
+        !fs::DriveHasNoMedia(DRIVE_REMOTE, ERROR_NOT_READY) &&
+        !fs::DriveHasNoMedia(DRIVE_REMOVABLE, ERROR_ACCESS_DENIED),
+        "ejecting media hides the reader without conflating unavailable network or restricted drives");
+    include_card_reader = false;
 }
 BOOL WINAPI TestDiskSpace(LPCWSTR root, PULARGE_INTEGER available,
                          PULARGE_INTEGER total, PULARGE_INTEGER free) {
@@ -313,6 +364,7 @@ int wmain(int argc, wchar_t** argv) {
     DriveChangeChecks();
     CatalogChecks();
     NetworkCatalogChecks();
+    CardReaderChecks();
     if (wcscmp(argv[1], L"--drives-only") != 0) AttributeChecks(argv[1]);
     std::printf("%d failure(s)\n", failures);
     return failures ? 1 : 0;

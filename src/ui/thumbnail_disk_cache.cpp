@@ -68,7 +68,8 @@ uint64_t FileTimeValue(const FILETIME& time) {
 // than any decode, so it is kept however quick the host was.
 bool Eligible(const std::wstring& path, DWORD attrs, bool& remote) {
     remote = false;
-    if (attrs & (FILE_ATTRIBUTE_ENCRYPTED | FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY)) return false;
+    if (fs::IsCloudPlaceholder(attrs) ||
+        (attrs & (FILE_ATTRIBUTE_ENCRYPTED | FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))) return false;
     const std::wstring normalized = pulse::path::StripExtendedPathPrefix(path);
     if (normalized.starts_with(L"\\\\")) {
         remote = !normalized.starts_with(L"\\\\.\\");
@@ -338,10 +339,13 @@ std::wstring ThumbnailDiskCache::EntryPath(const ThumbnailStoreKey& key) const {
     return root_ + name;
 }
 
-bool ThumbnailDiskCache::Load(const ThumbnailStoreKey& key, StoredThumbnail& out) {
+bool ThumbnailDiskCache::Load(const ThumbnailStoreKey& key, StoredThumbnail& out,
+                              const ThumbnailFileIdentity* verified) {
     bool remote = false;
+    if (Root().empty() || !Eligible(key.path, key.attrs, remote)) return false;
     ThumbnailFileIdentity identity{};
-    if (Root().empty() || !Eligible(key.path, key.attrs, remote) || !ReadThumbnailFileIdentity(key, identity)) return false;
+    if (verified) identity = *verified;
+    else if (!ReadThumbnailFileIdentity(key, identity)) return false;
     const std::wstring file = EntryPath(key);
     HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ | FILE_WRITE_ATTRIBUTES,
                                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
@@ -371,22 +375,25 @@ bool ThumbnailDiskCache::Load(const ThumbnailStoreKey& key, StoredThumbnail& out
     EntryHeader header{};
     std::memcpy(&header, entry.data(), sizeof(header));
     ThumbnailFileIdentity after{};
-    if (header.identity == identity && Decode(entry, key, out) &&
-        ReadThumbnailFileIdentity(key, after) && identity == after) return true;
-    // Another version may have replaced this entry while it was being read.
-    return false;
+    // The source may have changed while the disk entry was being decoded.
+    StoredThumbnail decoded;
+    if (header.identity != identity || !Decode(entry, key, decoded) ||
+        !ReadThumbnailFileIdentity(key, after) || identity != after) return false;
+    out = std::move(decoded);
+    return true;
 }
 
 void ThumbnailDiskCache::Save(const ThumbnailStoreKey& key, uint32_t decode_ms, const StoredThumbnail& thumb,
                               const ThumbnailFileIdentity* expected) {
     bool remote = false;
-    ThumbnailFileIdentity identity{};
-    if (Root().empty() || !Eligible(key.path, key.attrs, remote) || !ReadThumbnailFileIdentity(key, identity)) return;
-    if (expected && !(identity == *expected)) return;
+    if (Root().empty() || !Eligible(key.path, key.attrs, remote)) return;
     if (decode_ms < kMinDecodeMs && !remote && !key.keep_always && !AlwaysKept(key.path)) return;
     if (!thumb.width || !thumb.height || thumb.width > kMaxEdge || thumb.height > kMaxEdge ||
         thumb.pixels.size() != static_cast<size_t>(thumb.width) * thumb.height * 4 ||
         key.path.size() > 32767) return;
+    ThumbnailFileIdentity identity{};
+    if (expected) identity = *expected;
+    else if (!ReadThumbnailFileIdentity(key, identity)) return;
     const bool png = HasAlpha(thumb);
     std::vector<uint8_t> payload;
     if (!Encode(thumb, png, payload)) return;

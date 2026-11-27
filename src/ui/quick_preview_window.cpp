@@ -14,6 +14,7 @@
 #include "../ipc/preview_protocol.h"
 #include "../ops/clipboard.h"
 #include "fluent_components.h"
+#include "command_icons.h"
 #include "lumatext_renderer.h"
 #include "typography.h"
 #include "text_hit_ranges.h"
@@ -49,12 +50,10 @@ constexpr wchar_t kNextGlyph[] = L"\xE72A";
 constexpr wchar_t kMoreGlyph[] = L"\xE712";
 constexpr wchar_t kOpenGlyph[] = L"\xE8E5";
 constexpr wchar_t kCutGlyph[] = L"\xE8C6";
-constexpr wchar_t kLinkGlyph[] = L"\xE71B";
 constexpr wchar_t kStarGlyph[] = L"\xE734";
 constexpr wchar_t kStarFilledGlyph[] = L"\xE735";
 constexpr wchar_t kRenameGlyph[] = L"\xE8AC";
 constexpr wchar_t kDeleteGlyph[] = L"\xE74D";
-constexpr wchar_t kPropertiesGlyph[] = L"\xE946";
 
 bool AnimateTextScroll() {
     BOOL enabled = TRUE;
@@ -851,7 +850,7 @@ void QuickPreviewWindow::ShowContextMenu(POINT screen) {
         if (!text_kind)
             add(file_cmd(QuickPreviewAction::Copy), StringId::Copy, kCopyGlyph, L"Ctrl+C");
         add(file_cmd(QuickPreviewAction::Cut), StringId::Cut, kCutGlyph, L"Ctrl+X", writable);
-        add(file_cmd(QuickPreviewAction::CopyPath), StringId::CopyPath, kLinkGlyph,
+        add(file_cmd(QuickPreviewAction::CopyPath), StringId::CopyPath, command_icons::kCopyPathGlyph,
             L"Ctrl+Shift+C", true, true);
         add(file_cmd(QuickPreviewAction::ToggleStar),
             item_.starred ? StringId::Unstar : StringId::Star,
@@ -859,7 +858,7 @@ void QuickPreviewWindow::ShowContextMenu(POINT screen) {
         add(file_cmd(QuickPreviewAction::Rename), StringId::Rename, kRenameGlyph, L"F2", writable);
         add(file_cmd(QuickPreviewAction::Delete), StringId::Delete, kDeleteGlyph, L"Delete",
             writable, true);
-        add(file_cmd(QuickPreviewAction::Properties), StringId::Properties, kPropertiesGlyph,
+        add(file_cmd(QuickPreviewAction::Properties), StringId::Properties, command_icons::kPropertiesGlyph,
             L"Alt+Enter");
     }
     if (items.empty()) return;

@@ -3,15 +3,21 @@
 // Modified by EternalLightning for this independent distribution, including licensing notices.
 // Existing third-party notices and license terms remain applicable.
 
-#include "ui_renderer.h"
+#include "breadcrumb_layout.h"
 #include "device_crumbs.h"
+#include "dialog_text_fit.h"
+#include "typography.h"
 #include "../common/localization.h"
 #include "../common/known_folder_labels.h"
 #include "../common/path_utils.h"
 #include "../model/places.h"
 
 namespace pulse::ui {
-namespace { DeviceCrumbResolver device_resolver = nullptr; }
+namespace {
+DeviceCrumbResolver device_resolver = nullptr;
+constexpr float kBreadcrumbPaddingDip = 8.0f;
+constexpr float kBreadcrumbChevronDip = 14.0f;
+}
 void SetDeviceCrumbResolver(DeviceCrumbResolver resolver) { device_resolver = resolver; }
 std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path,
     std::wstring_view virtual_title) {
@@ -159,6 +165,69 @@ std::vector<BreadcrumbSegment> SplitBreadcrumb(const std::wstring& path,
         i = sep + 1;
     }
     return out;
+}
+
+void LayoutBreadcrumbs(Compositor* compositor, const D2D1_RECT_F& bounds, float scale, float margin,
+    const std::wstring& path, std::wstring_view title, std::vector<MainRenderer::BreadcrumbPlaced>& out) {
+    out.clear();
+    const auto segments = SplitBreadcrumb(path, title);
+    if (segments.empty()) return;
+    const float padding = kBreadcrumbPaddingDip * scale;
+    const float chevron = kBreadcrumbChevronDip * scale;
+    const float available = (std::max)(0.0f, bounds.right - bounds.left - 2 * margin);
+    const auto measure = [&](const std::wstring& text) {
+        return typography::MeasureLine(compositor, compositor ? compositor->AddressFormat() : nullptr, text);
+    };
+    std::vector<float> widths;
+    widths.reserve(segments.size());
+    float total = chevron * static_cast<float>(segments.size() - 1);
+    for (const auto& segment : segments) {
+        widths.push_back(measure(segment.text) + 2 * padding);
+        total += widths.back();
+    }
+    size_t first = 0;
+    while (total > available && first + 1 < segments.size()) total -= widths[first++] + chevron;
+    float x = bounds.left + margin;
+    for (size_t i = first; i < segments.size(); ++i) {
+        if (i > first) x += chevron;
+        const auto& segment = segments[i];
+        const float width = (std::min)(widths[i], bounds.right - margin - x);
+        if (width <= 0.0f) break;
+        const float text_width = width - 2 * padding;
+        out.push_back({D2D1::RectF(x, bounds.top + 2 * scale, x + width, bounds.bottom - 2 * scale),
+            text_width <= 0.0f ? std::wstring{} : widths[i] <= width + 0.5f ? segment.text :
+                FitTextEnd(segment.text, text_width, measure), segment.path, segment.text});
+        x += widths[i];
+    }
+}
+
+int HitBreadcrumbSegment(std::span<const MainRenderer::BreadcrumbPlaced> segments, float x, float y) {
+    for (size_t i = 0; i < segments.size(); ++i) {
+        const auto& rc = segments[i].rc;
+        if (x >= rc.left && x < rc.right && y >= rc.top && y < rc.bottom) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+void DrawBreadcrumbSegmentHighlight(fluent::Painter& painter, const Theme& theme,
+    const MainRenderer::BreadcrumbPlaced& segment, float opacity, bool pressed) {
+    if (opacity <= 0.0f) return;
+    auto fill = pressed ? theme.fill_pressed : theme.fill_hover;
+    fill.a *= opacity;
+    painter.FillRoundedRect(segment.rc, theme.radius_control * painter.Scale(), fill);
+}
+
+void DrawBreadcrumbSegmentLabel(fluent::Painter& painter, Compositor& compositor, const Theme& theme,
+    const MainRenderer::BreadcrumbPlaced& segment, bool separator, D2D1_COLOR_F ink) {
+    const auto& rc = segment.rc;
+    if (separator) {
+        const float left = rc.left - kBreadcrumbChevronDip * painter.Scale();
+        painter.DrawGlyph(L"\xE76C", D2D1::RectF(left, rc.top, rc.left, rc.bottom), theme.text_secondary);
+    }
+    if (segment.text.empty()) return;
+    const float padding = kBreadcrumbPaddingDip * painter.Scale();
+    painter.DrawText(segment.text, D2D1::RectF(rc.left + padding, rc.top, rc.right - padding, rc.bottom),
+        compositor.AddressFormat(), ink);
 }
 
 }

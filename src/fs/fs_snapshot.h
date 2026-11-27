@@ -68,6 +68,7 @@ public:
 
 private:
     struct Entry {
+        // Paths can retain refresh metadata after an oversized listing is declined.
         SnapshotPtr snapshot;
         DirectoryIdentity identity;
         uint64_t generation = 0;
@@ -75,16 +76,20 @@ private:
         bool dirty = true;
         std::list<std::wstring>::iterator lru_it;
     };
+    using EntryMap = std::unordered_map<std::wstring, Entry>;
 
     mutable std::mutex mutex_;
     size_t capacity_;
     size_t byte_capacity_;
     size_t resident_bytes_ = 0;
-    std::unordered_map<std::wstring, Entry> map_;
+    EntryMap map_;
     std::list<std::wstring> lru_;
 
-    static size_t SnapshotBytes(const SnapshotPtr& snapshot);
-    void EvictToBudget(const std::wstring* protected_key = nullptr);
+    size_t SnapshotBytes(const SnapshotPtr& snapshot) const;
+    Entry& InsertEntry(const std::wstring& key);
+    void StoreSnapshot(Entry& entry, SnapshotPtr&& snapshot, size_t bytes);
+    void Evict(EntryMap::iterator it);
+    void EvictToBudget();
 };
 
 } // namespace pulse::fs

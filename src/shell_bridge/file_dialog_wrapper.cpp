@@ -9,11 +9,11 @@
 #include "file_dialog_validation.h"
 #include "picker_shell_results.h"
 #include "../common/file_dialog_bridge_bypass.h"
+#include "../common/shell_id.h"
 #include "../ipc/picker_client.h"
 
 #include <algorithm>
 #include <atomic>
-#include <filesystem>
 #include <iterator>
 #include <memory>
 #include <new>
@@ -51,7 +51,7 @@ class FileDialog final : public IFileOpenDialog, public IFileSaveDialog, public 
                          public IFileDialogCustomize, public IOleWindow, public IObjectWithSite {
 public:
     FileDialog(DialogFactory factory, ComPtr<IFileDialog> native, const FileDialogBridgeServices& services)
-        : factory_(factory), native_(std::move(native)), services_(services) {
+        : factory_(factory), native_(std::move(native)), services_(services), client_state_(factory == DialogFactory::Save) {
         event_owner_->dialog = Identity();
     }
 
@@ -142,6 +142,14 @@ public:
             if (result.status == wire::Status::Cancelled) return HRESULT_FROM_WIN32(ERROR_CANCELLED);
             if (result.status == wire::Status::UseNative) {
                 bridge_result_ = false;
+                if (!result.paths.empty()) {
+                    const auto& id = result.paths.front();
+                    ComPtr<IShellItem> folder;
+                    SFGAOF attributes = 0;
+                    if (SUCCEEDED(shell_id::CreateItem({id.begin(), id.end()}, IID_PPV_ARGS(&folder))) &&
+                        SUCCEEDED(folder->GetAttributes(SFGAO_FOLDER, &attributes)) && (attributes & SFGAO_FOLDER))
+                        native_->SetFolder(folder.Get());
+                }
                 return ShowNativeWithoutTakeover(owner);
             }
             if (result.status == wire::Status::Unsupported && result.error_source == wire::ErrorSource::Win32 &&
@@ -301,18 +309,14 @@ public:
     HRESULT STDMETHODCALLTYPE SetClientGuid(REFGUID guid) override {
         if (const auto hr = Mutable(); FAILED(hr)) return hr;
         const auto hr = native_->SetClientGuid(guid);
-        return Capture(Setting::ClientGuid, hr, [&](SetterCall&) {
-            if (!client_state_) client_state_.emplace();
-            client_guid_ = guid;
-            return true;
-        });
+        if (hr == S_OK) client_guid_ = guid;
+        return Capture(Setting::ClientGuid, hr, [](SetterCall&) { return true; });
     }
     HRESULT STDMETHODCALLTYPE ClearClientData() override {
         if (const auto hr = Mutable(); FAILED(hr)) return hr;
         const auto hr = native_->ClearClientData();
-        return Capture(Setting::ClearClientData, hr, [&](SetterCall&) {
-            return client_state_ && client_guid_ && client_state_->Clear(*client_guid_);
-        });
+        const bool cleared = hr != S_OK || client_state_.Clear(ClientGuid());
+        return Capture(Setting::ClearClientData, hr, [&](SetterCall&) { return cleared; });
     }
     HRESULT STDMETHODCALLTYPE SetFilter(IShellItemFilter* filter) override {
         return NativeOnly<IFileDialog>([&](auto* dialog) { return dialog->SetFilter(filter); });
@@ -468,7 +472,7 @@ private:
     }
     HRESULT ShowNativeWithoutTakeover(HWND owner) {
         const dialog_bridge::NativeFallbackScope bypass;
-        return native_->Show(owner);
+        return ShowNativeTracked(owner);
     }
     HRESULT ShowNative(HWND owner) {
         FILEOPENDIALOGOPTIONS options = 0;
@@ -477,7 +481,26 @@ private:
         using Mode = dialog_bridge::NativeMode;
         const dialog_bridge::NativeModeScope mode(owner ? GetAncestor(owner, GA_ROOT) : nullptr,
             open ? Mode::Open : factory_ == DialogFactory::Save ? Mode::Save : Mode::Unknown);
-        return native_->Show(owner);
+        return ShowNativeTracked(owner);
+    }
+
+    const GUID* ClientGuid() const { return client_guid_ ? &*client_guid_ : nullptr; }
+
+    HRESULT ShowNativeTracked(HWND owner) {
+        const auto hr = native_->Show(owner);
+        if (hr == S_OK) {
+            ComPtr<IShellItem> item, folder;
+            if (native_->GetResult(&item) == S_OK) item->GetParent(&folder);
+            if (!folder) native_->GetFolder(&folder);
+            RememberFolder(folder.Get());
+        }
+        return hr;
+    }
+
+    bool HasForcedFolder() const {
+        return std::ranges::any_of(calls_, [](const SetterCall& call) {
+            return call.setting == Setting::Folder && call.native_result == S_OK;
+        });
     }
 
     template<class Interface, class Call>
@@ -611,30 +634,33 @@ private:
         std::copy_n(bytes, id.size(), id.begin());
 
         FILEOPENDIALOGOPTIONS options = 0;
-        if (native_->GetOptions(&options) != S_OK || ((options & FOS_PICKFOLDERS) && (options & FOS_ALLOWMULTISELECT)))
-            return std::nullopt;
-        ComPtr<IShellItem> folder;
+        if (native_->GetOptions(&options) != S_OK) return std::nullopt;
         std::u16string directory;
-        if (native_->GetFolder(&folder) != S_OK || !FilesystemFolder(folder.Get(), directory)) return std::nullopt;
+        if (!HasForcedFolder()) {
+            if (const auto remembered = client_state_.Read(ClientGuid())) {
+                const DWORD attributes = GetFileAttributesW(remembered->c_str());
+                if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
+                    directory.assign(remembered->begin(), remembered->end());
+            }
+        }
+        if (directory.empty()) {
+            ComPtr<IShellItem> folder;
+            if (native_->GetFolder(&folder) != S_OK || !FilesystemFolder(folder.Get(), directory)) return std::nullopt;
+        }
         PreparationContext context;
         context.resolved_initial_directory = std::move(directory);
         context.caller_validation_supported = true;
         context.save_caller_validation_supported = true;
         context.native_save_defaults_supported = true;
-        context.client_state_owned = client_state_.has_value() && client_guid_.has_value();
+        context.client_state_owned = true;
         const auto policy = factory_ == DialogFactory::Open ? AccessPolicy::LocalOpenV1 : AccessPolicy::LocalSaveV1;
         const auto decision = PrepareFileDialogContract(factory_, calls_, id, policy, context);
         if (decision.effective_options != options) return std::nullopt;
         if (!RuntimeContractCertified(decision) && !RuntimeLocalSaveContractCertified(decision)) return std::nullopt;
         auto request = BridgeRequestFor(decision);
-        if (request && context.client_state_owned && std::ranges::none_of(calls_, [](const SetterCall& call) {
-                return call.setting == Setting::Folder && call.native_result == S_OK;
-            })) {
-            if (const auto remembered = client_state_->Read(*client_guid_)) {
-                const DWORD attributes = GetFileAttributesW(remembered->c_str());
-                if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY))
-                    std::get<wire::Request>(request->body).initial_directory.assign(remembered->begin(), remembered->end());
-            }
+        if (request && !services_.run_bridge) {
+            auto& body = std::get<wire::Request>(request->body);
+            if (body.operation == wire::Operation::OpenFiles) body.required_capabilities |= wire::NativeOpenFolder;
         }
         return request;
     }
@@ -679,12 +705,16 @@ private:
                 if (SUCCEEDED(items_->GetItemAt(i, &recent))) SHAddToRecentDocs(SHARD_SHELLITEM, recent.Get());
             }
         }
-        if (client_state_ && client_guid_ && item_) {
+        if (item_) {
             ComPtr<IShellItem> folder;
-            std::u16string directory;
-            if (SUCCEEDED(item_->GetParent(&folder)) && FilesystemFolder(folder.Get(), directory))
-                client_state_->Write(*client_guid_, {directory.begin(), directory.end()});
+            if (SUCCEEDED(item_->GetParent(&folder))) RememberFolder(folder.Get());
         }
+    } catch (...) {}
+
+    void RememberFolder(IShellItem* folder) noexcept try {
+        std::u16string directory;
+        if (FilesystemFolder(folder, directory))
+            client_state_.Write(ClientGuid(), {directory.begin(), directory.end()});
     } catch (...) {}
 
     const DialogFactory factory_;
@@ -698,7 +728,7 @@ private:
     wire::PipeHandle cancel_;
     std::vector<SetterCall> calls_;
     std::vector<Subscription> subscriptions_;
-    std::optional<FileDialogClientState> client_state_;
+    FileDialogClientState client_state_;
     std::optional<GUID> client_guid_;
     std::optional<Button> button_;
     bool group_open_ = false, had_group_ = false;

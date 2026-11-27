@@ -18,6 +18,11 @@
 
 namespace pulse::fs {
 
+inline bool DriveHasNoMedia(UINT type, DWORD error) {
+    if (type == DRIVE_REMOVABLE) return error == ERROR_NOT_READY || error == ERROR_NO_MEDIA_IN_DRIVE;
+    return type == DRIVE_FIXED && error == ERROR_NO_MEDIA_IN_DRIVE;
+}
+
 // QueryDosDevice target of a drive letter. User-mode file systems create
 // \Device\Volume{GUID} disk devices; real partitions, VHDs and BitLocker
 // volumes are \Device\HarddiskVolumeN, subst drives \??\C:\..., RAM disks and

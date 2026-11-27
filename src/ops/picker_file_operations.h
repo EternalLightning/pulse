@@ -25,7 +25,9 @@ struct PickerClipboardWrite {
     bool text = false;
 };
 
-using PickerFileRequest = std::variant<OpRequest, PickerClipboardPaste, PickerProperties, PickerClipboardWrite>;
+struct PickerUndo {};
+
+using PickerFileRequest = std::variant<OpRequest, PickerClipboardPaste, PickerProperties, PickerClipboardWrite, PickerUndo>;
 
 class PickerFileOperations {
 public:
@@ -39,7 +41,7 @@ private:
     std::condition_variable event_;
     bool changed_ = false;
     bool started_ = false;
-    OpsManager manager_{false};
+    OpsManager manager_;
 };
 
 struct PickerFileOperation {

@@ -472,9 +472,13 @@ if(PULSE_APP_SOURCES)
     target_link_options(pulse PRIVATE
         /DELAYLOAD:version.dll /DELAYLOAD:netapi32.dll /DELAYLOAD:mpr.dll
         /DELAYLOAD:secur32.dll /DELAYLOAD:cfgmgr32.dll /DELAYLOAD:rstrtmgr.dll)
-    target_compile_options(pulse PRIVATE $<$<CONFIG:Release>:/Gy> $<$<CONFIG:Release>:/Gw>)
-    target_link_options(pulse PRIVATE $<$<CONFIG:Release>:/OPT:REF,ICF>)
-    set_property(TARGET pulse PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    target_compile_options(pulse PRIVATE $<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CXX>>:/GL>
+        $<$<CONFIG:Release>:/Gy> $<$<CONFIG:Release>:/Gw>)
+    # Fixtures copy LINK_OPTIONS from pulse and use their own compilation settings.
+    target_link_options(pulse PRIVATE $<$<CONFIG:Release>:/OPT:REF,ICF>
+        "$<$<AND:$<CONFIG:Release>,$<STREQUAL:$<TARGET_PROPERTY:NAME>,pulse>>:/INCREMENTAL:NO;/LTCG:INCREMENTAL>")
+    # CMake IPO would append /LTCG after the target's incremental LTCG option.
+    set_property(TARGET pulse PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE FALSE)
     target_link_libraries(pulse PRIVATE pulse_localization pulse_user_storage)
     pulse_enable_lumatext(pulse)
     pulse_add_version_resource(pulse "Pulse file manager" "Pulse" "Pulse.exe")
@@ -566,7 +570,7 @@ target_compile_definitions(pulse_drag_drop_test PRIVATE PULSE_DRAG_DROP_TESTING=
 target_link_libraries(pulse_drag_drop_test PRIVATE ole32 shell32 uuid advapi32 pulse_shell_query_client)
 add_executable(pulse_drop_staging_test src/bench/drop_staging_test_main.cpp
     src/ops/drop_staging.cpp)
-target_link_libraries(pulse_drop_staging_test PRIVATE user32)
+target_link_libraries(pulse_drop_staging_test PRIVATE user32 pulse_localization)
 
 add_executable(pulse_rename_ops_test src/bench/rename_ops_test.cpp
     src/ops/ops_manager.cpp src/ipc/shell_client.cpp)
@@ -1678,7 +1682,7 @@ target_link_libraries(pulse_image_cache_budget_test PRIVATE ole32 shell32 window
 
 add_executable(pulse_thumbnail_pipeline_test EXCLUDE_FROM_ALL
     src/bench/thumbnail_pipeline_test.cpp src/ui/thumbnail_cache.cpp src/ui/thumbnail_disk_cache.cpp)
-target_link_libraries(pulse_thumbnail_pipeline_test PRIVATE ole32 shell32 windowscodecs uuid)
+target_link_libraries(pulse_thumbnail_pipeline_test PRIVATE ole32 shell32 windowscodecs uuid pulse_localization)
 add_dependencies(pulse_thumbnail_pipeline_test pulse_preview)
 
 get_target_property(operation_fixture_sources pulse_locked_operation_test SOURCES)

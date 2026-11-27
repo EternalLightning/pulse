@@ -98,9 +98,9 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
         DrawSettingsButton(vm, spec);
         if (small_glyph) {
             const float mid = (r.top + r.bottom) * 0.5f;
-            DrawIconText(r.left + 8 * s, mid - 10 * s, 20 * s, 20 * s, std::wstring(glyph), L"",
-                         !enabled ? theme.text_disabled : high_contrast && (state.hovered || SettingsPressed(vm, r))
-                             ? theme.text_selected : theme.text, 0.72f);
+            painter_.DrawGlyph(glyph, D2D1::RectF(r.left + 8 * s, mid - 10 * s, r.left + 28 * s, mid + 10 * s),
+                !enabled ? theme.text_disabled : high_contrast && (state.hovered || SettingsPressed(vm, r))
+                    ? theme.text_selected : theme.text, !enabled, 14.0f);
         }
     };
     auto card = [&](const D2D1_RECT_F& r, float radius = 10.0f) {
@@ -517,11 +517,10 @@ void MainRenderer::DrawSettingsSysCtx(const WindowViewModel& vm, const D2D1_RECT
                 spec.skip_glyph = true;
                 DrawSettingsButton(vm, spec);
                 const float bm = (b.top + b.bottom) * 0.5f;
-                DrawIconText(b.left + 8 * s, bm - 10 * s, 20 * s, 20 * s, row.deleting ? L"\xE7A7" : L"\xE74D", L"",
-                             !ready ? theme.text_disabled : row.deleting
-                                 ? (high_contrast && (state.hovered || SettingsPressed(vm, b)) ? theme.text_selected : theme.text)
-                                 : AutoAccentText(theme.danger),
-                             0.62f);
+                painter_.DrawGlyph(spec.glyph, D2D1::RectF(b.left + 8 * s, bm - 10 * s, b.left + 28 * s, bm + 10 * s),
+                    !ready ? theme.text_disabled : row.deleting
+                        ? (high_contrast && (state.hovered || SettingsPressed(vm, b)) ? theme.text_selected : theme.text)
+                        : AutoAccentText(theme.danger), true, 14.0f);
                 badge_right = b.left - 10 * s;
             } else if (SysCtxSwitchable(row)) {
                 fluent::ControlState state{};

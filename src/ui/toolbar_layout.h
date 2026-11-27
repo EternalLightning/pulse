@@ -14,6 +14,17 @@ namespace pulse::ui {
 // Stable MenuCmd IDs; this geometry header does not link the application catalog.
 inline constexpr std::array<int, 10> kDefaultToolbarOrder{186, 5800, 2, 3, 4, 6, 5750, 5, 7, 306};
 inline constexpr std::array<int, 9> kLegacyToolbarCommands{2, 3, 4, 6, 5, 7, 306, 101, 181};
+inline constexpr std::array kNavigationGlyphs{L"\xE72B", L"\xE72A", L"\xE898", L"\xE72C"};
+
+inline auto LayoutNavigationButtons(float left, float top, float scale, float available) {
+    std::array<D2D1_RECT_F, kNavigationGlyphs.size()> buttons{};
+    const float step = available < 500.0f * scale ? 28.0f * scale : 34.0f * scale;
+    for (auto& button : buttons) {
+        button = {left, top, left + step - 4.0f * scale, top + 32.0f * scale};
+        left += step;
+    }
+    return buttons;
+}
 struct ToolbarCommandPlacement {
     int command = 0;
     D2D1_RECT_F bounds{};
@@ -33,17 +44,12 @@ inline ToolbarLayout MakeToolbarLayout(float width, float scale, float top, floa
                                       std::span<const int> command_order = kDefaultToolbarOrder) {
     ToolbarLayout out;
     const float available = width - left;
-    const float nav_step = available < 500*scale ? 28*scale : 34*scale;
-    float x = left + margin;
-    for (int i=0;i<4;++i) {
-        out.navigation[i] = {x,top+6*scale,x+nav_step-4*scale,top+38*scale};
-        x += nav_step;
-    }
+    out.navigation = LayoutNavigationButtons(left + margin, top + 6 * scale, scale, available);
     const float search_width = std::clamp(available*0.27f, 140*scale, 360*scale);
     out.operations = {width-margin-36*scale,top+4*scale,width-margin,top+40*scale};
     const float search_right = out.operations.left-8*scale;
     out.search = {search_right-search_width,top+4*scale,search_right,top+40*scale};
-    out.address = {x+6*scale,top+4*scale,out.search.left-8*scale,top+40*scale};
+    out.address = {out.navigation.back().right+10*scale,top+4*scale,out.search.left-8*scale,top+40*scale};
     if (available < 480*scale) {
         out.search.left=out.search.right-32*scale;
     }
@@ -56,7 +62,7 @@ inline ToolbarLayout MakeToolbarLayout(float width, float scale, float top, floa
     const float filter_right = out.overflow.left-action_gap;
     const float dropdown_span = 2*(dropdown_width+action_gap);
     const float left_limit = filter_right-filter_base-dropdown_span-action_gap;
-    x = left + margin;
+    float x = left + margin;
     for (const int command : command_order) {
         if (command <= 0 || std::any_of(out.placed_commands.begin(), out.placed_commands.end(),
             [=](const auto& item) { return item.command == command; })) continue;

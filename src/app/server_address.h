@@ -17,7 +17,7 @@ enum class ServerAddressKind {
     Invalid,      // empty, a local path, or a malformed host
     Server,       // \\host (the share list)
     Share,        // \\host\share[\more]
-    WebDav,       // http(s)://: unc holds the WebClient form, not opened in P1
+    WebDav,       // Windows WebClient UNC form of an HTTP(S) WebDAV address
     Unsupported,  // ftp://, afp://, nfs://, sftp://, ...
 };
 
@@ -34,6 +34,11 @@ struct ServerAddress {
 // working there; bare IPv4 addresses ("192.168.1.20\share") are always
 // accepted.
 ServerAddress ParseServerAddress(std::wstring_view text, bool allow_bare_host = false);
+
+constexpr bool IsBrowsableServerAddress(ServerAddressKind kind) {
+    return kind == ServerAddressKind::Server || kind == ServerAddressKind::Share ||
+        kind == ServerAddressKind::WebDav;
+}
 
 // "\\host\share\a\b" -> "\\host\share"; "\\host\" -> "\\host"; else empty.
 // Accepts the \\?\UNC\ prefix.

@@ -4,7 +4,7 @@
 // Existing third-party notices and license terms remain applicable.
 
 // lan_discovery.h - 局域网设备: a short, passive-first look for file servers on
-// the current network. mDNS (_smb._tcp / _device-info) through
+// the current network. SMB, device-info and WebDAV mDNS through
 // DnsServiceBrowse and WS-Discovery through Function Discovery. No subnet
 // scan, no SMB sign-in, nothing at all on a Public network.
 #pragma once

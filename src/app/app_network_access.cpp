@@ -21,16 +21,17 @@ app::NetworkRequestIdentity Identity(const app::NetworkAccessState& state, const
     return {state.epoch, tab.network_identity, tab.view_generation, tab.applied_generation, tab.current_path};
 }
 }
-void MarkNetworkForegroundListing(AppState& s, const app::Tab& tab) {
+void MarkNetworkForegroundListing(AppState& s, const app::Tab& tab, bool may_prompt) {
     if (fs::IsUncPath(tab.current_path) && tab.pending_generation)
-        State(s)->foreground_listings[tab.network_identity] = tab.pending_generation;
+        State(s)->foreground_listings[tab.network_identity] = {tab.pending_generation, may_prompt};
 }
-bool TakeNetworkForegroundListing(AppState& s, const app::Tab& tab, uint64_t generation) {
+bool TakeNetworkForegroundListing(AppState& s, const app::Tab& tab, uint64_t generation, bool for_prompt) {
     if (!s.network_access) return false;
     const auto found = s.network_access->foreground_listings.find(tab.network_identity);
-    if (found == s.network_access->foreground_listings.end() || found->second != generation) return false;
+    if (found == s.network_access->foreground_listings.end() || found->second.generation != generation) return false;
+    const bool allowed = !for_prompt || found->second.may_prompt;
     s.network_access->foreground_listings.erase(found);
-    return true;
+    return allowed;
 }
 bool NetworkForegroundRequestPending(const AppState& s, const app::Tab& tab) {
     if (!s.network_access) return false;
@@ -39,12 +40,12 @@ bool NetworkForegroundRequestPending(const AppState& s, const app::Tab& tab) {
 }
 void RequestNetworkAuthentication(AppState& s, app::Tab& tab, DWORD error) {
     if (s.exit_requested || s.core.exiting || ActiveTab(s) != &tab || !IsWindowVisible(s.hwnd)) return;
-    if (!app::IsNetworkAuthenticationError(error) || !fs::IsUncPath(tab.current_path) || tab.loading) return;
-    auto share = app::UncShareRoot(tab.current_path);
-    if (share.empty()) {
-        const auto address = app::ParseServerAddress(tab.current_path);
-        if (address.kind == app::ServerAddressKind::Server) share = address.unc + L"\\IPC$";
-    }
+    if (!fs::IsUncPath(tab.current_path) || tab.loading) return;
+    const auto address = app::ParseServerAddress(tab.current_path);
+    const bool webdav = address.kind == app::ServerAddressKind::WebDav;
+    if (!app::ShouldPromptNetworkAuthentication(error, webdav)) return;
+    auto share = webdav ? address.unc : app::UncShareRoot(tab.current_path);
+    if (share.empty() && address.kind == app::ServerAddressKind::Server) share = address.unc + L"\\IPC$";
     if (share.empty()) return;
     auto state = State(s);
     const auto identity = Identity(*state, tab);
@@ -57,7 +58,7 @@ void RequestNetworkAuthentication(AppState& s, app::Tab& tab, DWORD error) {
         // Windows owns the credential UI and secret buffers. This synchronous
         // provider call cannot be interrupted reliably; shutdown only closes
         // the result mailbox and never waits on a provider or credential dialog.
-        std::thread([mailbox, identity, share, owner, cancelled] {
+        std::thread([mailbox, identity, share, owner, cancelled, webdav] {
             DWORD code = ERROR_CANCELLED;
             {
                 std::lock_guard lock(mailbox->mutex);
@@ -66,7 +67,8 @@ void RequestNetworkAuthentication(AppState& s, app::Tab& tab, DWORD error) {
             NETRESOURCEW resource{};
             resource.dwType = share.ends_with(L"\\IPC$") ? RESOURCETYPE_ANY : RESOURCETYPE_DISK;
             resource.lpRemoteName = const_cast<wchar_t*>(share.c_str());
-            code = WNetAddConnection3W(IsWindow(owner) ? owner : nullptr, &resource, nullptr, nullptr, CONNECT_INTERACTIVE);
+            const DWORD flags = CONNECT_INTERACTIVE | (webdav ? CONNECT_PROMPT : 0);
+            code = WNetAddConnection3W(IsWindow(owner) ? owner : nullptr, &resource, nullptr, nullptr, flags);
             app::EndNetworkShareRequest(share);
             if (!cancelled->load()) mailbox->Publish({identity, code});
         }).detach();

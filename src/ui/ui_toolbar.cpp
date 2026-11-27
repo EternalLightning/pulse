@@ -7,6 +7,7 @@
 #include "toolbar_layout.h"
 #include "toolbar_icons.h"
 #include "address_search_layout.h"
+#include "breadcrumb_layout.h"
 #include "toolbar_command_state.h"
 #include "pane_header_icons.h"
 #include "command_icons.h"
@@ -28,14 +29,15 @@ void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_
     if (address_opacity > 0.0f) {
         if (address_opacity < 1.0f) dc->PushLayer(D2D1::LayerParameters(rect, nullptr,
             D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1::Matrix3x2F::Identity(), address_opacity), nullptr);
-        const wchar_t* nav_glyphs[] = {kIconBack,kIconForward,kIconUp,kIconRefresh};
         const HitTestResult::Region nav_hits[] = {HitTestResult::NavBack,HitTestResult::NavForward,HitTestResult::NavUp,HitTestResult::NavRefresh};
         for (int i=0;i<4;++i) {
             const auto r=layout.navigation[i];
             if (r.right<=r.left) continue;
             const bool enabled=i==0 ? vm.can_go_back : i==1 ? vm.can_go_forward : true;
-            DrawButton(r,theme,enabled && IsHovered(vm,nav_hits[i]) ? theme.fill_hover : kTransparent,
-                nav_glyphs[i],L"",enabled ? (vm.dark && !IsHighContrast() ? HexColor(0xFFFFFF) : theme.text_secondary) : theme.text_disabled,true,true);
+            fluent::ControlState state;
+            state.enabled = enabled;
+            state.hovered = enabled && IsHovered(vm, nav_hits[i]);
+            toolbar_icons::DrawNavigationButton(painter_, r, kNavigationGlyphs[i], theme, state, IsHighContrast());
         }
         // Breadcrumb address bar: segments clickable, empty area -> edit mode.
         D2D1_RECT_F addrRc = AddressBarRect(rect.right);
@@ -77,14 +79,9 @@ void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_
                         D2D1::RoundedRect(seg.rc, theme.radius_control * scale_, theme.radius_control * scale_),
                         brAccent_.get(), 2.0f * scale_);
                 }
-                auto hover_fill = theme.fill_hover;
-                hover_fill.a *= ControlHoverOpacity(seg.rc, (int)i == vm.breadcrumb_hover);
-                if ((int)i != vm.breadcrumb_drop && hover_fill.a > 0.0f) {
-                    MakeBrush(dc, hover_fill, brFillHover_);
-                    FillRoundedRect(dc, brFillHover_.get(), seg.rc.left, seg.rc.top,
-                        seg.rc.right - seg.rc.left, seg.rc.bottom - seg.rc.top,
-                        theme.radius_control * scale_);
-                }
+                const float hover = ControlHoverOpacity(seg.rc, static_cast<int>(i) == vm.breadcrumb_hover);
+                if (static_cast<int>(i) != vm.breadcrumb_drop)
+                    DrawBreadcrumbSegmentHighlight(painter_, theme, seg, hover);
             }
             dc->SetTransform(transform);
             dc->PopLayer();
@@ -98,17 +95,10 @@ void MainRenderer::DrawNavigationBar(const WindowViewModel& vm, const D2D1_RECT_
                         D2D1::Matrix3x2F::Identity(), breadcrumb_opacity), nullptr);
                     dc->SetTransform(D2D1::Matrix3x2F::Translation(-6.0f * scale_ * path_progress, 0) * transform);
                     for (size_t i = 0; i < placed.size(); ++i) {
-                        const auto& seg = placed[i];
-                        if (i > 0) {
-                            const float chX = seg.rc.left - 14.0f * scale_;
-                            DrawIconText(chX, addrRc.top, 14.0f * scale_, addrRc.bottom - addrRc.top,
-                                kIconChevronRight, L">", theme.text_secondary, 0.55f);
-                        }
-                        MakeBrush(dc, theme.text, brText_);
-                        // Keep the right padding available for the final glyph.
-                        DrawTextRect(dc, compositor_->AddressFormat(), brText_.get(), seg.text,
-                            seg.rc.left + 8 * scale_, seg.rc.top, seg.rc.right - seg.rc.left - 8 * scale_,
-                            seg.rc.bottom - seg.rc.top, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                        const bool highlighted = IsHighContrast() && static_cast<int>(i) == vm.breadcrumb_hover &&
+                            static_cast<int>(i) != vm.breadcrumb_drop;
+                        DrawBreadcrumbSegmentLabel(painter_, *compositor_, theme, placed[i], i != 0,
+                            highlighted ? theme.text_selected : theme.text);
                     }
                     if (placed.empty() && !vm.pane.path.empty()) {
                         MakeBrush(dc, theme.text, brText_);
@@ -174,13 +164,12 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         return D2D1::RectF(cx-radius,cy-radius,cx+radius,cy+radius);
     };
     const bool high_contrast = IsHighContrast();
-    const auto draw_command_icon = [&](int command, command_icons::Icon icon, D2D1_RECT_F bounds,
+    const auto draw_command_icon = [&](command_icons::Icon icon, D2D1_RECT_F bounds,
                                        bool enabled, D2D1_COLOR_F color) {
-        if (toolbar_icons::DrawArtwork(painter_, command, bounds, scale_, vm.dark,
-            high_contrast || !enabled, color, icon_slot_dip)) return;
         if (!paneHeaderStroke_.get()) command_icons::CreateStrokeStyle(dc, &paneHeaderStroke_);
         MakeBrush(dc, color, brText_);
-        toolbar_icons::Draw(painter_, dc, brText_.get(), paneHeaderStroke_.get(), icon, bounds, scale_, icon_slot_dip);
+        toolbar_icons::Draw(painter_, dc, brText_.get(), paneHeaderStroke_.get(), icon, bounds,
+            scale_, icon_slot_dip, high_contrast || !enabled);
     };
     if (layout.create.right > layout.create.left) {
         const std::wstring label=l10n::Get(l10n::StringId::New);
@@ -201,7 +190,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float icon_y=(layout.create.top+layout.create.bottom)*0.5f;
         const auto create_color=!create.state.enabled ? theme.text_disabled
             : IsHighContrast() && create.state.hovered ? theme.text_selected : theme.text;
-        draw_command_icon(186,command_icons::Icon::Add,icon_bounds(icon_x,icon_y),create.state.enabled,create_color);
+        draw_command_icon(command_icons::Icon::NewItem,icon_bounds(icon_x,icon_y),create.state.enabled,create_color);
     }
     if (layout.create.right > layout.create.left && layout.commands[0].right > layout.create.right) {
         MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
@@ -209,7 +198,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
             layout.create.top+7*scale_,scale_,18*scale_);
     }
     using Icon = command_icons::Icon;
-    const Icon icons[]={Icon::Cut,Icon::Copy,Icon::Paste,Icon::Rename,Icon::Delete,Icon::Info,
+    const Icon icons[]={Icon::Cut,Icon::Copy,Icon::Paste,Icon::Rename,Icon::Delete,Icon::Properties,
         Icon::Split,vm.details_visible ? Icon::PanelClose : Icon::Panel,Icon::Columns};
     const HitTestResult::Region hits[]={HitTestResult::Cut,HitTestResult::Copy,HitTestResult::Paste,
         HitTestResult::Rename,HitTestResult::Delete,HitTestResult::Properties,
@@ -227,7 +216,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const auto foreground = !enabled ? theme.text_disabled
             : IsHighContrast() && (selected || IsHovered(vm,hits[i])) ? theme.text_selected
             : selected ? theme.accent_ink : theme.text;
-        draw_command_icon(kLegacyToolbarCommands[i],icons[i],layout.commands[i],enabled,foreground);
+        draw_command_icon(icons[i],layout.commands[i],enabled,foreground);
     }
     for (const auto& placed : layout.placed_commands) {
         if (placed.command == 186 || std::find(kLegacyToolbarCommands.begin(), kLegacyToolbarCommands.end(),
@@ -245,7 +234,7 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         if (item->selected) DrawButton(placed.bounds, theme, theme.fill_selected, L"", L"",
             theme.text, true, true);
         painter_.DrawButton(button);
-        draw_command_icon(placed.command,toolbar_icons::Resolve(item->glyph,item->pictogram,item->command),placed.bounds,item->enabled,
+        draw_command_icon(toolbar_icons::Resolve(item->glyph,item->pictogram),placed.bounds,item->enabled,
             !item->enabled ? theme.text_disabled : IsHighContrast() && (hovered || item->selected)
                 ? theme.text_selected : item->selected ? theme.accent_ink : theme.text);
     }
@@ -270,9 +259,9 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
     if (layout.has_overflow && layout.overflow.right > layout.overflow.left) {
         const bool hovered = IsHovered(vm, HitTestResult::ToolbarMore);
         DrawButton(layout.overflow, theme, hovered ? theme.fill_hover : kTransparent, L"", L"", theme.text, true, true);
-        draw_command_icon(0, Icon::More, layout.overflow, true, high_contrast && hovered ? theme.text_selected : theme.text);
+        draw_command_icon(Icon::More, layout.overflow, true, high_contrast && hovered ? theme.text_selected : theme.text);
     }
-    const auto command = [&](D2D1_RECT_F bounds, const wchar_t* glyph, int files_icon,
+    const auto command = [&](D2D1_RECT_F bounds, const wchar_t* glyph,
                              l10n::StringId label, HitTestResult::Region region, bool dropdown, bool enabled = true) {
         fluent::ButtonSpec button;
         button.bounds=bounds;
@@ -290,28 +279,17 @@ void MainRenderer::DrawCommandBar(const WindowViewModel& vm, const D2D1_RECT_F& 
         const float cy=(bounds.top+bounds.bottom)*0.5f;
         const auto foreground=!enabled ? theme.text_disabled
             : IsHighContrast() && button.state.hovered ? theme.text_selected : theme.text;
-        auto icon=icon_bounds(cx,cy);
-        if (files_icon == IDR_TOOLBAR_CUSTOMIZE_SVG) {
-            // Keep the 16 DIP artwork's one-pixel horizontal strokes aligned at 100%.
-            const float side = 16.0f * scale_;
-            const float left = std::round(cx - side * 0.5f);
-            const float top = std::round(cy - side * 0.5f);
-            icon = D2D1::RectF(left, top, left + side, top + side);
-        }
-        if (!DrawFluentSvg(files_icon,icon,1.0f,&foreground)) {
-            DrawIconText(icon.left,icon.top,icon.right-icon.left,icon.bottom-icon.top,
-                glyph,L"",foreground,0.82f);
-        }
+        draw_command_icon(command_icons::FromGlyph(glyph), icon_bounds(cx, cy), enabled, foreground);
     };
     if (!layout.has_overflow && layout.overflow.right > layout.overflow.left) {
-        command(layout.overflow,L"\xE9E9",IDR_TOOLBAR_CUSTOMIZE_SVG,l10n::StringId::CustomizeCommands,HitTestResult::ToolbarMore,false);
+        command(layout.overflow,command_icons::kCustomizeCommandsGlyph,l10n::StringId::CustomizeCommands,HitTestResult::ToolbarMore,false);
     }
     MakeBrush(dc,theme.stroke_divider,brStrokeDivider_);
     FillRect(dc,brStrokeDivider_.get(),layout.sort.left-4*scale_,layout.sort.top+7*scale_,scale_,18*scale_);
-    command(layout.sort,L"\xE8CB",IDR_FILES_SORT_SVG,l10n::StringId::ToolbarSort,HitTestResult::ToolbarSort,true);
-    command(layout.group,L"\xE8FD",IDR_FILES_GROUP_SVG,l10n::StringId::ToolbarGroup,HitTestResult::ToolbarGroup,true,vm.can_group);
+    command(layout.sort,L"\xE8CB",l10n::StringId::ToolbarSort,HitTestResult::ToolbarSort,true);
+    command(layout.group,L"\xF168",l10n::StringId::ToolbarGroup,HitTestResult::ToolbarGroup,true,vm.can_group);
     if (vm.pane.filter_expand <= 0.015f && !vm.filter_editing) {
-        command(layout.filter,kIconFilter,IDR_FILES_FILTER_SVG,l10n::StringId::ToolbarFilter,HitTestResult::FilterBox,false);
+        command(layout.filter,kIconFilter,l10n::StringId::ToolbarFilter,HitTestResult::FilterBox,false);
     } else {
         fluent::TextFieldSpec field;
         field.bounds=layout.filter;

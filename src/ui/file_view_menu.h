@@ -2,6 +2,7 @@
 #pragma once
 
 #include "fluent_menu.h"
+#include "command_icons.h"
 #include "sort_types.h"
 #include "view_layout.h"
 #include "../common/localization.h"
@@ -55,21 +56,32 @@ inline std::vector<FluentMenuItem> BuildFileGroupingChoices(GroupMode mode, Sort
     return items;
 }
 
+struct FileViewChoice {
+    l10n::StringId label;
+    const wchar_t* glyph;
+    float glyph_scale = 1.0f;
+};
+inline constexpr FileViewChoice kFileViewChoices[] = {
+    {l10n::StringId::ViewExtraLarge, L"\xECA5", 1.16f},
+    {l10n::StringId::ViewLarge, L"\xECA5"},
+    {l10n::StringId::MediumIcons, L"\xECA5", 0.82f},
+    {l10n::StringId::ViewSmall, L"\xECA5"},
+    {l10n::StringId::ViewList, L"\xEA37"},
+    {l10n::StringId::ViewDetails, command_icons::kDetailsViewGlyph},
+    {l10n::StringId::ViewTiles, L"\xECA5"},
+    {l10n::StringId::ViewContent, command_icons::kContentViewGlyph},
+};
+
 inline std::vector<FluentMenuItem> BuildFileViewChoices(ViewMode current, int command_base) {
-    using I = l10n::StringId;
-    constexpr I labels[] = {I::ViewExtraLarge, I::ViewLarge, I::MediumIcons, I::ViewSmall,
-        I::ViewList, I::ViewDetails, I::ViewTiles, I::ViewContent};
-    constexpr const wchar_t* glyphs[] = {L"\xE7F4", L"\xE7F4", L"\xE7F4", L"\xECA5",
-        L"\xEA37", L"\xE8A5", L"\xECA5", L"\xE8FD"};
     std::vector<FluentMenuItem> items;
-    items.reserve(8);
-    for (int i = 0; i < 8; ++i) {
+    items.reserve(std::size(kFileViewChoices));
+    for (int i = 0; i < static_cast<int>(std::size(kFileViewChoices)); ++i) {
+        const auto& choice = kFileViewChoices[i];
         FluentMenuItem row;
         row.command = command_base + i;
-        row.text = l10n::Get(labels[i]);
-        row.glyph = glyphs[i];
-        if (i == 0) row.glyph_scale = 1.16f;
-        else if (i == 2) row.glyph_scale = 0.82f;
+        row.text = l10n::Get(choice.label);
+        row.glyph = choice.glyph;
+        row.glyph_scale = choice.glyph_scale;
         row.radio = ViewModeIndex(current) == i;
         items.push_back(std::move(row));
     }

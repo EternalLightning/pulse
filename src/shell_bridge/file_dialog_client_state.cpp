@@ -53,12 +53,11 @@ std::wstring ProcessIdentity() {
     return path;
 }
 }
-FileDialogClientState::FileDialogClientState()
-    : FileDialogClientState(ProcessIdentity(), L"Software\\Pulse\\FileDialogClients") {}
-FileDialogClientState::FileDialogClientState(std::wstring app_identity, std::wstring registry_root) {
-    if (app_identity.empty() || registry_root.empty()) return;
+FileDialogClientState::FileDialogClientState(bool save) : save_(save) {
+    const auto app_identity = ProcessIdentity();
+    if (app_identity.empty()) return;
     constexpr wchar_t digits[] = L"0123456789abcdef";
-    app_key_ = std::move(registry_root);
+    app_key_ = L"Software\\Pulse\\FileDialogClients";
     size_t column = 0;
     for (const wchar_t ch : app_identity) {
         if (column == 0) app_key_ += L'\\';
@@ -67,15 +66,16 @@ FileDialogClientState::FileDialogClientState(std::wstring app_identity, std::wst
     }
     app_key_ += L"\\Clients";
 }
-std::wstring FileDialogClientState::Key(REFGUID guid) const {
+std::wstring FileDialogClientState::Key(const GUID* guid) const {
     if (app_key_.empty()) return {};
+    if (!guid) return app_key_ + (save_ ? L"\\DefaultSave" : L"\\DefaultOpen");
     wchar_t text[40]{};
     swprintf_s(text, L"\\%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-        guid.Data1, guid.Data2, guid.Data3, guid.Data4[0], guid.Data4[1],
-        guid.Data4[2], guid.Data4[3], guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+        guid->Data1, guid->Data2, guid->Data3, guid->Data4[0], guid->Data4[1],
+        guid->Data4[2], guid->Data4[3], guid->Data4[4], guid->Data4[5], guid->Data4[6], guid->Data4[7]);
     return app_key_ + text;
 }
-std::optional<std::wstring> FileDialogClientState::Read(REFGUID guid) const noexcept try {
+std::optional<std::wstring> FileDialogClientState::Read(const GUID* guid) const noexcept try {
     const auto key = Key(guid);
     if (key.empty()) return std::nullopt;
     KeyHandle handle;
@@ -91,7 +91,7 @@ std::optional<std::wstring> FileDialogClientState::Read(REFGUID guid) const noex
     if (!ValidDirectory(directory)) return std::nullopt;
     return directory;
 } catch (...) { return std::nullopt; }
-bool FileDialogClientState::Write(REFGUID guid, const std::wstring& directory) const noexcept try {
+bool FileDialogClientState::Write(const GUID* guid, const std::wstring& directory) const noexcept try {
     const auto key = Key(guid);
     if (key.empty() || !ValidDirectory(directory)) return false;
     KeyHandle handle;
@@ -99,7 +99,7 @@ bool FileDialogClientState::Write(REFGUID guid, const std::wstring& directory) c
     return RegSetValueExW(handle.value, L"Directory", 0, REG_SZ, reinterpret_cast<const BYTE*>(directory.c_str()),
         static_cast<DWORD>((directory.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
 } catch (...) { return false; }
-bool FileDialogClientState::Clear(REFGUID guid) const noexcept try {
+bool FileDialogClientState::Clear(const GUID* guid) const noexcept try {
     const auto key = Key(guid);
     if (key.empty()) return false;
     const LSTATUS status = RegDeleteTreeW(HKEY_CURRENT_USER, key.c_str());

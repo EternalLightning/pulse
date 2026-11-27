@@ -15,6 +15,7 @@
 #include "app_terminal.h"
 #include "details_columns_ui.h"
 #include "../ui/toolbar_layout.h"
+#include "../ui/command_icons.h"
 #include "app_hover.h"
 #include "app_network_locations.h"
 #include "app_column_view.h"
@@ -607,7 +608,7 @@ void StartDragOut(AppState& s) {
     const bool high_contrast = ui::IsHighContrast();
     const auto theme = high_contrast ? ui::MakeHighContrastTheme() : ui::MakeTheme(s.darkMode, s.accentColor);
     ui::PaneViewModel pane;
-    app::FillPaneViewModel(pane, *s.pane, &s.places);
+    FillAppPaneViewModel(s, pane, *s.pane);
     const HBITMAP preview = s.renderer.CreateDragPreview(pane, tab->selected_index, theme);
     internal_file_drag = true;
     DWORD effect = ui::DoFileDragDrop(paths, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK,
@@ -627,9 +628,11 @@ void StartDragOut(AppState& s) {
 float MaxScrollForActivePane(AppState& s, ui::PaneViewModel* out) {
     if (!s.pane || !s.pane->ActiveTab()) return 0.0f;
     ui::PaneViewModel pane;
-    app::FillPaneViewModel(pane, *s.pane, &s.places);
+    FillAppPaneViewModel(s, pane, *s.pane);
     s.home_catalog.Fill(pane, &s.places);
-    const float max_scroll = s.renderer.MaxScrollForPane(pane, FocusedPaneRect(s));
+    // The pending projection has no row geometry to clamp against yet.
+    const float max_scroll = pane.projection_loading ? std::max(pane.scroll_y, s.scrollTargetY)
+        : s.renderer.MaxScrollForPane(pane, FocusedPaneRect(s));
     if (out) *out = std::move(pane);
     return max_scroll;
 }
@@ -637,11 +640,11 @@ float MaxScrollForActivePane(AppState& s, ui::PaneViewModel* out) {
 void ClampScroll(AppState& s) {
     app::Tab* tab = ActiveTab(s);
     if (!tab) return;
-    const float maxScroll = MaxScrollForActivePane(s);
+    ui::PaneViewModel pane;
+    const float maxScroll = MaxScrollForActivePane(s, &pane);
+    if (pane.projection_loading) return;
     tab->scroll_y = std::clamp(tab->scroll_y, 0.0f, maxScroll);
     s.scrollTargetY = std::clamp(s.scrollTargetY, 0.0f, maxScroll);
-    ui::PaneViewModel pane;
-    app::FillPaneViewModel(pane, *s.pane, &s.places);
     const float maxScrollX = s.renderer.MaxScrollXForPane(pane, FocusedPaneRect(s));
     tab->scroll_x = std::clamp(tab->scroll_x, 0.0f, maxScrollX);
 }
@@ -756,7 +759,7 @@ void ApplyMarqueeSelection(AppState& s) {
 
     if (n > 0 && clipR > clipL && clipB > clipT) {
         ui::PaneViewModel pane;
-        app::FillPaneViewModel(pane, *s.pane, &s.places);
+        FillAppPaneViewModel(s, pane, *s.pane);
         const auto [first, last] = s.renderer.VisibleRangeInPane(pane, FocusedPaneRect(s));
         const D2D1_RECT_F marquee = D2D1::RectF(clipL, clipT, clipR, clipB);
         for (int view = first; view >= 0 && view <= last; ++view) {
@@ -773,7 +776,7 @@ void ApplyMarqueeSelection(AppState& s) {
         return;
     }
     ui::PaneViewModel focusPane;
-    app::FillPaneViewModel(focusPane, *s.pane, &s.places);
+    FillAppPaneViewModel(s, focusPane, *s.pane);
     int focus = s.renderer.ItemFromPointInPane(focusPane, FocusedPaneRect(s),
                                                static_cast<float>(s.marqueeCur.x),
                                                static_cast<float>(s.marqueeCur.y));
@@ -1126,8 +1129,9 @@ void UpdateSmoothScroll(AppState& s) {
         const float progress = !s.renderer.MotionEnabled() || s.shot_high_contrast ? 1.0f :
             ui::fluent::EvaluateMotion({100.0f, ui::fluent::EasingCurve::OutCubic}, s.keyboardScrollElapsedMs);
         ui::PaneViewModel pane;
-        app::FillPaneViewModel(pane, *s.pane, &s.places);
-        const float maximum_x = s.renderer.MaxScrollXForPane(pane, FocusedPaneRect(s));
+        FillAppPaneViewModel(s, pane, *s.pane);
+        const float maximum_x = pane.projection_loading ? std::max(tab->scroll_x, s.keyboardScrollTargetX)
+            : s.renderer.MaxScrollXForPane(pane, FocusedPaneRect(s));
         s.keyboardScrollTargetX = std::clamp(s.keyboardScrollTargetX, 0.0f, maximum_x);
         tab->scroll_y = std::clamp(s.keyboardScrollFrom.y + (s.scrollTargetY - s.keyboardScrollFrom.y) * progress,
             0.0f, maxScroll);
@@ -2641,7 +2645,7 @@ LRESULT HandleLButtonDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARA
                 ui::FluentMenuItem props;
                 props.command = app::CmdProperties;
                 props.text = l10n::Get(l10n::StringId::Properties);
-                props.glyph = L"\xE946";
+                props.glyph = ui::command_icons::kPropertiesGlyph;
                 props.separator_after = true;
                 items.push_back(std::move(props));
                 ui::FluentMenuItem shell;
@@ -3822,7 +3826,7 @@ LRESULT HandleMouseWheel(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM
         if (wheelTab && (wheelTab->view_mode == ui::ViewMode::List || msg == WM_MOUSEHWHEEL)) {
             if (s->keyboardScroll) CancelScrollAnimation(*s);
             ui::PaneViewModel pane;
-            app::FillPaneViewModel(pane, *s->pane, &s->places);
+            FillAppPaneViewModel(*s, pane, *s->pane);
             const float maxX = s->renderer.MaxScrollXForPane(pane, FocusedPaneRect(*s));
             const auto bounds = FocusedPaneRect(*s);
             StartHorizontalSmoothScroll(*s, (msg == WM_MOUSEHWHEEL ? 1.0f : -1.0f) *
@@ -3977,6 +3981,15 @@ LRESULT HandleKeyDown(AppState* s, HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                 ResetMarquee(*s);
                 s->clickCollapseIndex = -1;
             }
+        } else if (vm.pane.file_groups_collapsed && (wParam == VK_UP || wParam == VK_DOWN ||
+                   wParam == VK_PRIOR || wParam == VK_NEXT || wParam == VK_HOME || wParam == VK_END)) {
+            const auto list = ListRect(*s);
+            const float page = std::max(ui::kDateGroupHeaderDip * s->scale, list.bottom - list.top);
+            const float step = wParam == VK_UP || wParam == VK_DOWN ? ui::kDateGroupHeaderDip * s->scale : page;
+            if (wParam == VK_HOME || wParam == VK_END) {
+                CancelScrollAnimation(*s);
+                tab->scroll_y = s->scrollTargetY = wParam == VK_HOME ? 0.0f : MaxScrollForActivePane(*s);
+            } else StartSmoothScroll(*s, (wParam == VK_UP || wParam == VK_PRIOR) ? -step : step);
         } else if (!shift && (wParam == VK_LEFT || wParam == VK_RIGHT) &&
                    HandleColumnArrowKey(*s, wParam == VK_RIGHT)) {
             CancelScrollAnimation(*s);

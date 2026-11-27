@@ -438,7 +438,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             hwnd, app::WM_DEVICE_OPERATION_DONE);
         s->shell_verbs_mailbox = std::make_shared<WindowResultMailbox<ShellVerbsResult>>(hwnd, WM_SHELL_VERBS);
         s->shell_registry_mailbox = std::make_shared<WindowResultMailbox<bool>>(hwnd, WM_SHELL_CACHE_INVALIDATE);
-        s->clipboard_paste_mailbox = std::make_shared<WindowResultMailbox<bool>>(hwnd, WM_CLIPBOARD_PASTE_RESULT);
+        s->clipboard_paste_mailbox = std::make_shared<WindowResultMailbox<app::ClipboardPasteResult>>(
+            hwnd, WM_CLIPBOARD_PASTE_RESULT);
         s->details_attribute_mailbox = std::make_shared<WindowResultMailbox<app::DetailsAttributeResult>>(hwnd, WM_DETAILS_ATTRIBUTE_RESULT);
         s->shortcut_drop_mailbox = std::make_shared<WindowResultMailbox<app::ShortcutDropResult>>(hwnd, WM_DROP_SHORTCUTS_RESULT);
         s->external_open_mailbox = std::make_shared<WindowResultMailbox<app::ExternalOpenResult>>(
@@ -549,7 +550,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         s->renderer.SetSidebarWidthDip(static_cast<float>(s->appPrefs.sidebar_width));
         ApplyAccentFromPrefs(*s);
         ApplyAppWindowChrome(*s);
-        s->index.Start(hwnd, WM_INDEX_NOTIFY, WM_INDEX_SEARCH);
+        s->index.Start(hwnd, WM_INDEX_NOTIFY, WM_INDEX_SEARCH, index::kPipeName,
+                       s->core.startup_index_migration);
         StartChangeTracking(*s);
         s->networkIndex.Start(hwnd, WM_NETWORK_INDEX_NOTIFY, WM_NETWORK_INDEX_SEARCH);
         s->contentSearch.Start(hwnd, WM_CONTENT_SEARCH, s->contentIndexObserver ? index::ContentAgentMode::Observer : index::ContentAgentMode::Instant);
@@ -1130,8 +1132,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
     }
 
     case WM_SHOWWINDOW:
-        // Hidden owners stop painting, so unload the provider here.
-        if (s && !wParam) s->renderer.NotifyPreviewOwnerHidden();
+        if (s && !wParam) s->renderer.ReleaseHiddenWindowResources();
         // Sent before the window becomes visible; restore full rate right away.
         if (s && wParam && !IsIconic(hwnd)) SyncUiScheduling(*s);
         break;
@@ -1572,7 +1573,8 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_RECYCLE_INFO: {
         auto* info = reinterpret_cast<fs::RecycleBinInfo*>(lParam);
-        if (s && info && ApplyQueriedRecycleInfo(*s, *info))
+        if (s && info && (wParam == 0 || wParam == s->recycle_listing_generation) &&
+            ApplyQueriedRecycleInfo(*s, *info))
             InvalidateRect(hwnd, nullptr, FALSE);
         delete info;
         return 0;
@@ -1770,13 +1772,7 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         return 0;
 
     case WM_CLIPBOARD_PASTE_RESULT:
-        if (s && s->clipboard_paste_mailbox) {
-            for (const bool success : s->clipboard_paste_mailbox->Take(wParam)) {
-                if (!success) s->notification_toast.Show(hwnd,
-                    l10n::Get(l10n::StringId::OpCopyFailed),
-                    l10n::Get(l10n::StringId::OperationFailedMessage));
-            }
-        }
+        if (s) HandleClipboardPasteResult(*s, wParam);
         return 0;
 
     case WM_DROP_SHORTCUTS_RESULT:
@@ -1820,6 +1816,14 @@ LRESULT CALLBACK WndProcImpl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
     case WM_INDEX_NOTIFY: {
         if (s) {
+            if (s->core.startup_index_migration && s->core.startup_index_migration->Ready()) {
+                const auto migration = std::exchange(s->core.startup_index_migration, {});
+                s->core.windows.ForEach([&](HWND window, AppState& state) {
+                    state.settings.RefreshStorage();
+                    if (!migration->Error().empty()) state.settings.SetError(migration->Error());
+                    if (IndexStatusVisible(state)) InvalidateRect(window, nullptr, FALSE);
+                });
+            }
             const bool ready = s->index.PinyinReady();
             if (ready && !s->pinyinReadyLast && s->appPrefs.search_pinyin) {
                 ForEachPane(*s, [&](app::Pane& pane) {
@@ -2437,15 +2441,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         ? app::SingleInstanceCoordinator::AcquireResult::Primary : state.single_instance.Acquire();
     if (!skip_singleton && singleton_result == app::SingleInstanceCoordinator::AcquireResult::Primary) {
         std::wstring migration_error;
-        // No window exists yet. Keep filesystem migration off the UI thread.
+        // Preferences require the final configuration location before they load.
         std::thread migration([&] {
             pulse::storage::ApplyConfiguration(migration_error);
-            std::wstring index_error;
-            if (!pulse::storage::ApplyUserIndex(index_error) && migration_error.empty())
-                migration_error = std::move(index_error);
             ApplyStagedSettingsAtStartup();
         });
         migration.join();
+        if (!pulse::storage::Pending(pulse::storage::Kind::Index).empty()) {
+            state.core.startup_index_migration = index::IndexClient::StartUserIndexMigration();
+            if (!state.core.startup_index_migration && migration_error.empty())
+                migration_error = l10n::Get(l10n::StringId::IndexMigrationFailed);
+        }
         if (!migration_error.empty()) state.settings.SetError(std::move(migration_error));
     }
 

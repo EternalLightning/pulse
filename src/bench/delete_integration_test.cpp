@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
             Probe::Notify(s.ops, [&] {
                 const auto pending = s.ops.PendingDeleteConfirmation();
                 if (!pending) return;
-                const auto spec = BuildDeleteConfirmationSpec(*pending);
+                const auto spec = ui::BuildDeleteConfirmationSpec(*pending);
                 const auto& reason = l10n::Get(l10n::StringId::DeleteReasonNetwork);
                 check(!reason.empty() && spec.message.find(reason) != std::wstring::npos &&
                     spec.cancel_is_default && spec.danger,
@@ -200,14 +200,14 @@ int main(int argc, char** argv) {
         mixed.token = 12;
         mixed.plan.targets = {{L"C:\\Fixture\\keep-in-bin.txt", {L"C:\\Fixture\\keep-in-bin.txt"}, ops::DeleteDisposition::Recyclable, L"mock proven recycle"},
             {L"C:\\Fixture\\permanent.txt", {L"C:\\Fixture\\permanent.txt"}, ops::DeleteDisposition::Permanent, L"explicit permanent"}};
-        auto actual_spec = BuildDeleteConfirmationSpec(mixed);
+        auto actual_spec = ui::BuildDeleteConfirmationSpec(mixed);
         check(actual_spec.cancel_is_default && actual_spec.danger && actual_spec.fit_to_work_area &&
             actual_spec.message.find(L"2 items (1 permanent, 1 recycled)") != std::wstring::npos &&
             actual_spec.message.find(l10n::Get(l10n::StringId::DeleteMixedWarning)) != std::wstring::npos &&
             actual_spec.message.find(L"explicit permanent") != std::wstring::npos,
             "shared confirmation explicitly summarizes irreversible reason and mixed logical count");
         for (int i = 0; i < 20; ++i) mixed.plan.targets.push_back({std::wstring(4000, L'x'), {L"C:\\Fixture\\long.txt"}, ops::DeleteDisposition::Permanent, L"explicit permanent"});
-        actual_spec = BuildDeleteConfirmationSpec(mixed);
+        actual_spec = ui::BuildDeleteConfirmationSpec(mixed);
         check(actual_spec.message.size() < 1600 && actual_spec.note.find(L"more items") != std::wstring::npos &&
             actual_spec.rows.size() == 5 && actual_spec.rows[2].text.size() == 4000,
             "large batch uses bounded path rows while retaining full long names for width-based fitting");

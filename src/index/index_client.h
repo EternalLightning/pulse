@@ -22,6 +22,26 @@
 
 namespace pulse::index {
 
+class StartupIndexMigration {
+public:
+    explicit StartupIndexMigration(HANDLE process) noexcept : process_(process) {}
+    ~StartupIndexMigration() { CloseHandle(process_); }
+    StartupIndexMigration(const StartupIndexMigration&) = delete;
+    StartupIndexMigration& operator=(const StartupIndexMigration&) = delete;
+
+    bool Ready() const noexcept { return ready_.load(); }
+    const std::wstring& Error() const noexcept { return error_; }
+
+private:
+    friend class IndexClient;
+    void Complete();
+
+    HANDLE process_;
+    std::once_flag finish_;
+    std::atomic<bool> ready_{false};
+    std::wstring error_;
+};
+
 class IndexClient {
 public:
     IndexClient() = default;
@@ -29,7 +49,8 @@ public:
     IndexClient(const IndexClient&) = delete;
     IndexClient& operator=(const IndexClient&) = delete;
 
-    void Start(HWND notify, UINT status_msg, UINT search_msg, std::wstring pipe_name = kPipeName);
+    void Start(HWND notify, UINT status_msg, UINT search_msg, std::wstring pipe_name = kPipeName,
+               std::shared_ptr<StartupIndexMigration> migration = {});
     void Stop();
 
     std::wstring Status() const;
@@ -60,9 +81,11 @@ public:
     bool RequestInstallService(); // one UAC via runas --install
 
     static std::wstring ExePath();
+    static std::shared_ptr<StartupIndexMigration> StartUserIndexMigration();
 
 private:
     friend struct IndexClientTestAccess;
+    bool WaitForStartupMigration(StartupIndexMigration& migration);
     void Worker();
     void Writer();
     bool EnsureConnected();

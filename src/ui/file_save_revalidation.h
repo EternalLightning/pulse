@@ -15,6 +15,7 @@ struct SaveObjectIdentity {
     ULONGLONG volume = 0;
     std::array<BYTE, 16> file{};
     LONGLONG creation_time = 0;
+    bool legacy = false;
     bool operator==(const SaveObjectIdentity&) const = default;
 };
 
@@ -33,6 +34,7 @@ public:
     bool TargetExists() const { return target_.has_value(); }
     const SaveObjectIdentity& ParentIdentity() const { return parent_identity_; }
     const std::optional<SaveObjectIdentity>& TargetIdentity() const { return target_; }
+    bool UsesLegacyIdentity() const { return parent_identity_.legacy || (target_ && target_->legacy); }
 private:
     SaveConfirmationSnapshot() = default;
     std::wstring path_, parent_;
@@ -40,6 +42,7 @@ private:
     bool caller_validates_access_ = false;
     bool no_test_file_create_ = false, require_existing_parent_ = false;
     bool parent_exists_ = true;
+    bool allow_legacy_identity_ = false;
     SaveObjectIdentity parent_identity_;
     std::optional<SaveObjectIdentity> target_;
     friend SaveRevalidationResult CaptureSaveConfirmation(const SaveTargetRequest&, const std::function<bool()>&);

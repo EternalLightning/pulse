@@ -3,7 +3,9 @@
 
 #include "animation_clock.h"
 #include "ui_compositor.h"
+#include "ui_renderer.h"
 #include "../common/localization.h"
+#include "../common/path_utils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -15,6 +17,8 @@ constexpr float kRowDip = 30.0f;
 constexpr float kGroupGapDip = 12.0f;
 constexpr float kDisclosureDip = 20.0f;
 constexpr float kScrollbarDip = 10.0f;
+constexpr wchar_t kDriveGlyph[] = L"\xE7F1";
+constexpr wchar_t kFolderGlyph[] = L"\xE8B7";
 
 bool Contains(D2D1_RECT_F rect, float x, float y) {
     return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
@@ -36,9 +40,13 @@ FilePickerTree::~FilePickerTree() {
 
 FilePickerTree::Node& FilePickerTree::AddRoot(Group group, PickerPlace place) {
     auto node = std::make_unique<Node>();
+    const bool drive = path::IsDriveRootPath(place.directory);
     node->label = std::move(place.label);
-    node->glyph = std::move(place.glyph);
+    node->glyph = drive ? kDriveGlyph : std::move(place.glyph);
+    node->icon_color = place.icon_color;
+    node->use_path_icon = !drive && (place.use_path_icon || node->glyph == kFolderGlyph);
     node->target.directory = std::move(place.directory);
+    node->target.native_folder = place.native_folder;
     return *roots_[group].emplace_back(std::move(node));
 }
 
@@ -48,9 +56,10 @@ void FilePickerTree::ApplyPlaces(PickerPlaces places) {
     for (auto& place : places.open_tabs) AddRoot(OpenTabs, std::move(place)).shortcut = true;
     for (auto& place : places.quick_access) AddRoot(QuickAccess, std::move(place)).pinned = true;
     if (pulse_folder_) {
-        AddRoot(QuickAccess, {l10n::Get(l10n::StringId::PickerPulseFolder), {}, L"\xE8B7"}).target.pulse_folder = true;
+        AddRoot(QuickAccess, {l10n::Get(l10n::StringId::PickerPulseFolder), {}, kFolderGlyph}).target.pulse_folder = true;
     }
     for (auto& place : places.network) AddRoot(Devices, std::move(place));
+    for (auto& place : places.portable_devices) AddRoot(Devices, std::move(place));
 }
 
 void FilePickerTree::Initialize(HWND window, model::FileVisibility visibility, bool pulse_folder,
@@ -81,10 +90,17 @@ void FilePickerTree::Layout(D2D1_RECT_F bounds, float scale, bool animate) {
     Tick(AnimationTimeMs(), animate);
 }
 
-void FilePickerTree::Navigate(std::wstring_view directory, bool animate) {
+void FilePickerTree::MarkInitialDirectory(std::wstring_view directory, bool animate) {
+    if (selected_) return;
     directory_ = directory;
-    navigated_ = true;
+    mark_initial_directory_ = true;
     SyncPath(animate);
+}
+
+FilePickerTree::Target FilePickerTree::Activate(Node& node) {
+    selected_ = cursor_ = &node;
+    mark_initial_directory_ = resolving_initial_directory_ = false;
+    return node.target;
 }
 
 void FilePickerTree::Fetch(Node& node) {
@@ -124,14 +140,15 @@ bool FilePickerTree::ApplyListing(UINT_PTR token, bool animate) {
                 child->label = (*request->base)[static_cast<size_t>(index)].name;
                 child->target.directory = prefix + child->label;
                 child->parent = node;
-                child->glyph = node == computer_ ? L"\xEDA2" : L"\xE8B7";
+                child->glyph = node == computer_ ? kDriveGlyph : kFolderGlyph;
+                child->use_path_icon = node != computer_;
                 node->children.push_back(std::move(child));
             }
         }
         return true;
     });
     if (changed || places_ready) {
-        if (reveal_ || (places_ready && navigated_)) SyncPath(animate);
+        if (resolving_initial_directory_ || (places_ready && mark_initial_directory_)) SyncPath(animate);
         else RebuildRows(animate);
     }
     return changed || places_ready;
@@ -156,12 +173,8 @@ void FilePickerTree::SyncPath(bool animate) {
         node = child->get();
     }
     selected_ = node && node->target.directory.size() == directory_.size() ? node : nullptr;
-    reveal_ = !selected_ && node && node->listing;
+    resolving_initial_directory_ = !selected_ && node && node->listing;
     RebuildRows(animate);
-    if (selected_) {
-        cursor_ = selected_;
-        Reveal(cursor_, animate);
-    }
 }
 
 void FilePickerTree::AppendRows(Node& node) {
@@ -191,7 +204,7 @@ void FilePickerTree::Toggle(Node& node, bool animate) {
     if (node.expanded) {
         node.failed = false;
         Fetch(node);
-    } else reveal_ = false;
+    } else resolving_initial_directory_ = false;
     RebuildRows(animate);
     Reveal(cursor_, animate);
 }
@@ -231,7 +244,7 @@ fluent::ScrollbarSpec FilePickerTree::Scrollbar() const {
         scrollbar_hover_.value, 1.0f, true};
 }
 
-bool FilePickerTree::Draw(Compositor& compositor, fluent::Painter& painter, const Theme& theme,
+bool FilePickerTree::Draw(Compositor& compositor, MainRenderer& renderer, fluent::Painter& painter, const Theme& theme,
                           bool enabled, bool focused, bool high_contrast,
                           std::optional<D2D1_POINT_2F> pointer, uint64_t now, bool animate) {
     const auto* hovered = enabled && pointer && !dragging_ ? Hit(pointer->x, pointer->y) : nullptr;
@@ -257,8 +270,10 @@ bool FilePickerTree::Draw(Compositor& compositor, fluent::Painter& painter, cons
         fluent::SidebarItemSpec item{};
         item.bounds = rect;
         item.text = node.label;
-        item.glyph = node.expanded && node.glyph == L"\xE8B7" ? std::wstring_view{L"\xE838"} : node.glyph;
+        item.glyph = node.expanded && node.glyph == kFolderGlyph ? std::wstring_view{L"\xE838"} : node.glyph;
+        item.icon_color = node.use_path_icon && node.icon_color.a <= 0.0f ? theme.icon_folder : node.icon_color;
         item.trailing_reserve = node.pinned ? 20.0f * scale_ : 0.0f;
+        item.show_selection_indicator = true;
         item.state.enabled = enabled;
         item.state.selected = &node == selected_;
         item.state.hovered = &node == hovered;
@@ -269,8 +284,7 @@ bool FilePickerTree::Draw(Compositor& compositor, fluent::Painter& painter, cons
         node.hover.TickHover(item.state.hovered, now, animate && steady && was_visible);
         item.state.hover_progress = node.hover.value;
         pending |= node.hover.Pending();
-        painter.DrawSidebarItem(item);
-        if (item.state.keyboard_focus) painter.DrawFocusRing(rect, theme.radius_flyout * scale_);
+        renderer.DrawSidebarRow(painter, item, high_contrast, node.use_path_icon ? &node.target.directory : nullptr);
         if (node.pinned) {
             const bool highlighted = high_contrast && enabled && (item.state.selected || item.state.hovered || item.state.pressed);
             const auto color = !enabled ? theme.text_disabled : highlighted ? theme.text_selected : theme.text_secondary;
@@ -322,7 +336,7 @@ std::optional<FilePickerTree::Target> FilePickerTree::Key(WPARAM key, bool anima
     const int page = std::max(1, static_cast<int>(Viewport() / (kRowDip * scale_)) - 1);
     int next = current;
     switch (key) {
-    case VK_RETURN: case VK_SPACE: return cursor_->target;
+    case VK_RETURN: case VK_SPACE: return Activate(*cursor_);
     case VK_LEFT:
         if (cursor_->expanded) Toggle(*cursor_, animate);
         else if (cursor_->parent) cursor_ = cursor_->parent;
@@ -386,7 +400,7 @@ std::optional<FilePickerTree::Target> FilePickerTree::MouseUp(float x, float y, 
     CancelPointer();
     if (!match) return {};
     if (disclosure) { Toggle(*node, animate); return {}; }
-    return node->target;
+    return Activate(*node);
 }
 
 void FilePickerTree::CancelPointer() {

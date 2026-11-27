@@ -318,8 +318,6 @@ void ClearPaneFilter(AppState& s) {
     CancelScrollAnimation(s);
     if (auto* tab = ActiveTab(s)) {
         tab->filter_text.clear();
-        tab->view_filter_map.reset();
-        tab->view_cache_filter_text.clear();
         tab->scroll_y = 0;
         tab->scroll_x = 0;
         s.scrollTargetY = 0;
@@ -359,8 +357,6 @@ void HideFilterEditor(AppState& s, bool commit) {
                 app::CollectFilterMatches(*tab, &s.places, matches);
                 tab->SelectIndices(matches);
                 tab->filter_text.clear();
-                tab->view_filter_map.reset();
-                tab->view_cache_filter_text.clear();
                 if (tab->selected_index >= 0) EnsureRowVisible(s, *tab, tab->selected_index);
             } else {
                 tab->filter_text = restore;

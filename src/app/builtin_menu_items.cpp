@@ -15,7 +15,8 @@ std::optional<BuiltinMenuItem> ItemForCommand(int command) {
     if (command >= CmdTagBase && command < CmdTagBase + 7) return BuiltinMenuItem::Tags;
     if (command >= CmdViewBase && command < CmdViewBase + 8) return BuiltinMenuItem::View;
     if ((command >= CmdGroupAuto && command <= CmdGroupSize) ||
-        command == CmdGroupAscending || command == CmdGroupDescending) return BuiltinMenuItem::Group;
+        command == CmdGroupAscending || command == CmdGroupDescending ||
+        command == CmdExpandFileGroups || command == CmdCollapseFileGroups) return BuiltinMenuItem::Group;
     if (command >= CmdSortName && command <= CmdFolderSortMixed) return BuiltinMenuItem::Sort;
     switch (command) {
     case CmdOpenInNewTab: return BuiltinMenuItem::OpenInNewTab;
@@ -32,7 +33,7 @@ std::optional<BuiltinMenuItem> ItemForCommand(int command) {
     case CmdDetailsPanel: return BuiltinMenuItem::View;
     case CmdRefresh: return BuiltinMenuItem::Refresh;
     case CmdNewFolder: case CmdNewFile: case CmdNewTextFile: return BuiltinMenuItem::NewMenu;
-    case CmdPaste: return BuiltinMenuItem::Paste;
+    case CmdPaste: case CmdPasteShortcut: return BuiltinMenuItem::Paste;
     case CmdProperties: return BuiltinMenuItem::Properties;
     case CmdFolderProperties: return BuiltinMenuItem::FolderProperties;
     case CmdNewMenu: return BuiltinMenuItem::NewMenu;

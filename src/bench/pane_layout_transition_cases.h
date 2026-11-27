@@ -61,12 +61,17 @@ inline int pulse::ui::ItemReflowUiTest::RunPaneLayoutTransition() {
     };
 
     uint64_t now = 1000;
-    for (const int command : {app::CmdLayoutTwoVertical, app::CmdLayoutTwoHorizontal, app::CmdLayoutFourGrid}) {
+    for (const int command : {app::CmdLayoutTwoVertical, app::CmdLayoutTwoHorizontal, app::CmdLayoutThree,
+            app::CmdLayoutFourGrid}) {
         DispatchMenuCommand(s, command);
         const auto split_pixels = frame(now);
+        if (command == app::CmdLayoutThree)
+            check(HitTestVm(s).tabs.front().title.ends_with(L" (3)"), "three-pane layout updates the tab label");
         const auto divider = HitTestVm(s).splitters.front().hit_rect;
         DispatchMenuCommand(s, app::CmdLayoutSingle);
         const auto& single = HitTestVm(s);
+        if (command == app::CmdLayoutThree)
+            check(!single.tabs.front().title.ends_with(L" (3)"), "switching back to one pane clears the count");
         const auto hit = renderer.HitTest(single, bounds,
             (divider.left + divider.right) / 2, (divider.top + divider.bottom) / 2);
         check(single.pane_slots.size() == 1 && single.splitters.empty() && s.splitterNodes.empty() &&
@@ -109,6 +114,37 @@ inline int pulse::ui::ItemReflowUiTest::RunPaneLayoutTransition() {
     check(!editing.empty() && !renderer.pane_layout_surface_.HasCurrent(),
         "an active rename field uses the new layout immediately");
     s.renameIndex = -1;
+
+    DispatchMenuCommand(s, app::CmdLayoutThree);
+    const auto before_hide = frame(now + 100);
+    const bool captured = s.compositor.CaptureFrame();
+    renderer.ReleaseHiddenWindowResources();
+    check(captured && !s.compositor.FrameCopy() && !renderer.pane_layout_surface_.HasCurrent() &&
+        !renderer.SurfaceAnimating(), "hidden window releases its captured frame and pane transitions");
+    check(!before_hide.empty() && before_hide == frame(now + 200) && !renderer.SurfaceAnimating(),
+        "the first frame after showing restores the current layout without replaying old animation");
+
+    DispatchMenuCommand(s, app::CmdLayoutSingle);
+    auto& grouped_tab = *ActiveTab(s);
+    std::vector<fs::DirEntry> grouped_entries(3);
+    grouped_entries[0].name = L"example.jpg";
+    grouped_entries[1].name = L"first.txt";
+    grouped_entries[2].name = L"second.txt";
+    grouped_tab.SetSnapshot(std::make_shared<const std::vector<fs::DirEntry>>(std::move(grouped_entries)));
+    DispatchMenuCommand(s, app::CmdGroupType);
+    const auto expanded = frame(now + 450, false);
+    grouped_tab.SelectOnly(1);
+    DispatchMenuCommand(s, app::CmdCollapseFileGroups);
+    const auto collapsed = frame(now + 500, false);
+    const auto headers = HitTestVm(s).pane.date_groups;
+    check(headers && headers->size() == 2 && HitTestVm(s).pane.EntryCount() == 0 &&
+        grouped_tab.SelectedCount() == 0 && !collapsed.empty() && collapsed != expanded,
+        "collapse command draws only group headers and clears the hidden item selection");
+    DispatchMenuCommand(s, app::CmdSelectAll);
+    check(grouped_tab.SelectedCount() == 0, "select-all cannot reselect hidden items");
+    DispatchMenuCommand(s, app::CmdExpandFileGroups);
+    check(HitTestVm(s).pane.EntryCount() == 3 && HitTestVm(s).pane.date_groups == headers &&
+        frame(now + 550, false) == expanded, "expand command restores grouped rows and their rendered layout");
 
     renderer.SetCompositor(nullptr);
     s.compositor.Shutdown();

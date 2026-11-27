@@ -24,6 +24,7 @@ struct SaveTargetRequest {
     bool no_test_file_create = false; // metadata/overwrite only; never create or test write access
     bool require_existing_save_parent = false;
     bool native_save_defaults = false; // negotiated current-filter extension precedence
+    bool allow_legacy_identity = false; // providers without FileIdInfo, with genuine file indexes
 };
 
 struct SaveTargetResult {

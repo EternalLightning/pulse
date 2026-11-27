@@ -42,9 +42,8 @@ struct Agent {
     std::atomic<ULONGLONG> last_activity{0};
 } g;
 
-// Every live Pulse window polls the agent once per second, so a long quiet
-// period means the Pulse instance(s) that used it are gone (e.g. it was
-// replaced by an update). Exit instead of lingering as an orphan forever.
+// Each live Pulse process polls the agent, so a long quiet period means the
+// clients have gone away (e.g. after an update). Exit instead of lingering.
 constexpr ULONGLONG kIdleExitMs = 10ull * 60ull * 1000ull;
 
 bool WriteFrame(HANDLE pipe, uint32_t type, uint32_t id,

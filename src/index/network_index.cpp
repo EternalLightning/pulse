@@ -16,6 +16,8 @@
 #include <chrono>
 #include <cwctype>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <queue>
 #include <sstream>
 #include <winnetwk.h>
@@ -88,8 +90,14 @@ struct NetworkRecord {
 constexpr uint32_t kNetworkVersion = 1;
 constexpr uint16_t kRecordDirectory = 1;
 constexpr uint64_t kMaxConfigBytes = 4ull * 1024 * 1024;
-constexpr auto kReconcileInterval = std::chrono::minutes(5);
+constexpr auto kWatchedReconcileInterval = std::chrono::minutes(30);
+constexpr auto kUnwatchedReconcileInterval = std::chrono::minutes(5);
+constexpr auto kFirstRetry = std::chrono::seconds(15);
+constexpr auto kMaxRetry = std::chrono::seconds(kUnwatchedReconcileInterval);
 constexpr auto kCrawlWakeInterval = std::chrono::milliseconds(250);
+constexpr auto kWatchBatchInterval = std::chrono::milliseconds(250);
+constexpr size_t kMaxChangedPaths = 256;
+constexpr size_t kShardWriteBuffer = 64 * 1024;
 
 void SetError(std::wstring* error, const std::wstring& value) {
     if (error) *error = value;
@@ -279,8 +287,10 @@ bool CopyHandle(HANDLE source, HANDLE destination) {
 
 class ShardBuilder {
 public:
-    explicit ShardBuilder(const std::wstring& base)
-        : records_path_(base + L".records.tmp"), pool_path_(base + L".pool.tmp") {
+    explicit ShardBuilder(const std::wstring& base) {
+        if (base.empty()) return;
+        records_path_ = base + L".records.tmp";
+        pool_path_ = base + L".pool.tmp";
         records_ = CreateFileW(records_path_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                                CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, nullptr);
         pool_ = CreateFileW(pool_path_.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
@@ -298,31 +308,36 @@ public:
         return records_ != INVALID_HANDLE_VALUE && pool_ != INVALID_HANDLE_VALUE;
     }
 
-    bool Add(const std::wstring& path, const WIN32_FIND_DATAW& find) {
+    bool Add(std::wstring_view path, const WIN32_FIND_DATAW& find) {
         const size_t name_length = wcslen(find.cFileName);
-        if (!Valid() || path.size() > UINT32_MAX || name_length > UINT16_MAX ||
-            pool_chars_ > UINT32_MAX - path.size()) return false;
+        if (name_length > UINT16_MAX || name_length > path.size() || path.size() > UINT32_MAX) return false;
         NetworkRecord record{};
-        record.path_off = static_cast<uint32_t>(pool_chars_);
-        record.path_len = static_cast<uint32_t>(path.size());
         record.name_len = static_cast<uint16_t>(name_length);
-        record.name_off = record.path_len - record.name_len;
+        record.name_off = static_cast<uint32_t>(path.size() - name_length);
         record.flags = (find.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? kRecordDirectory : 0;
         record.size = (static_cast<uint64_t>(find.nFileSizeHigh) << 32) | find.nFileSizeLow;
         record.mtime = FileTimeValue(find.ftLastWriteTime);
-        if (!WriteAll(records_, &record, sizeof(record)) ||
-            !WriteAll(pool_, path.data(), path.size() * sizeof(wchar_t))) return false;
+        return Add(path, record);
+    }
+
+    bool Add(std::wstring_view path, NetworkRecord record) {
+        if (!Valid() || path.size() > UINT32_MAX || pool_chars_ > UINT32_MAX - path.size())
+            return false;
+        record.path_off = static_cast<uint32_t>(pool_chars_);
+        record.path_len = static_cast<uint32_t>(path.size());
+        record_buffer_.push_back(record);
+        pool_buffer_.append(path);
         ++count_;
         pool_chars_ += path.size();
-        return true;
+        return (record_buffer_.size() * sizeof(record) < kShardWriteBuffer &&
+                pool_buffer_.size() * sizeof(wchar_t) < kShardWriteBuffer) || Flush();
     }
 
     uint64_t Count() const { return count_; }
 
-    bool Save(const std::wstring& path) {
-        if (!Valid() || path.empty()) return false;
-        const std::wstring temp = path + L".tmp";
-        HANDLE output = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+    bool Write(const std::wstring& path) {
+        if (!Valid() || !Flush()) return false;
+        HANDLE output = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                                     FILE_ATTRIBUTE_NORMAL, nullptr);
         if (output == INVALID_HANDLE_VALUE) return false;
         NetworkHeader header{{'P', 'N', 'E', 'T'}, kNetworkVersion, count_,
@@ -333,19 +348,24 @@ public:
                         CopyHandle(records_, output) && CopyHandle(pool_, output) &&
                         FlushFileBuffers(output);
         CloseHandle(output);
-        if (!ok || !MoveFileExW(temp.c_str(), path.c_str(),
-                                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-            DeleteFileW(temp.c_str());
-            return false;
-        }
-        return true;
+        return ok;
     }
 
 private:
+    bool Flush() {
+        const bool ok = WriteAll(records_, record_buffer_.data(), record_buffer_.size() * sizeof(NetworkRecord)) &&
+                        WriteAll(pool_, pool_buffer_.data(), pool_buffer_.size() * sizeof(wchar_t));
+        record_buffer_.clear();
+        pool_buffer_.clear();
+        return ok;
+    }
+
     std::wstring records_path_;
     std::wstring pool_path_;
     HANDLE records_ = INVALID_HANDLE_VALUE;
     HANDLE pool_ = INVALID_HANDLE_VALUE;
+    std::vector<NetworkRecord> record_buffer_;
+    std::wstring pool_buffer_;
     uint64_t count_ = 0;
     uint64_t pool_chars_ = 0;
 };
@@ -454,6 +474,60 @@ struct NetworkIndex::Shard {
                 return {};
         }
         return shard;
+    }
+
+    bool CopyWithChanges(ShardBuilder& builder, const NetworkIndex& index, const std::wstring& root,
+                         uint64_t generation, const ChangedPaths& paths) const {
+        struct Edit {
+            WIN32_FIND_DATAW find{};
+            bool exists = false;
+            bool parent = false;
+            bool name_changed = false;
+            bool directory = false;
+            bool matched = false;
+        };
+        std::map<std::wstring, Edit, std::less<>> edits;
+        for (const auto& [path, name_changed] : paths) {
+            const auto parent = path.substr(0, path.rfind(L'\\'));
+            if (parent != root) edits[parent].parent = true;
+            edits[path].name_changed = name_changed;
+        }
+        // An exact lookup also detects short names, unexpected case and directory changes.
+        for (auto& [path, edit] : edits) {
+            if (!index.RootStillCurrent(root, generation)) return false;
+            const auto full = LongPath(path);
+            const auto handle = NetworkFindFirst(full.c_str(), &edit.find, 0);
+            edit.exists = handle != INVALID_HANDLE_VALUE;
+            if (!edit.exists) {
+                if (edit.parent || GetLastError() != ERROR_FILE_NOT_FOUND) return false;
+                continue;
+            }
+            NetworkFindClose(handle);
+            const std::wstring_view name(path.c_str() + path.rfind(L'\\') + 1);
+            const DWORD attributes = edit.find.dwFileAttributes;
+            edit.directory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            if (name != edit.find.cFileName || (edit.parent && !edit.directory) ||
+                (edit.directory && (edit.name_changed || (attributes & FILE_ATTRIBUTE_REPARSE_POINT))))
+                return false;
+        }
+        for (size_t i = 0; i < count; ++i) {
+            if ((i & 4095u) == 0 && !index.RootStillCurrent(root, generation)) return false;
+            const auto& record = records[i];
+            const std::wstring_view path(pool + record.path_off, record.path_len);
+            auto found = edits.find(path);
+            if (found == edits.end()) {
+                if (!builder.Add(path, record)) return false;
+                continue;
+            }
+            auto& edit = found->second;
+            if (edit.matched || edit.directory != ((record.flags & kRecordDirectory) != 0)) return false;
+            edit.matched = true;
+            if (edit.exists && !builder.Add(path, edit.find)) return false;
+        }
+        for (const auto& [path, edit] : edits) {
+            if (!edit.matched && (!edit.exists || edit.directory || !builder.Add(path, edit.find))) return false;
+        }
+        return true;
     }
 };
 
@@ -647,28 +721,80 @@ void NetworkIndex::SeedChanges(const std::wstring& owner) {
     changes_.Seed(owner, std::move(baseline));
 }
 
-void NetworkIndex::ObserveChanges(const std::wstring& root, const BYTE* data, DWORD bytes) {
+bool NetworkIndex::ObserveChanges(const std::wstring& root, const BYTE* data, DWORD bytes,
+                                  ChangedPaths& paths) {
     std::wstring old_path;
     size_t offset = 0;
-    while (offset + offsetof(FILE_NOTIFY_INFORMATION, FileName) <= bytes) {
+    bool complete = true;
+    constexpr size_t header = offsetof(FILE_NOTIFY_INFORMATION, FileName);
+    while (offset + header <= bytes) {
         const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(data + offset);
-        if (info->FileNameLength % sizeof(wchar_t) ||
-            info->FileNameLength > bytes - offset - offsetof(FILE_NOTIFY_INFORMATION, FileName)) { changes_.Gap(); break; }
+        if (!info->FileNameLength || info->FileNameLength % sizeof(wchar_t) ||
+            info->FileNameLength > bytes - offset - header ||
+            info->Action < FILE_ACTION_ADDED || info->Action > FILE_ACTION_RENAMED_NEW_NAME)
+            return false;
+        const std::wstring_view relative(info->FileName, info->FileNameLength / sizeof(wchar_t));
+        if (relative.find_first_of(L"/:*?\"<>|") != relative.npos || relative.find(L'\0') != relative.npos)
+            return false;
+        for (size_t begin = 0;;) {
+            const auto end = relative.find(L'\\', begin);
+            const auto part = relative.substr(begin, end == relative.npos ? end : end - begin);
+            if (part.empty() || part == L"." || part == L"..") return false;
+            if (end == relative.npos) break;
+            begin = end + 1;
+        }
         ChangeRecord event;
-        event.path = root + L"\\" + std::wstring(info->FileName, info->FileNameLength / sizeof(wchar_t));
-        if (info->Action == FILE_ACTION_RENAMED_OLD_NAME) old_path = event.path;
-        else {
+        event.path = root + L"\\";
+        event.path.append(relative);
+        if (paths.size() <= kMaxChangedPaths)
+            paths[event.path] |= info->Action != FILE_ACTION_MODIFIED;
+        if (info->Action == FILE_ACTION_RENAMED_OLD_NAME) {
+            if (!old_path.empty()) complete = false;
+            old_path = event.path;
+        } else {
             const auto attributes = GetFileAttributesW(LongPath(event.path).c_str());
             event.is_dir = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
             if (info->Action == FILE_ACTION_ADDED) event.kind = ChangeKind::Created;
             else if (info->Action == FILE_ACTION_REMOVED) event.kind = ChangeKind::Deleted;
-            else if (info->Action == FILE_ACTION_RENAMED_NEW_NAME) { event.kind = ChangeKind::Renamed; event.old_path = std::move(old_path); }
+            else if (info->Action == FILE_ACTION_RENAMED_NEW_NAME) {
+                if (old_path.empty()) complete = false;
+                event.kind = ChangeKind::Renamed;
+                event.old_path.swap(old_path);
+            }
             changes_.Record(std::move(event));
         }
-        if (!info->NextEntryOffset) break;
-        if (info->NextEntryOffset > bytes - offset || info->NextEntryOffset < offsetof(FILE_NOTIFY_INFORMATION, FileName)) { changes_.Gap(); break; }
+        if (!info->NextEntryOffset) return complete && old_path.empty();
+        if (info->NextEntryOffset > bytes - offset || info->NextEntryOffset < header + info->FileNameLength ||
+            info->NextEntryOffset % alignof(FILE_NOTIFY_INFORMATION)) return false;
         offset += info->NextEntryOffset;
     }
+    return false;
+}
+
+void NetworkIndex::RequestFullScan(RootState& root, Clock::time_point when) {
+    root.full_due = (std::min)(root.full_due, when);
+    root.full_requested = true;
+    root.changed_paths.clear();
+}
+
+void NetworkIndex::QueueWatchChanges(const std::wstring& path, ChangedPaths paths, bool gap, bool watching) {
+    {
+        std::lock_guard lock(mu_);
+        for (auto& root : roots_) {
+            if (!EqualPath(root.info.path, path)) continue;
+            root.info.watching = watching && root.info.online;
+            const auto due = Clock::now() + kWatchBatchInterval;
+            if (gap) RequestFullScan(root, due);
+            else if (!root.full_requested && root.info.error.empty()) {
+                if (root.changed_paths.empty()) root.batch_due = due;
+                for (const auto& [changed, name_changed] : paths)
+                    root.changed_paths[changed] |= name_changed;
+                if (root.changed_paths.size() > kMaxChangedPaths) RequestFullScan(root, root.batch_due);
+            }
+            break;
+        }
+    }
+    crawl_cv_.notify_one();
 }
 
 bool NetworkIndex::LoadConfiguration(std::vector<std::wstring>& configured) {
@@ -710,7 +836,7 @@ void NetworkIndex::RefreshConfiguration() {
         const auto previous = std::find_if(roots_.begin(), roots_.end(), [&](const auto& root) {
             return EqualPath(root.info.path, value);
         });
-        if (previous != roots_.end()) next.push_back(*previous);
+        if (previous != roots_.end()) next.push_back(std::move(*previous));
         else {
             RootState root;
             root.info.path = value;
@@ -719,8 +845,7 @@ void NetworkIndex::RefreshConfiguration() {
         }
     }
     roots_ = std::move(next);
-    dirty_roots_.clear();
-    for (const auto& root : roots_) dirty_roots_.insert(root.info.path);
+    for (auto& root : roots_) RequestFullScan(root, Clock::now());
     ++generation_;
     crawl_cv_.notify_one();
     if (watch_wake_event_) SetEvent(watch_wake_event_);
@@ -738,7 +863,6 @@ void NetworkIndex::Start(HWND notify, UINT status_msg, UINT search_msg) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         roots_.clear();
-        dirty_roots_.clear();
         for (const auto& path : configured) {
             RootState state;
             state.info.path = path;
@@ -751,7 +875,6 @@ void NetworkIndex::Start(HWND notify, UINT status_msg, UINT search_msg) {
             state.info.indexed_items = state.shard ? state.shard->count : 0;
             state.info.state = state.shard ? l10n::Get(l10n::StringId::NetworkIndexWaitingValidation).c_str() : l10n::Get(l10n::StringId::NetworkIndexWaitingScan).c_str();
             roots_.push_back(std::move(state));
-            dirty_roots_.insert(path);
         }
         ++generation_;
     }
@@ -813,7 +936,6 @@ bool NetworkIndex::AddRoot(const std::wstring& raw, std::wstring* error) {
     state.info.path = path;
     state.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingScan).c_str();
     roots_.push_back(std::move(state));
-    dirty_roots_.insert(path);
     ++generation_;
     crawl_cv_.notify_one();
     if (watch_wake_event_) SetEvent(watch_wake_event_);
@@ -837,7 +959,6 @@ bool NetworkIndex::RemoveRoot(const std::wstring& raw, std::wstring* error) {
         if (!EqualPath(root.info.path, path)) configured.push_back(root.info.path);
     if (!SaveNetworkRoots(configured, error)) return false;
     roots_.erase(found);
-    dirty_roots_.erase(path);
     DeleteFileW(ShardPath(path).c_str());
     DeleteFileW(ShardPath(path, 0).c_str());
     DeleteFileW(ShardPath(path, 1).c_str());
@@ -853,7 +974,7 @@ void NetworkIndex::Rebuild(const std::wstring& raw) {
     const std::wstring path = raw.empty() ? L"" : NormalizeNetworkRoot(raw);
     for (auto& root : roots_) {
         if (path.empty() || EqualPath(root.info.path, path)) {
-            dirty_roots_.insert(root.info.path);
+            RequestFullScan(root, Clock::now());
             root.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingRescan).c_str();
         }
     }
@@ -869,7 +990,7 @@ bool NetworkIndex::RootStillCurrent(const std::wstring& path, uint64_t generatio
            });
 }
 
-void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
+void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation, const ChangedPaths& paths) {
     auto abandon = [&] {
         if (!running_) return;
         std::lock_guard<std::mutex> lock(mu_);
@@ -877,14 +998,16 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
             if (!EqualPath(root.info.path, path)) continue;
             root.info.building = false;
             root.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingRescan).c_str();
-            dirty_roots_.insert(root.info.path);
+            RequestFullScan(root, Clock::now());
             break;
         }
     };
+    std::shared_ptr<Shard> previous;
     {
         std::lock_guard<std::mutex> lock(mu_);
         for (auto& root : roots_) {
             if (!EqualPath(root.info.path, path)) continue;
+            previous = root.shard;
             root.info.building = true;
             root.info.progress = 0;
             root.info.state = l10n::Get(l10n::StringId::NetworkIndexScanning).c_str();
@@ -894,9 +1017,14 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
     }
     NotifyStatus();
 
-    ShardBuilder builder(ShardPath(path) + L".build");
-    std::vector<std::wstring> stack{path};
-    DWORD failure = builder.Valid() ? ERROR_SUCCESS : ERROR_WRITE_FAULT;
+    const auto base = ShardPath(path);
+    std::optional<ShardBuilder> builder(std::in_place, base);
+    const bool patched = previous && !paths.empty() && builder->Valid() &&
+                         previous->CopyWithChanges(*builder, *this, path, generation, paths);
+    if (!patched && !paths.empty()) builder.emplace(base);
+    std::vector<std::wstring> stack;
+    if (!patched) stack.push_back(path);
+    DWORD failure = builder->Valid() ? ERROR_SUCCESS : ERROR_WRITE_FAULT;
     bool root_accessible = true;
     uint64_t since_notify = 0;
     while (!stack.empty() && running_ && failure == ERROR_SUCCESS) {
@@ -923,7 +1051,7 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
             if (wcscmp(find.cFileName, L".") == 0 || wcscmp(find.cFileName, L"..") == 0)
                 continue;
             std::wstring full = directory + L"\\" + find.cFileName;
-            if (!builder.Add(full, find)) {
+            if (!builder->Add(full, find)) {
                 failure = ERROR_WRITE_FAULT;
                 break;
             }
@@ -934,8 +1062,8 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
                 std::lock_guard<std::mutex> lock(mu_);
                 for (auto& root : roots_) {
                     if (!EqualPath(root.info.path, path)) continue;
-                    root.info.indexed_items = builder.Count();
-                    root.info.state = l10n::Format(l10n::StringId::NetworkIndexFoundCountFormat, static_cast<unsigned long long>(builder.Count()));
+                    root.info.indexed_items = builder->Count();
+                    root.info.state = l10n::Format(l10n::StringId::NetworkIndexFoundCountFormat, static_cast<unsigned long long>(builder->Count()));
                     break;
                 }
                 NotifyStatus();
@@ -954,37 +1082,31 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
         return;
     }
 
-    const bool server_accessible = root_accessible;
-    int next_slot = 0;
-    {
-        std::lock_guard<std::mutex> lock(mu_);
-        for (const auto& root : roots_) {
-            if (EqualPath(root.info.path, path) && root.shard && root.shard->slot == 0)
-                next_slot = 1;
-        }
-    }
+    const int next_slot = previous && previous->slot == 0 ? 1 : 0;
     const std::wstring publish_path = ShardPath(path, next_slot);
+    const std::wstring temp = publish_path.empty() ? L"" : publish_path + L".tmp";
     std::shared_ptr<Shard> shard;
-    if (failure == ERROR_SUCCESS && builder.Save(publish_path))
-        shard = Shard::Open(publish_path, next_slot);
-    if (failure == ERROR_SUCCESS && !shard) {
-        failure = ERROR_WRITE_FAULT;
-    }
+    if (failure == ERROR_SUCCESS && !temp.empty() && builder->Write(temp))
+        shard = Shard::Open(temp, next_slot);
+    if (failure == ERROR_SUCCESS && !shard) failure = ERROR_WRITE_FAULT;
 
     {
         std::lock_guard<std::mutex> lock(mu_);
-        if (generation != generation_) {
+        if (!running_ || generation != generation_) {
+            if (!temp.empty()) DeleteFileW(temp.c_str());
             for (auto& root : roots_) {
                 if (!EqualPath(root.info.path, path)) continue;
                 root.info.building = false;
                 root.info.state = l10n::Get(l10n::StringId::NetworkIndexWaitingRescan).c_str();
-                dirty_roots_.insert(root.info.path);
+                RequestFullScan(root, Clock::now());
                 break;
             }
             return;
         }
         for (auto& root : roots_) {
             if (!EqualPath(root.info.path, path)) continue;
+            if (failure == ERROR_SUCCESS && !MoveFileExW(temp.c_str(), publish_path.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) failure = GetLastError();
             root.info.building = false;
             root.info.progress = failure == ERROR_SUCCESS ? 100 : 0;
             if (failure == ERROR_SUCCESS) {
@@ -992,54 +1114,72 @@ void NetworkIndex::BuildRoot(const std::wstring& path, uint64_t generation) {
                 root.shard = std::move(shard);
                 root.info.online = true;
                 root.info.indexed_items = root.shard ? root.shard->count : 0;
-                root.info.state = l10n::Format(l10n::StringId::NetworkIndexSyncedCountFormat, static_cast<unsigned long long>(root.info.indexed_items));
+                root.info.state = l10n::Format(root.info.watching ? l10n::StringId::NetworkIndexWatchingCountFormat :
+                    l10n::StringId::NetworkIndexSyncedCountFormat, static_cast<unsigned long long>(root.info.indexed_items));
                 root.info.error.clear();
+                root.retry_delay = {};
+                if (!patched && !root.full_requested) root.full_due = Clock::now() +
+                    (root.info.watching ? kWatchedReconcileInterval : kUnwatchedReconcileInterval);
                 if (old_shard && old_shard->slot != root.shard->slot)
                     DeleteFileW(ShardPath(path, old_shard->slot).c_str());
                 DeleteFileW(ShardPath(path).c_str());
             } else {
-                root.info.online = server_accessible && root.shard != nullptr;
+                root.info.online = root_accessible && root.shard != nullptr;
                 if (!root.info.online) root.info.watching = false;
                 root.info.indexed_items = root.shard ? root.shard->count : 0;
-                root.info.state = server_accessible && root.shard
+                root.info.state = root_accessible && root.shard
                     ? l10n::Get(l10n::StringId::NetworkIndexSyncFailedPreserved).c_str()
                     : root.shard ? l10n::Get(l10n::StringId::NetworkIndexOfflinePreserved).c_str() : l10n::Get(l10n::StringId::NetworkIndexUnavailable).c_str();
                 root.info.error = Win32Message(failure);
+                root.changed_paths.clear();
+                root.retry_delay = root.retry_delay.count() == 0 ? kFirstRetry :
+                    (std::min)(kMaxRetry, root.retry_delay * 2);
+                if (!root.full_requested) root.full_due = Clock::now() + root.retry_delay;
             }
             break;
         }
     }
+    if (failure != ERROR_SUCCESS && !temp.empty()) DeleteFileW(temp.c_str());
     NotifyStatus();
-    if (watch_wake_event_) SetEvent(watch_wake_event_);
+    if (watch_wake_event_ && (!patched || failure != ERROR_SUCCESS)) SetEvent(watch_wake_event_);
 }
 
 void NetworkIndex::CrawlLoop() {
-    auto next_reconcile = std::chrono::steady_clock::now() + kReconcileInterval;
     while (running_) {
         SeedPendingChanges();
         changes_.Flush(false);
-        std::vector<std::wstring> work;
+        std::wstring path;
+        ChangedPaths paths;
         uint64_t generation = 0;
         {
             std::unique_lock<std::mutex> lock(mu_);
-            crawl_cv_.wait_for(lock, kCrawlWakeInterval, [this] {
-                return !running_ || !dirty_roots_.empty();
-            });
             if (!running_) return;
-            const auto now = std::chrono::steady_clock::now();
-            if (dirty_roots_.empty() && now < next_reconcile) continue;
-            if (now >= next_reconcile) {
-                for (const auto& root : roots_) dirty_roots_.insert(root.info.path);
-                next_reconcile = now + kReconcileInterval;
+            const auto now = Clock::now();
+            auto earliest = Clock::time_point::max();
+            RootState* next = nullptr;
+            for (auto& root : roots_) {
+                const auto due = root.changed_paths.empty() ? root.full_due :
+                    (std::min)(root.full_due, root.batch_due);
+                if (due >= earliest) continue;
+                earliest = due;
+                next = &root;
             }
-            work.assign(dirty_roots_.begin(), dirty_roots_.end());
-            dirty_roots_.clear();
+            if (!next || earliest > now) {
+                crawl_cv_.wait_until(lock, (std::min)(earliest, now + kCrawlWakeInterval));
+                continue;
+            }
+            path = next->info.path;
+            next->info.building = true;
+            if (next->full_due <= now) {
+                next->full_due = Clock::time_point::max();
+                next->full_requested = false;
+                next->changed_paths.clear();
+            } else {
+                paths.swap(next->changed_paths);
+            }
             generation = generation_;
         }
-        for (const auto& root : work) {
-            if (!running_) return;
-            BuildRoot(root, generation);
-        }
+        BuildRoot(path, generation, paths);
     }
 }
 
@@ -1112,15 +1252,23 @@ void NetworkIndex::WatchLoop() {
                 watch->event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
                 if (watch->event && watch->Arm()) watches.push_back(std::move(watch));
             }
+            bool reconcile = false;
             {
                 std::lock_guard<std::mutex> lock(mu_);
                 for (auto& root : roots_) {
-                    root.info.watching = root.info.online && has_watch(root.info.path);
+                    const bool watching = root.info.online && has_watch(root.info.path);
+                    if (watching && !root.info.watching) {
+                        // The preceding scan ran without this handle and may have missed changes.
+                        RequestFullScan(root, Clock::now() + kWatchBatchInterval);
+                        reconcile = true;
+                    }
+                    root.info.watching = watching;
                     if (root.info.watching && !root.info.building && root.info.error.empty())
                         root.info.state = l10n::Format(l10n::StringId::NetworkIndexWatchingCountFormat,
                             static_cast<unsigned long long>(root.info.indexed_items));
                 }
             }
+            if (reconcile) crawl_cv_.notify_one();
             NotifyStatus();
         }
         std::vector<HANDLE> events{watch_wake_event_};
@@ -1133,7 +1281,6 @@ void NetworkIndex::WatchLoop() {
                                                   FALSE, INFINITE);
         if (!running_ || wait >= WAIT_OBJECT_0 + events.size()) return;
         refresh = wait == WAIT_OBJECT_0;
-        bool dirty = false;
         for (auto it = watches.begin(); it != watches.end();) {
             auto& watch = **it;
             if (WaitForSingleObject(watch.event, 0) != WAIT_OBJECT_0) {
@@ -1144,24 +1291,16 @@ void NetworkIndex::WatchLoop() {
             const bool completed = GetOverlappedResult(watch.directory, &watch.overlapped, &bytes, FALSE) != FALSE;
             const DWORD error = completed ? ERROR_SUCCESS : GetLastError();
             watch.pending = false;
-            if (completed && bytes) ObserveChanges(watch.path, watch.buffer.data(), bytes);
+            ChangedPaths paths;
+            const bool valid = completed && bytes && ObserveChanges(watch.path, watch.buffer.data(), bytes, paths);
             // Windows buffers changes between reads while this directory handle stays open.
             const bool watching = (completed || error == ERROR_NOTIFY_ENUM_DIR) && watch.Arm();
-            if (!completed || !bytes || !watching) changes_.Gap();
-            {
-                std::lock_guard<std::mutex> lock(mu_);
-                for (auto& root : roots_) {
-                    if (!EqualPath(root.info.path, watch.path)) continue;
-                    dirty_roots_.insert(root.info.path);
-                    root.info.watching = watching && root.info.online;
-                    dirty = true;
-                    break;
-                }
-            }
+            const bool gap = !valid || !watching;
+            if (gap) changes_.Gap();
+            QueueWatchChanges(watch.path, std::move(paths), gap, watching);
             if (watching) ++it;
             else it = watches.erase(it);
         }
-        if (dirty) crawl_cv_.notify_one();
     }
 }
 
@@ -1181,7 +1320,7 @@ void NetworkIndex::SearchLoop() {
     while (running_) {
         Query query;
         uint32_t id = 0;
-        std::vector<RootState> roots;
+        std::vector<std::pair<NetworkRootInfo, std::shared_ptr<Shard>>> roots;
         std::vector<std::shared_ptr<Shard>> shards;
         {
             std::unique_lock<std::mutex> lock(mu_);
@@ -1190,23 +1329,28 @@ void NetworkIndex::SearchLoop() {
             query = pending_query_;
             id = pending_id_;
             have_pending_search_ = false;
-            roots = roots_;
+            roots.reserve(roots_.size());
+            for (const auto& root : roots_) {
+                auto info = root.info;
+                if (info.online && (root.full_requested || !root.changed_paths.empty())) info.building = true;
+                roots.emplace_back(std::move(info), root.shard);
+            }
         }
         SearchResult result;
         const CompiledQuery compiled = ParseQuery(query.needle);
         const auto& prefix = query.path_prefix.empty() ? compiled.path_prefix : query.path_prefix;
-        for (const auto& root : roots) {
-            if (!StartsWithPath(root.info.path, prefix) && !StartsWithPath(prefix, root.info.path))
+        for (const auto& [info, shard] : roots) {
+            if (!StartsWithPath(info.path, prefix) && !StartsWithPath(prefix, info.path))
                 continue;
-            if (root.info.building || !root.info.online || !root.shard || !root.info.error.empty()) {
+            if (info.building || !info.online || !shard || !info.error.empty()) {
                 result.incomplete = true;
                 if (!result.error) {
-                    result.error = root.info.building ? ERROR_NOT_READY :
-                        !root.info.online ? ERROR_NETWORK_UNREACHABLE :
-                        !root.shard ? ERROR_NOT_READY : ERROR_READ_FAULT;
+                    result.error = info.building ? ERROR_NOT_READY :
+                        !info.online ? ERROR_NETWORK_UNREACHABLE :
+                        !shard ? ERROR_NOT_READY : ERROR_READ_FAULT;
                 }
             }
-            if (root.info.online && root.shard) shards.push_back(root.shard);
+            if (info.online && shard) shards.push_back(shard);
         }
         struct Candidate {
             const Shard* shard = nullptr;

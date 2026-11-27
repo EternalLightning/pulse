@@ -123,6 +123,15 @@ D2D1_RECT_F ViewLayout::ItemRect(int index) const noexcept {
     return D2D1_RECT_F{left, top, left + metrics_.cell_width, top + metrics_.cell_height};
 }
 
+D2D1_RECT_F ViewLayout::GroupHeaderRect(size_t group_index) const noexcept {
+    if (!date_groups_ || group_index >= date_groups_->size()) return {};
+    const float header_height = kDateGroupHeaderDip * scale_;
+    const float left = viewport_.left - scroll_x_;
+    const float top = viewport_.top - scroll_y_ + static_cast<float>(group_index) * header_height +
+        (count_ ? (*date_groups_)[group_index].first * metrics_.cell_height : 0.0f);
+    return {left, top, left + metrics_.cell_width, top + header_height};
+}
+
 bool ViewLayout::IsStripedRow(int index) const noexcept {
     if (index < 0 || static_cast<size_t>(index) >= count_) return false;
     int local = index;

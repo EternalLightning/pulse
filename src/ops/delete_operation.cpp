@@ -15,10 +15,12 @@
 #include "../common/path_utils.h"
 #include "../common/file_operation_error.h"
 #include <winnetwk.h>
+#include <shellapi.h>
 #include <algorithm>
 #include <chrono>
 #include <set>
 #include <unordered_map>
+#include <utility>
 
 namespace pulse::ops {
 namespace {
@@ -45,20 +47,51 @@ bool WithinDeletedPath(const std::wstring& path, const std::wstring& deleted) {
         normalized.starts_with(root) && normalized[root.size()] == L'\\');
 }
 
-bool CoveredPermanentTarget(const DeleteTarget& child, const DeleteTarget& parent) {
-    if (child.disposition != DeleteDisposition::Permanent || parent.disposition != DeleteDisposition::Permanent ||
-        child.physical_paths.size() != 1 || parent.physical_paths.size() != 1) return false;
-    const auto source = fs::NormalizePath(child.physical_paths.front());
-    const auto ancestor = fs::NormalizePath(parent.physical_paths.front());
-    if (source.size() <= ancestor.size() || !WithinDeletedPath(source, ancestor)) return false;
-    // Strict components preserve case-distinct siblings. Reparse ancestors do
-    // not cover their targets because recursive deletion never follows them.
-    for (size_t end = ancestor.size(); end != std::wstring::npos; end = source.find(L'\\', end + 1)) {
+bool IsSinglePermanentTarget(const DeleteTarget& target) {
+    return target.disposition == DeleteDisposition::Permanent && target.physical_paths.size() == 1;
+}
+
+bool IsRecursiveDeletePath(const std::wstring& source, size_t ancestor_size) {
+    // Recursive deletion stops at a reparse point, including the selected ancestor itself.
+    for (size_t end = ancestor_size; end != std::wstring::npos; end = source.find(L'\\', end + 1)) {
         const DWORD attrs = GetFileAttributesW(source.substr(0, end).c_str());
         if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY) ||
             (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
     }
     return true;
+}
+
+void OmitCoveredPermanentTargets(std::vector<DeleteTarget>& targets) {
+    // Keep the pre-trim length for the same attribute probes on trailing-separator spellings.
+    using SelectedPath = std::pair<std::wstring, size_t>;
+    std::vector<SelectedPath> selected;
+    selected.reserve(targets.size());
+    for (const auto& target : targets) {
+        if (!IsSinglePermanentTarget(target)) continue;
+        auto path = fs::NormalizePath(target.physical_paths.front());
+        const size_t length = path.size();
+        while (!path.empty() && path.back() == L'\\') path.pop_back();
+        selected.emplace_back(std::move(path), length);
+    }
+    if (selected.size() < 2) return;
+    std::sort(selected.begin(), selected.end());
+    selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
+
+    std::erase_if(targets, [&](const DeleteTarget& target) {
+        if (!IsSinglePermanentTarget(target)) return false;
+        const auto source = fs::NormalizePath(target.physical_paths.front());
+        for (size_t split = source.size(); split != 0;) {
+            split = source.rfind(L'\\', split - 1);
+            if (split == std::wstring::npos) break;
+            const auto prefix = std::wstring_view(source).substr(0, split);
+            auto ancestor = std::lower_bound(selected.begin(), selected.end(), prefix,
+                [](const SelectedPath& candidate, std::wstring_view key) { return candidate.first < key; });
+            for (; ancestor != selected.end() && ancestor->first == prefix; ++ancestor) {
+                if (source.size() > ancestor->second && IsRecursiveDeletePath(source, ancestor->second)) return true;
+            }
+        }
+        return false;
+    });
 }
 
 bool IsNetworkDeletionPath(std::wstring_view path) {
@@ -70,6 +103,20 @@ bool IsNetworkDeletionPath(std::wstring_view path) {
     wchar_t remote[32768]{};
     DWORD size = ARRAYSIZE(remote);
     return WNetGetConnectionW(drive, remote, &size) == NO_ERROR;
+}
+
+bool RecycleUnavailable(const std::wstring& path, std::unordered_map<std::wstring, bool>& volumes) {
+    wchar_t root[32768];
+    if (!GetVolumePathNameW(path.c_str(), root, ARRAYSIZE(root))) return false;
+    const auto volume = pulse::path::StripExtendedPathPrefix(root);
+    auto [result, first] = volumes.try_emplace(volume, false);
+    if (first) {
+        SHQUERYRBINFO info{sizeof(info)};
+        const HRESULT hr = SHQueryRecycleBinW(volume.c_str(), &info);
+        result->second = hr == E_FAIL || hr == E_NOTIMPL ||
+            hr == HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED) || hr == HRESULT_FROM_WIN32(ERROR_INVALID_FUNCTION);
+    }
+    return result->second;
 }
 
 bool AddExistingRecyclePair(DeleteTarget& target, std::wstring& error) {
@@ -143,12 +190,7 @@ DeletePlan BuildDeletePlan(const OpRequest& request, uint64_t task_id, std::wstr
         }
         plan.targets.push_back(std::move(target));
     }
-    const auto selected = plan.targets;
-    std::erase_if(plan.targets, [&](const DeleteTarget& target) {
-        return std::any_of(selected.begin(), selected.end(), [&](const DeleteTarget& parent) {
-            return CoveredPermanentTarget(target, parent);
-        });
-    });
+    OmitCoveredPermanentTargets(plan.targets);
     for (const auto& target : plan.targets)
         for (const auto& path : target.physical_paths)
             if (!ipc::IsLosslessDeleteShellPath(path)) {
@@ -408,20 +450,27 @@ void OpsManager::RunDelete(const QueueItem& item,
     }
     auto plan = BuildDeletePlan(item.req, item.seq, error);
     if (!error.empty()) { finish(std::move(error)); return; }
-    bool network_copy_undo = false;
+    bool copy_undo = false;
     if (produced_undo &&
         item.req.type == OpType::RecycleDelete && item.req.delete_targets.empty()) {
         std::lock_guard lock(mutex_);
-        network_copy_undo = item.req.undo_revision == undo_revision_ && !undo_.empty() &&
+        copy_undo = item.req.undo_revision == undo_revision_ && !undo_.empty() &&
             undo_.back().supported && undo_.back().type == OpType::Copy &&
             undo_.back().destinations == item.req.sources &&
             undo_.back().produced_identities == item.req.undo_produced_identities;
     }
-    if (produced_undo &&
-        std::any_of(plan.targets.begin(), plan.targets.end(), [&](const auto& target) {
-            return target.disposition == DeleteDisposition::Permanent &&
-                (!network_copy_undo || !std::all_of(target.physical_paths.begin(),
-                    target.physical_paths.end(), IsNetworkDeletionPath));
+    if (copy_undo) {
+        std::unordered_map<std::wstring, bool> volumes;
+        for (auto& target : plan.targets) {
+            if (delete_cancel_.load() || stopping_.load()) { finish({}, {}, false, false, {}, {}, true); return; }
+            if (target.disposition == DeleteDisposition::RecycleRequested && target.physical_paths.size() == 1 &&
+                RecycleUnavailable(target.physical_paths.front(), volumes))
+                target.disposition = DeleteDisposition::Permanent;
+        }
+    }
+    if (produced_undo && !copy_undo &&
+        std::any_of(plan.targets.begin(), plan.targets.end(), [](const auto& target) {
+            return target.disposition == DeleteDisposition::Permanent;
         })) {
         finish(l10n::Get(l10n::StringId::DeleteNativeUndoUnavailable).c_str(), {}, false,
             false, {}, {}, false, {}, E_ACCESSDENIED);
